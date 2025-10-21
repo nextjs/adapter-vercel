@@ -1,59 +1,12 @@
 import type { NextAdapter, NextConfig } from 'next';
-import { convertRewrites } from '@vercel/routing-utils/dist/superstatic';
-import type {
-  HasField,
-  Rewrite,
-  Route,
-  RouteWithSrc,
-} from '@vercel/routing-utils';
+import type { RouteWithSrc } from '@vercel/routing-utils';
 
 type AdapterRoutes = Parameters<
   NonNullable<NextAdapter['onBuildComplete']>
 >[0]['routes'];
 
-export function normalizeRedirect(item: AdapterRoutes['redirects'][0]) {
-  return {
-    source: item.source,
-    destination: item.destination,
-    statusCode: item.statusCode,
-    permanent: item.permanent,
-    has: item.has as HasField,
-    missing: item.missing as HasField,
-  };
-}
-
-export function normalizeRewrites(rewrites: AdapterRoutes['rewrites']) {
-  const normalize = (item: (typeof rewrites)['beforeFiles'][0]): Rewrite => ({
-    source: item.source,
-    destination: item.destination,
-    has: item.has as HasField,
-    missing: item.missing as HasField,
-  });
-
-  const internalParams = ['nextInternalLocale'];
-
-  return {
-    beforeFiles: convertRewrites(
-      rewrites.beforeFiles.map(normalize),
-      internalParams
-    ).map((item) => {
-      if ('check' in item) {
-        delete item.check;
-        item.continue = true;
-        item.override = true;
-      }
-      return item;
-    }),
-    afterFiles: convertRewrites(
-      rewrites.afterFiles.map(normalize),
-      internalParams
-    ),
-    fallback: convertRewrites(rewrites.fallback.map(normalize), internalParams),
-  };
-}
-
 export function modifyWithRewriteHeaders(
-  rewrites: Route[],
+  rewrites: RouteWithSrc[],
   {
     isAfterFilesRewrite = false,
     shouldHandlePrefetchRsc,
@@ -126,7 +79,7 @@ export function modifyWithRewriteHeaders(
       const rscSuffix = parts.join('|');
 
       rewrite.src = rewrite.src.replace(
-        /\/?\(\?:\/\)\?/,
+        /(\\\/(\?)?)?\(\?:\\\/\)\?\$$/,
         `(?:/)?(?<rscsuff>${rscSuffix})?`
       );
 
@@ -163,19 +116,161 @@ export function modifyWithRewriteHeaders(
   }
 }
 
-export function normalizeDynamicRoutes(
-  dynamicRoutes: AdapterRoutes['dynamicRoutes']
-) {
-  return dynamicRoutes.map(
-    (item) =>
-      ({
-        src: item.namedRegex || item.regex,
-        dest: `${item.page}?${Object.entries(item.routeKeys || {})
-          .map(([namedKey, originalKey]) => {
-            return `${originalKey}=$${namedKey}`;
-          })
-          .join('&')}`,
-        check: true,
-      }) satisfies RouteWithSrc
-  );
+export function normalizeRewrites(rewrites: AdapterRoutes['rewrites']): {
+  beforeFiles: RouteWithSrc[];
+  afterFiles: RouteWithSrc[];
+  fallback: RouteWithSrc[];
+} {
+  const normalize = (
+    item: (typeof rewrites)['beforeFiles'][0]
+  ): RouteWithSrc => ({
+    src: item.sourceRegex,
+    dest: item.destination,
+    has: item.has,
+    missing: item.missing,
+    check: true,
+  });
+
+  return {
+    beforeFiles: rewrites.beforeFiles.map((item) => {
+      const route = normalize(item);
+      delete route.check;
+      route.continue = true;
+      route.override = true;
+      return route;
+    }),
+    afterFiles: rewrites.afterFiles.map(normalize),
+    fallback: rewrites.fallback.map(normalize),
+  };
+}
+
+export function normalizeNextDataRoutes(
+  config: NextConfig,
+  buildId: string,
+  shouldHandleMiddlewareDataResolving: boolean,
+  isOverride = false
+): RouteWithSrc[] {
+  if (!shouldHandleMiddlewareDataResolving) return [];
+
+  const path = require('node:path');
+  const basePath = config.basePath || '';
+  const trailingSlash = config.trailingSlash || false;
+
+  return [
+    // ensure x-nextjs-data header is always present if we are doing middleware next data resolving
+    {
+      src: path.posix.join('/', basePath, '/_next/data/(.*)'),
+      missing: [
+        {
+          type: 'header',
+          key: 'x-nextjs-data',
+        },
+      ],
+      transforms: [
+        {
+          type: 'request.headers',
+          op: 'append',
+          target: {
+            key: 'x-nextjs-data',
+          },
+          args: '1',
+        },
+      ],
+      continue: true,
+    },
+    // strip _next/data prefix for resolving
+    {
+      src: `^${path.posix.join(
+        '/',
+        basePath,
+        '/_next/data/',
+        buildId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+        '/(.*).json'
+      )}`,
+      dest: `${path.posix.join(
+        '/',
+        basePath,
+        '/$1',
+        trailingSlash ? '/' : ''
+      )}`,
+      ...(isOverride ? { override: true } : {}),
+      continue: true,
+      has: [
+        {
+          type: 'header',
+          key: 'x-nextjs-data',
+        },
+      ],
+    },
+    // normalize "/index" from "/_next/data/index.json" to -> just "/"
+    {
+      src: path.posix.join('^/', basePath, '/index(?:/)?'),
+      has: [
+        {
+          type: 'header',
+          key: 'x-nextjs-data',
+        },
+      ],
+      dest: path.posix.join('/', basePath, trailingSlash ? '/' : ''),
+      ...(isOverride ? { override: true } : {}),
+      continue: true,
+    },
+  ];
+}
+
+export function denormalizeNextDataRoutes(
+  config: NextConfig,
+  buildId: string,
+  shouldHandleMiddlewareDataResolving: boolean,
+  isOverride = false
+): RouteWithSrc[] {
+  if (!shouldHandleMiddlewareDataResolving) return [];
+
+  const path = require('node:path');
+  const basePath = config.basePath || '';
+  const trailingSlash = config.trailingSlash || false;
+
+  return [
+    {
+      src: path.posix.join(
+        '^/',
+        basePath && basePath !== '/'
+          ? `${basePath}${trailingSlash ? '/$' : '$'}`
+          : '$'
+      ),
+      has: [
+        {
+          type: 'header',
+          key: 'x-nextjs-data',
+        },
+      ],
+      dest: `${path.posix.join(
+        '/',
+        basePath,
+        '/_next/data/',
+        buildId,
+        '/index.json'
+      )}`,
+      continue: true,
+      ...(isOverride ? { override: true } : {}),
+    },
+    {
+      src: path.posix.join('^/', basePath, '((?!_next/)(?:.*[^/]|.*))/?$'),
+      has: [
+        {
+          type: 'header',
+          key: 'x-nextjs-data',
+        },
+      ],
+      dest: `${path.posix.join(
+        '/',
+        basePath,
+        '/_next/data/',
+        buildId,
+        '/$1.json'
+      )}`,
+      continue: true,
+      ...(isOverride ? { override: true } : {}),
+    },
+  ];
 }

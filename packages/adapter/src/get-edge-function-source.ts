@@ -25,7 +25,7 @@ export async function getNextjsEdgeFunctionSource(
   filePaths: string[],
   params: NextjsParams,
   outputDir: string,
-  wasm?: { filePath: string; name: string }[]
+  wasm?: { [name: string]: string }
 ): Promise<Source> {
   const chunks = new ConcatSource(raw(`globalThis._ENTRIES = {};`));
   for (const filePath of filePaths) {
@@ -43,9 +43,7 @@ export async function getNextjsEdgeFunctionSource(
    * We validate at this point because we want to verify against user code.
    * It should not count the Worker wrapper nor the Next.js wrapper.
    */
-  const wasmFiles = (wasm ?? []).map(({ filePath }) =>
-    join(outputDir, filePath)
-  );
+  const wasmFiles = Object.values(wasm ?? []);
   await validateSize(text, wasmFiles);
 
   // Wrap to fake module.exports
@@ -58,17 +56,17 @@ export async function getNextjsEdgeFunctionSource(
   })`;
 
   return sourcemapped`
-  ${raw(getWasmImportStatements(wasm))}
+  ${raw(getWasmImportStatements(wasm || {}))}
   ${chunks};
   export default ${raw(getPageMatchCode)}.call({}).default(
     ${raw(JSON.stringify(params))}
   )`;
 }
 
-function getWasmImportStatements(wasm: { name: string }[] = []) {
-  return wasm
-    .filter(({ name }) => name.startsWith('wasm_'))
-    .map(({ name }) => {
+function getWasmImportStatements(wasm: { [name: string]: string }) {
+  return Object.entries(wasm)
+    .filter(([name]) => name.startsWith('wasm_'))
+    .map(([name]) => {
       const pathname = `/wasm/${name}.wasm`;
       return `const ${name} = require(${JSON.stringify(pathname)});`;
     })

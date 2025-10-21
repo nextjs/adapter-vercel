@@ -111,8 +111,6 @@ describe('Next.js Adapter Tests', () => {
     .map((name) => path.join(FIXTURES_DIR, name))
     .filter((p) => fs.statSync(p).isDirectory())
     .sort();
-  // TODO: remove after testing
-  // .slice(1, 2);
 
   fixtures.forEach((fixture) => {
     const fixtureName = path.basename(fixture);

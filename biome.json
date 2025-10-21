@@ -19,7 +19,8 @@
       "!**/.env/**",
       "!target/**",
       "!**/tests/fixture/**",
-      "!**/tests/errors/**"
+      "!**/tests/errors/**",
+      "!**/test/**/*.json"
     ],
     "ignoreUnknown": true
   },

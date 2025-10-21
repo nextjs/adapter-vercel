@@ -1,12 +1,63 @@
 import path from 'node:path';
-import fs from 'node:fs/promises';
+import fs from 'fs-extra';
 import { Sema } from 'async-sema';
 import type { AdapterOutput, NextConfig } from 'next';
 import type { VercelConfig } from './types';
+import type { RouteWithSrc } from '@vercel/routing-utils';
+import type { NextjsParams } from './get-edge-function';
 import { getHandlerSource } from './node-handler';
-import { getNodeVersion } from '@vercel/build-utils';
+import {
+  getLambdaOptionsFromFunction,
+  getNodeVersion,
+} from '@vercel/build-utils';
 import { AdapterOutputType } from 'next/dist/shared/lib/constants';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
+import { INTERNAL_PAGES } from './constants';
+
+const copy = async (src: string, dest: string) => {
+  await fs.remove(dest);
+  await fs.copy(src, dest);
+};
+
+const writeLock = new Map<string, Promise<any>>();
+
+const writeFileWithLock = async (filePath: string, content: string) => {
+  await writeLock.get(filePath);
+  const writePromise = fs
+    .writeFile(filePath, content)
+    .finally(() => writeLock.delete(filePath));
+
+  writeLock.set(filePath, writePromise);
+  return writePromise;
+};
+
+export async function handlePublicFiles(
+  publicFolder: string,
+  vercelOutputDir: string,
+  config: NextConfig
+) {
+  const topLevelItems = await fs.readdir(publicFolder).catch(() => []);
+  const fsSema = new Sema(16, { capacity: topLevelItems.length });
+
+  await Promise.all(
+    topLevelItems.map(async (item) => {
+      await fsSema.acquire();
+
+      const destination = path.join(
+        vercelOutputDir,
+        'static',
+        config.basePath || '',
+        item
+      );
+      const destDirectory = path.dirname(destination);
+
+      await fs.mkdir(destDirectory, { recursive: true });
+      await copy(path.join(publicFolder, item), destination);
+
+      fsSema.release();
+    })
+  );
+}
 
 export async function handleStaticOutputs(
   outputs: Array<AdapterOutput['STATIC_FILE']>,
@@ -27,36 +78,53 @@ export async function handleStaticOutputs(
       await fsSema.acquire();
 
       const srcExtension = path.extname(output.filePath);
-      const destExtension = path.extname(output.pathname);
 
-      // automatically statically optimized pages should
+      // Automatically statically optimized pages should
       // be output to static folder but apply content-type override
-      if (srcExtension === '.html' && !destExtension) {
-        vercelConfig.overrides[path.posix.join('./', output.pathname)] = {
+      // and path to remove the extension
+      const isHtml = srcExtension === '.html';
+
+      if (isHtml) {
+        vercelConfig.overrides[
+          path.posix.join('./', output.pathname + '.html')
+        ] = {
           contentType: 'text/html; charset=utf-8',
+          path: path.posix.join('./', output.pathname),
         };
       }
       const destination = path.join(
         vercelOutputDir,
         'static',
-        config.basePath || '',
-        output.pathname
+        output.pathname + (isHtml ? '.html' : '')
       );
       const destDirectory = path.dirname(destination);
 
       await fs.mkdir(destDirectory, { recursive: true });
-      await fs.rename(output.filePath, destination);
+      await copy(output.filePath, destination);
 
       fsSema.release();
     })
   );
+
+  await fs.writeFile(
+    path.posix.join(
+      vercelOutputDir,
+      'static',
+      config.basePath || '',
+      '_next/static/not-found.txt'
+    ),
+    'Not Found'
+  );
 }
+
+const vercelConfig = JSON.parse(process.env.NEXT_ADAPTER_VERCEL_CONFIG || '{}');
 
 export type FuncOutputs = Array<
   | AdapterOutput['PAGES']
   | AdapterOutput['APP_PAGE']
   | AdapterOutput['APP_ROUTE']
   | AdapterOutput['PAGES_API']
+  | AdapterOutput['MIDDLEWARE']
 >;
 
 export async function handleNodeOutputs(
@@ -67,6 +135,8 @@ export async function handleNodeOutputs(
     repoRoot,
     projectDir,
     nextVersion,
+    isMiddleware,
+    prerenderFallbackFalseMap,
     vercelOutputDir,
   }: {
     config: NextConfig;
@@ -74,6 +144,8 @@ export async function handleNodeOutputs(
     repoRoot: string;
     projectDir: string;
     nextVersion: string;
+    isMiddleware?: boolean;
+    prerenderFallbackFalseMap: Record<string, string[]>;
     vercelOutputDir: string;
   }
 ) {
@@ -83,14 +155,31 @@ export async function handleNodeOutputs(
   const functionsDir = path.join(vercelOutputDir, 'functions');
   const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
 
+  let pages404Output: undefined | FuncOutputs[0];
+  let pagesErrorOutput: undefined | FuncOutputs[0];
+
+  for (const item of nodeOutputs) {
+    if (item.pathname === path.posix.join('/', config.basePath || '', '/404')) {
+      pages404Output = item;
+    }
+    if (
+      item.pathname === path.posix.join('/', config.basePath || '', '/_error')
+    ) {
+      pagesErrorOutput = item;
+    }
+
+    if (pages404Output && pagesErrorOutput) {
+      break;
+    }
+  }
+
   await Promise.all(
     nodeOutputs.map(async (output) => {
       await fsSema.acquire();
 
       const functionDir = path.join(
         functionsDir,
-        config.basePath || '',
-        `${output.pathname}.func`
+        `${output.pathname === '/' ? '/index' : output.pathname}.func`
       );
       await fs.mkdir(functionDir, { recursive: true });
 
@@ -99,19 +188,39 @@ export async function handleNodeOutputs(
       for (const [relPath, fsPath] of Object.entries(output.assets)) {
         files[relPath] = path.posix.relative(repoRoot, fsPath);
       }
-      files[path.posix.relative(projectDir, output.filePath)] =
+      files[path.posix.relative(repoRoot, output.filePath)] =
         path.posix.relative(repoRoot, output.filePath);
+
+      // ensure 404 handler is included in function for rendering
+      // not-found in pages router
+      if (output.type === AdapterOutputType.PAGES) {
+        const notFoundOutput = pages404Output || pagesErrorOutput;
+
+        if (notFoundOutput) {
+          for (const [relPath, fsPath] of Object.entries(
+            notFoundOutput.assets
+          )) {
+            files[relPath] = path.posix.relative(repoRoot, fsPath);
+          }
+          files[path.posix.relative(repoRoot, notFoundOutput.filePath)] =
+            path.posix.relative(repoRoot, notFoundOutput.filePath);
+        }
+      }
 
       const handlerFilePath = path.join(
         functionDir,
         handlerRelativeDir,
         '___next_launcher.cjs'
       );
+
       await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
-      await fs.writeFile(
+      await writeFileWithLock(
         handlerFilePath,
         getHandlerSource({
           projectRelativeDistDir: path.posix.relative(projectDir, distDir),
+          prerenderFallbackFalseMap,
+          isMiddleware,
+          nextConfig: config,
         })
       );
 
@@ -120,13 +229,22 @@ export async function handleNodeOutputs(
           ? 'PAGE'
           : 'API';
 
-      // TODO: read vercel.json for additional function options
+      const sourceFile = await getSourceFilePathFromPage({
+        workPath: projectDir,
+        page: output.sourcePage,
+        pageExtensions: config.pageExtensions || [],
+      });
+      const vercelConfigOpts = await getLambdaOptionsFromFunction({
+        sourceFile,
+        config: vercelConfig,
+      });
 
-      await fs.writeFile(
+      await writeFileWithLock(
         path.join(functionDir, `.vc-config.json`),
         JSON.stringify(
           // TODO: strongly type this
           {
+            ...vercelConfigOpts,
             filePathMap: files,
             operationType,
             framework: {
@@ -141,9 +259,9 @@ export async function handleNodeOutputs(
             maxDuration: output.config.maxDuration,
             supportsResponseStreaming: true,
             experimentalAllowBundling: true,
-          },
-          null,
-          2
+            // middleware handler always expects Request/Response interface
+            useWebApi: isMiddleware,
+          }
         )
       );
 
@@ -153,30 +271,16 @@ export async function handleNodeOutputs(
 }
 
 export async function handlePrerenderOutputs(
-  nodeOutputs: FuncOutputs,
   prerenderOutputs: Array<AdapterOutput['PRERENDER']>,
   {
-    config,
-    distDir,
-    repoRoot,
-    projectDir,
-    nextVersion,
     vercelOutputDir,
+    nodeOutputsParentMap,
   }: {
-    config: NextConfig;
-    distDir: string;
-    repoRoot: string;
-    projectDir: string;
-    nextVersion: string;
     vercelOutputDir: string;
+    nodeOutputsParentMap: Map<string, FuncOutputs[0]>;
   }
-): Promise<FuncOutputs> {
-  const nodeOutputsParentMap = new Map<string, FuncOutputs[0]>();
+) {
   const prerenderParentIds = new Set<string>();
-
-  for (const output of nodeOutputs) {
-    nodeOutputsParentMap.set(output.id, output);
-  }
   const fsSema = new Sema(16, { capacity: prerenderOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
 
@@ -187,12 +291,16 @@ export async function handlePrerenderOutputs(
       try {
         const prerenderConfigPath = path.join(
           functionsDir,
-          `${output.pathname}.prerender-config.json`
+          `${
+            output.pathname === '/' ? '/index' : output.pathname
+          }.prerender-config.json`
         );
         const prerenderFallbackPath = output.fallback?.filePath
           ? path.join(
               functionsDir,
-              `${output.pathname}.prerender-fallback${path.extname(output.fallback.filePath)}`
+              `${
+                output.pathname === '/' ? '/index' : output.pathname
+              }.prerender-fallback${path.extname(output.fallback.filePath)}`
             )
           : undefined;
 
@@ -210,14 +318,38 @@ export async function handlePrerenderOutputs(
         const clonedNodeOutput = Object.assign({}, parentNodeOutput);
         clonedNodeOutput.pathname = output.pathname;
 
-        await handleNodeOutputs([clonedNodeOutput], {
-          config,
-          distDir,
-          repoRoot,
-          projectDir,
-          nextVersion,
-          vercelOutputDir,
-        });
+        const parentFunctionDir = path.join(
+          functionsDir,
+          `${
+            parentNodeOutput.pathname === '/'
+              ? '/index'
+              : parentNodeOutput.pathname
+          }.func`
+        );
+        const prerenderFunctionDir = path.join(
+          functionsDir,
+          `${output.pathname === '/' ? '/index' : output.pathname}.func`
+        );
+
+        if (output.pathname !== parentNodeOutput.pathname) {
+          await fs.mkdir(path.dirname(prerenderFunctionDir), {
+            recursive: true,
+          });
+          await fs
+            .symlink(
+              path.relative(
+                path.dirname(prerenderFunctionDir),
+                parentFunctionDir
+              ),
+              prerenderFunctionDir
+            )
+            .catch((err) => {
+              // we can tolerate it already existing
+              if (!(typeof err === 'object' && err && err.code === 'EEXIST')) {
+                throw err;
+              }
+            });
+        }
 
         const initialHeaders = Object.assign(
           {},
@@ -233,7 +365,7 @@ export async function handlePrerenderOutputs(
             output.fallback.filePath,
             'utf8'
           );
-          await fs.writeFile(
+          await writeFileWithLock(
             prerenderFallbackPath,
             `${output.fallback.postponedState}${fallbackHtml}`
           );
@@ -242,7 +374,7 @@ export async function handlePrerenderOutputs(
         }
 
         await fs.mkdir(path.dirname(prerenderConfigPath), { recursive: true });
-        await fs.writeFile(
+        await writeFileWithLock(
           prerenderConfigPath,
           JSON.stringify(
             // TODO: strongly type this
@@ -279,15 +411,10 @@ export async function handlePrerenderOutputs(
               chain: output.pprChain
                 ? {
                     ...output.pprChain,
-                    outputPath: path.posix.join(
-                      config.basePath || '',
-                      parentNodeOutput.pathname
-                    ),
+                    outputPath: path.posix.join(parentNodeOutput.pathname),
                   }
                 : undefined,
-            },
-            null,
-            2
+            }
           )
         );
 
@@ -298,7 +425,7 @@ export async function handlePrerenderOutputs(
           !output.fallback.postponedState
         ) {
           // we use link to avoid copying files un-necessarily
-          await fs.link(output.fallback.filePath, prerenderFallbackPath);
+          await copy(output.fallback.filePath, prerenderFallbackPath);
         }
       } catch (err) {
         console.error(`Failed to handle output:`, output);
@@ -308,18 +435,15 @@ export async function handlePrerenderOutputs(
       fsSema.release();
     })
   );
-
-  // If a node output was consumed by a prerender we don't want to
-  // create a separate function for it
-  return nodeOutputs.filter((output) => !prerenderParentIds.has(output.id));
 }
 
 type EdgeFunctionConfig = {
   runtime: 'edge';
   entrypoint: string;
-  envVarsInUse?: string[];
+  environment?: Record<string, string>;
   files: Record<string, string>;
   regions?: 'all' | string | string[];
+  framework?: { slug: string; version: string };
 };
 
 export async function handleEdgeOutputs(
@@ -329,12 +453,14 @@ export async function handleEdgeOutputs(
     distDir,
     repoRoot,
     projectDir,
+    nextVersion,
     vercelOutputDir,
   }: {
-    config: NextConfig;
     distDir: string;
+    config: NextConfig;
     repoRoot: string;
     projectDir: string;
+    nextVersion: string;
     vercelOutputDir: string;
   }
 ) {
@@ -348,8 +474,7 @@ export async function handleEdgeOutputs(
 
       const functionDir = path.join(
         functionsDir,
-        config.basePath || '',
-        `${output.pathname}.func`
+        `${output.pathname === '/' ? 'index' : output.pathname}.func`
       );
       await fs.mkdir(functionDir, { recursive: true });
 
@@ -364,15 +489,20 @@ export async function handleEdgeOutputs(
       // Get file paths for the edge function source generation
       const filePaths = [
         path.posix.relative(projectDir, output.filePath),
-        ...Object.keys(output.assets),
+        ...Object.values(output.assets).map((item) =>
+          path.posix.relative(projectDir, item)
+        ),
       ];
 
       // Create Next.js parameters for the edge function
       const params = {
-        name: 'middleware', // This would typically come from the output config
-        staticRoutes: [], // These would come from Next.js routing info
-        dynamicRoutes: [], // These would come from Next.js routing info
-        nextConfig: null, // This would come from next.config.js
+        name: output.id.replace(/\.rsc$/, ''),
+        staticRoutes: [],
+        dynamicRoutes: [],
+        nextConfig: {
+          basePath: config.basePath,
+          i18n: config.i18n as NonNullable<NextjsParams['nextConfig']>['i18n'],
+        },
       };
 
       // Generate the edge function source using Next.js logic
@@ -380,7 +510,7 @@ export async function handleEdgeOutputs(
         filePaths,
         params,
         projectDir,
-        undefined // TODO: Add WASM support when available in AdapterOutput
+        output.wasmAssets
       );
 
       const edgeSource = edgeSourceObj.source();
@@ -391,7 +521,7 @@ export async function handleEdgeOutputs(
         'index.js'
       );
       await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
-      await fs.writeFile(handlerFilePath, edgeSource);
+      await writeFileWithLock(handlerFilePath, edgeSource.toString());
 
       const edgeConfig: EdgeFunctionConfig = {
         runtime: 'edge',
@@ -400,16 +530,189 @@ export async function handleEdgeOutputs(
           'index.js'
         ),
         files,
-        envVarsInUse: undefined, // TODO: env not yet available in AdapterOutput config
+        environment: output.config.env || {},
         regions: output.config.preferredRegion,
+        framework: {
+          slug: 'nextjs',
+          version: nextVersion,
+        },
       };
 
-      await fs.writeFile(
+      await writeFileWithLock(
         path.join(functionDir, '.vc-config.json'),
-        JSON.stringify(edgeConfig, null, 2)
+        JSON.stringify(edgeConfig)
       );
 
       fsSema.release();
     })
   );
+}
+
+export async function handleMiddleware(
+  output: AdapterOutput['MIDDLEWARE'],
+  ctx: {
+    config: NextConfig;
+    nextVersion: string;
+    distDir: string;
+    repoRoot: string;
+    projectDir: string;
+    vercelOutputDir: string;
+    prerenderFallbackFalseMap: Record<string, string[]>;
+  }
+): Promise<RouteWithSrc[]> {
+  if (output.runtime === 'nodejs') {
+    await handleNodeOutputs([output], {
+      ...ctx,
+      isMiddleware: true,
+    });
+  } else if (output.runtime === 'edge') {
+    await handleEdgeOutputs([output], ctx);
+  } else {
+    throw new Error(`Invalid middleware output ${JSON.stringify(output)}`);
+  }
+
+  const routes: RouteWithSrc[] = [];
+
+  for (const matcher of output.config.matchers || []) {
+    const route: RouteWithSrc = {
+      continue: true,
+      has: matcher.has,
+      src: matcher.sourceRegex,
+      missing: matcher.missing,
+    };
+
+    route.middlewarePath = output.pathname;
+    route.middlewareRawSrc = matcher.source ? [matcher.source] : [];
+
+    route.override = true;
+    routes.push(route);
+  }
+
+  return routes;
+}
+
+// We only need this once per build
+let _usesSrcCache: boolean | undefined;
+
+async function usesSrcDirectory(workPath: string): Promise<boolean> {
+  if (!_usesSrcCache) {
+    const sourcePages = path.join(workPath, 'src', 'pages');
+
+    try {
+      if ((await fs.stat(sourcePages)).isDirectory()) {
+        _usesSrcCache = true;
+      }
+    } catch (_err) {
+      _usesSrcCache = false;
+    }
+  }
+
+  if (!_usesSrcCache) {
+    const sourceAppdir = path.join(workPath, 'src', 'app');
+
+    try {
+      if ((await fs.stat(sourceAppdir)).isDirectory()) {
+        _usesSrcCache = true;
+      }
+    } catch (_err) {
+      _usesSrcCache = false;
+    }
+  }
+
+  return Boolean(_usesSrcCache);
+}
+
+function isDirectory(path: string) {
+  return fs.existsSync(path) && fs.lstatSync(path).isDirectory();
+}
+
+async function getSourceFilePathFromPage({
+  workPath,
+  page,
+  pageExtensions,
+}: {
+  workPath: string;
+  page: string;
+  pageExtensions?: ReadonlyArray<string>;
+}) {
+  const usesSrcDir = await usesSrcDirectory(workPath);
+  const extensionsToTry = pageExtensions || ['js', 'jsx', 'ts', 'tsx'];
+
+  for (const pageType of [
+    // middleware is not nested in pages/app
+    ...(page === 'middleware' ? [''] : ['pages', 'app']),
+  ]) {
+    let fsPath = path.join(workPath, pageType, page);
+    if (usesSrcDir) {
+      fsPath = path.join(workPath, 'src', pageType, page);
+    }
+
+    if (fs.existsSync(fsPath)) {
+      return path.relative(workPath, fsPath);
+    }
+    const extensionless = fsPath;
+
+    for (const ext of extensionsToTry) {
+      fsPath = `${extensionless}.${ext}`;
+      // for appDir, we need to treat "index.js" as root-level "page.js"
+      if (
+        pageType === 'app' &&
+        extensionless ===
+          path.join(workPath, `${usesSrcDir ? 'src/' : ''}app/index`)
+      ) {
+        fsPath = `${extensionless.replace(/index$/, 'page')}.${ext}`;
+      }
+      if (fs.existsSync(fsPath)) {
+        return path.relative(workPath, fsPath);
+      }
+    }
+
+    if (isDirectory(extensionless)) {
+      if (pageType === 'pages') {
+        for (const ext of extensionsToTry) {
+          fsPath = path.join(extensionless, `index.${ext}`);
+          if (fs.existsSync(fsPath)) {
+            return path.relative(workPath, fsPath);
+          }
+        }
+        // appDir
+      } else {
+        for (const ext of extensionsToTry) {
+          // RSC
+          fsPath = path.join(extensionless, `page.${ext}`);
+          if (fs.existsSync(fsPath)) {
+            return path.relative(workPath, fsPath);
+          }
+          // Route Handlers
+          fsPath = path.join(extensionless, `route.${ext}`);
+          if (fs.existsSync(fsPath)) {
+            return path.relative(workPath, fsPath);
+          }
+        }
+      }
+    }
+  }
+
+  // if we got here, and didn't find a source not-found file, then it was the one injected
+  // by Next.js. There's no need to warn or return a source file in this case, as it won't have
+  // any configuration applied to it.
+  if (page === '/_not-found/page') {
+    return '';
+  }
+  // if we got here, and didn't find a source global-error file, then it was the one injected
+  // by Next.js for App Router 500 page. There's no need to warn or return a source file in this case, as it won't have
+  // any configuration applied to it.
+  if (page === '/_global-error/page') {
+    return '';
+  }
+
+  // Skip warning for internal pages (_app.js, _error.js, _document.js)
+  if (!INTERNAL_PAGES.includes(page)) {
+    console.log(
+      `WARNING: Unable to find source file for page ${page} with extensions: ${extensionsToTry.join(
+        ', '
+      )}, this can cause functions config from \`vercel.json\` to not be applied`
+    );
+  }
+  return '';
 }

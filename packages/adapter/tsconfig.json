@@ -17,9 +17,9 @@
     "strict": true,
     "outDir": "dist",
     "target": "es2022",
-    "module": "commonjs",
+    "module": "es2022",
     "moduleResolution": "node"
   },
-  "include": ["src"],
+  "include": ["src", "build.mts"],
   "exclude": ["node_modules", "**/*.test.ts"]
 }

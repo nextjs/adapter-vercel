@@ -163,7 +163,6 @@ function parseSetCookieHeader(cookieHeader: string): string[] {
   const cookies: string[] = [];
   let current = 0;
   let start: number;
-  let inQuotes = false;
   let char: string;
   let foundCookie: boolean;
 
@@ -189,10 +188,10 @@ function parseSetCookieHeader(cookieHeader: string): string[] {
     while (skipWhitespace()) {
       char = cookieHeader.charAt(current);
       if (char === ',') {
-        let cookieEnd = current;
+        const cookieEnd = current;
         current += 1;
         skipWhitespace();
-        let attributeStart = current;
+        const attributeStart = current;
 
         while (current < cookieHeader.length && isTokenChar()) {
           current += 1;

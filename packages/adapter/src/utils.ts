@@ -30,3 +30,9 @@ export function getImagesConfig(config: NextConfig) {
     contentDispositionType: images.contentDispositionType,
   };
 }
+
+const matchOperatorsRegex = /[|\\{}()[\]^$+*?.-]/g;
+
+export function escapeStringRegexp(str: string): string {
+  return str.replace(matchOperatorsRegex, '\\$&');
+}
