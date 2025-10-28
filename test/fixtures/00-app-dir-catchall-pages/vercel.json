@@ -1,9 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "build": {
-    "env": {
-      "VERCEL_FORCE_BUILD_IN_HIVE": "hvi_lhr1_dizzy",
-      "VERCEL_BUILD_CONTAINER_VERSION": "pr-47823-4c2c256dbbcfbfc833403057e538088bb96e6d83"
-    }
-  }
-}
