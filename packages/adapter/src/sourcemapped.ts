@@ -4,7 +4,7 @@ import {
   type RawSourceMap,
 } from 'source-map';
 import convertSourceMap from 'convert-source-map';
-import fs from 'node:fs/promises';
+import fs from 'fs-extra';
 import {
   ConcatSource,
   OriginalSource,
@@ -79,13 +79,7 @@ async function getSourceMap(
 ): Promise<RawSourceMap | null> {
   let map: RawSourceMap;
   try {
-    if (
-      fullFilePath &&
-      (await fs
-        .access(`${fullFilePath}.map`)
-        .then(() => true)
-        .catch(() => false))
-    ) {
+    if (fullFilePath && (await fs.pathExists(`${fullFilePath}.map`))) {
       const mapJson = await fs.readFile(`${fullFilePath}.map`, 'utf8');
       map = convertSourceMap.fromJSON(mapJson).toObject();
     } else {

@@ -1,11 +1,13 @@
 import type { NextjsParams } from './get-edge-function';
-import { readFile } from 'node:fs/promises';
+import { readFile } from 'fs-extra';
 import { ConcatSource, type Source } from 'webpack-sources';
 import { fileToSource, raw, sourcemapped } from './sourcemapped';
 import { join } from 'path';
-import { EDGE_FUNCTION_SIZE_LIMIT, prettyBytes } from './constants';
+import { EDGE_FUNCTION_SIZE_LIMIT } from './constants';
 import zlib from 'zlib';
 import { promisify } from 'util';
+import { prettyBytes } from './pretty-bytes';
+
 import { template } from './edge-function-template';
 
 const gzip = promisify<zlib.InputType, Buffer>(zlib.gzip);
@@ -25,7 +27,7 @@ export async function getNextjsEdgeFunctionSource(
   filePaths: string[],
   params: NextjsParams,
   outputDir: string,
-  wasm?: { [name: string]: string }
+  wasm?: Record<string, string>
 ): Promise<Source> {
   const chunks = new ConcatSource(raw(`globalThis._ENTRIES = {};`));
   for (const filePath of filePaths) {
@@ -35,22 +37,19 @@ export async function getNextjsEdgeFunctionSource(
     chunks.add(await fileToSource(content, filePath, fullFilePath));
   }
 
-  const sourceResult = chunks.source();
-  const text =
-    typeof sourceResult === 'string' ? sourceResult : sourceResult.toString();
+  const text = chunks.source();
 
   /**
    * We validate at this point because we want to verify against user code.
    * It should not count the Worker wrapper nor the Next.js wrapper.
    */
-  const wasmFiles = Object.values(wasm ?? []);
+  const wasmFiles = Object.values(wasm || {});
   await validateSize(text, wasmFiles);
 
   // Wrap to fake module.exports
   const getPageMatchCode = `(function () {
     const module = { exports: {}, loaded: false };
-    const fn = (function(module,exports) {${template}
-});
+    const fn = (function(module,exports) {${template}\n});
     fn(module, module.exports);
     return module.exports;
   })`;
@@ -63,7 +62,7 @@ export async function getNextjsEdgeFunctionSource(
   )`;
 }
 
-function getWasmImportStatements(wasm: { [name: string]: string }) {
+function getWasmImportStatements(wasm: Record<string, string>) {
   return Object.entries(wasm)
     .filter(([name]) => name.startsWith('wasm_'))
     .map(([name]) => {

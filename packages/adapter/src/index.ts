@@ -823,7 +823,7 @@ const myAdapter: NextAdapter = {
         src: path.posix.join(
           '/',
           config.basePath || '',
-          `/((?!index$).*?)(?:/)?$`
+          `/((?!index$|_error$|500$).*?)(?:/)?$`
         ),
         headers: {
           'x-matched-path': '/$1',

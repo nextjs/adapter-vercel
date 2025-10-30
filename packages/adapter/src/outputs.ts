@@ -1,5 +1,6 @@
 import path from 'node:path';
-import fs from 'fs-extra';
+import fs from 'node:fs/promises';
+import fse from 'fs-extra';
 import { Sema } from 'async-sema';
 import type { AdapterOutput, NextConfig } from 'next';
 import type { VercelConfig } from './types';
@@ -15,16 +16,21 @@ import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { INTERNAL_PAGES } from './constants';
 
 const copy = async (src: string, dest: string) => {
-  await fs.remove(dest);
-  await fs.copy(src, dest);
+  await fse.remove(dest);
+  await fse.copy(src, dest);
 };
 
 const writeLock = new Map<string, Promise<any>>();
 
-const writeFileWithLock = async (filePath: string, content: string) => {
+const writeIfNotExists = async (filePath: string, content: string) => {
   await writeLock.get(filePath);
+
   const writePromise = fs
-    .writeFile(filePath, content)
+    .writeFile(filePath, content, { flag: 'wx' })
+    .catch((err) => {
+      if (err.code === 'EEXIST') return;
+      throw err;
+    })
     .finally(() => writeLock.delete(filePath));
 
   writeLock.set(filePath, writePromise);
@@ -214,7 +220,7 @@ export async function handleNodeOutputs(
       );
 
       await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
-      await writeFileWithLock(
+      await writeIfNotExists(
         handlerFilePath,
         getHandlerSource({
           projectRelativeDistDir: path.posix.relative(projectDir, distDir),
@@ -239,7 +245,7 @@ export async function handleNodeOutputs(
         config: vercelConfig,
       });
 
-      await writeFileWithLock(
+      await writeIfNotExists(
         path.join(functionDir, `.vc-config.json`),
         JSON.stringify(
           // TODO: strongly type this
@@ -261,6 +267,7 @@ export async function handleNodeOutputs(
             experimentalAllowBundling: true,
             // middleware handler always expects Request/Response interface
             useWebApi: isMiddleware,
+            launcherType: 'Nodejs',
           }
         )
       );
@@ -365,7 +372,7 @@ export async function handlePrerenderOutputs(
             output.fallback.filePath,
             'utf8'
           );
-          await writeFileWithLock(
+          await writeIfNotExists(
             prerenderFallbackPath,
             `${output.fallback.postponedState}${fallbackHtml}`
           );
@@ -374,7 +381,7 @@ export async function handlePrerenderOutputs(
         }
 
         await fs.mkdir(path.dirname(prerenderConfigPath), { recursive: true });
-        await writeFileWithLock(
+        await writeIfNotExists(
           prerenderConfigPath,
           JSON.stringify(
             // TODO: strongly type this
@@ -439,9 +446,12 @@ export async function handlePrerenderOutputs(
 
 type EdgeFunctionConfig = {
   runtime: 'edge';
+  name: string;
   entrypoint: string;
-  environment?: Record<string, string>;
-  files: Record<string, string>;
+  environment: Record<string, string>;
+  filePathMap: Record<string, string>;
+  assets?: Array<{ name: string; path: string }>;
+  deploymentTarget: string;
   regions?: 'all' | string | string[];
   framework?: { slug: string; version: string };
 };
@@ -479,19 +489,37 @@ export async function handleEdgeOutputs(
       await fs.mkdir(functionDir, { recursive: true });
 
       const files: Record<string, string> = {};
+      const jsRegex = /\.(m|c)?js$/;
+
+      const nonJsAssetFiles: Array<{ name: string; path: string }> = [];
 
       for (const [relPath, fsPath] of Object.entries(output.assets)) {
-        files[relPath] = path.posix.relative(repoRoot, fsPath);
+        if (jsRegex.test(fsPath)) {
+          files[relPath] = path.posix.relative(repoRoot, fsPath);
+        } else {
+          const assetPath = path.posix.join('assets', relPath);
+
+          files[assetPath] = path.posix.relative(repoRoot, fsPath);
+
+          nonJsAssetFiles.push({
+            name: relPath,
+            path: assetPath,
+          });
+        }
+      }
+      for (const [name, fsPath] of Object.entries(output.wasmAssets || {})) {
+        files[`wasm/${name}.wasm`] = path.posix.relative(repoRoot, fsPath);
       }
       files[path.posix.relative(projectDir, output.filePath)] =
         path.posix.relative(repoRoot, output.filePath);
 
       // Get file paths for the edge function source generation
+
       const filePaths = [
         path.posix.relative(projectDir, output.filePath),
-        ...Object.values(output.assets).map((item) =>
-          path.posix.relative(projectDir, item)
-        ),
+        ...Object.values(output.assets)
+          .map((item) => path.posix.relative(projectDir, item))
+          .filter((item) => jsRegex.test(item)),
       ];
 
       // Create Next.js parameters for the edge function
@@ -521,15 +549,18 @@ export async function handleEdgeOutputs(
         'index.js'
       );
       await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
-      await writeFileWithLock(handlerFilePath, edgeSource.toString());
+      await writeIfNotExists(handlerFilePath, edgeSource.toString());
 
       const edgeConfig: EdgeFunctionConfig = {
         runtime: 'edge',
+        name: params.name,
         entrypoint: path.posix.join(
           path.posix.relative(repoRoot, projectDir),
           'index.js'
         ),
-        files,
+        filePathMap: files,
+        assets: nonJsAssetFiles,
+        deploymentTarget: 'v8-worker',
         environment: output.config.env || {},
         regions: output.config.preferredRegion,
         framework: {
@@ -538,7 +569,7 @@ export async function handleEdgeOutputs(
         },
       };
 
-      await writeFileWithLock(
+      await writeIfNotExists(
         path.join(functionDir, '.vc-config.json'),
         JSON.stringify(edgeConfig)
       );
@@ -623,7 +654,7 @@ async function usesSrcDirectory(workPath: string): Promise<boolean> {
 }
 
 function isDirectory(path: string) {
-  return fs.existsSync(path) && fs.lstatSync(path).isDirectory();
+  return fse.existsSync(path) && fse.lstatSync(path).isDirectory();
 }
 
 async function getSourceFilePathFromPage({
@@ -647,7 +678,7 @@ async function getSourceFilePathFromPage({
       fsPath = path.join(workPath, 'src', pageType, page);
     }
 
-    if (fs.existsSync(fsPath)) {
+    if (fse.existsSync(fsPath)) {
       return path.relative(workPath, fsPath);
     }
     const extensionless = fsPath;
@@ -662,7 +693,7 @@ async function getSourceFilePathFromPage({
       ) {
         fsPath = `${extensionless.replace(/index$/, 'page')}.${ext}`;
       }
-      if (fs.existsSync(fsPath)) {
+      if (fse.existsSync(fsPath)) {
         return path.relative(workPath, fsPath);
       }
     }
@@ -671,7 +702,7 @@ async function getSourceFilePathFromPage({
       if (pageType === 'pages') {
         for (const ext of extensionsToTry) {
           fsPath = path.join(extensionless, `index.${ext}`);
-          if (fs.existsSync(fsPath)) {
+          if (fse.existsSync(fsPath)) {
             return path.relative(workPath, fsPath);
           }
         }
@@ -680,12 +711,12 @@ async function getSourceFilePathFromPage({
         for (const ext of extensionsToTry) {
           // RSC
           fsPath = path.join(extensionless, `page.${ext}`);
-          if (fs.existsSync(fsPath)) {
+          if (fse.existsSync(fsPath)) {
             return path.relative(workPath, fsPath);
           }
           // Route Handlers
           fsPath = path.join(extensionless, `route.${ext}`);
-          if (fs.existsSync(fsPath)) {
+          if (fse.existsSync(fsPath)) {
             return path.relative(workPath, fsPath);
           }
         }
