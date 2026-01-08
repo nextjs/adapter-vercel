@@ -31,97 +31,6 @@ export const getHandlerSource = (ctx: {
           const relativeDistDir = process.env
             .__PRIVATE_RELATIVE_DIST_DIR as string;
 
-          interface PlainHeaders {
-            [header: string]: string | string[] | undefined;
-          }
-
-          function toPlainHeaders(headers?: Headers): PlainHeaders {
-            const result: PlainHeaders = {};
-            if (!headers) return result;
-            headers.forEach((value, key) => {
-              result[key] = value;
-              if (key.toLowerCase() === 'set-cookie') {
-                result[key] = splitCookiesString(value);
-              }
-            });
-            return result;
-          }
-
-          function splitCookiesString(cookiesString: string) {
-            const cookiesStrings: string[] = [];
-
-            let pos = 0;
-            let start: number;
-            let ch: string;
-            let lastComma: number;
-            let nextStart: number;
-            let cookiesSeparatorFound: boolean;
-
-            function skipWhitespace() {
-              while (
-                pos < cookiesString.length &&
-                /\s/.test(cookiesString.charAt(pos))
-              )
-                pos += 1;
-              return pos < cookiesString.length;
-            }
-
-            function notSpecialChar() {
-              ch = cookiesString.charAt(pos);
-              return ch !== '=' && ch !== ';' && ch !== ',';
-            }
-
-            while (pos < cookiesString.length) {
-              start = pos;
-              cookiesSeparatorFound = false;
-
-              while (skipWhitespace()) {
-                ch = cookiesString.charAt(pos);
-                if (ch === ',') {
-                  // ',' is a cookie separator if we have later first '=', not ';' or ','
-                  lastComma = pos;
-                  pos += 1;
-
-                  skipWhitespace();
-                  nextStart = pos;
-
-                  while (pos < cookiesString.length && notSpecialChar()) {
-                    pos += 1;
-                  }
-
-                  // currently special character
-                  if (
-                    pos < cookiesString.length &&
-                    cookiesString.charAt(pos) === '='
-                  ) {
-                    // we found cookies separator
-                    cookiesSeparatorFound = true;
-                    // pos is inside the next cookie, so back up and return it.
-                    pos = nextStart;
-                    cookiesStrings.push(
-                      cookiesString.substring(start, lastComma)
-                    );
-                    start = pos;
-                  } else {
-                    // in param ',' or param separator ';',
-                    // we continue from that comma
-                    pos = lastComma + 1;
-                  }
-                } else {
-                  pos += 1;
-                }
-              }
-
-              if (!cookiesSeparatorFound || pos >= cookiesString.length) {
-                cookiesStrings.push(
-                  cookiesString.substring(start, cookiesString.length)
-                );
-              }
-            }
-
-            return cookiesStrings;
-          }
-
           type Context = {
             waitUntil?: (promise: Promise<unknown>) => void;
             headers?: Record<string, string>;
@@ -139,48 +48,22 @@ export const getHandlerSource = (ctx: {
           return async function handler(request: Request): Promise<Response> {
             console.log('middleware handler', request);
 
-            function addRequestMeta(
-              req: IncomingMessage | Request,
-              key: string,
-              value: any
-            ) {
-              const NEXT_REQUEST_META = Symbol.for('NextInternalRequestMeta');
-              const meta = (req as any)[NEXT_REQUEST_META] || {};
-              meta[key] = value;
-              (req as any)[NEXT_REQUEST_META] = meta;
-              return meta;
-            }
-            // we use '.' for relative project dir since we process.chdir
-            // to the same directory as the handler file so everything is
-            // relative to that/project dir
-            addRequestMeta(request, 'relativeProjectDir', '.');
-
             let middlewareHandler = await require(
               './' + path.posix.join(relativeDistDir, 'server', 'middleware.js')
             );
-            middlewareHandler = middlewareHandler.default || middlewareHandler;
+            middlewareHandler = middlewareHandler.handler || middlewareHandler;
 
             const context = getRequestContext();
-            const result = await middlewareHandler({
-              request: {
-                url: request.url,
-                method: request.method,
-                headers: toPlainHeaders(request.headers),
-                nextConfig: process.env.__PRIVATE_NEXT_CONFIG,
-                page: '/middleware',
-                body:
-                  request.method !== 'GET' && request.method !== 'HEAD'
-                    ? request.body
-                    : undefined,
-                waitUntil: context.waitUntil,
+            const response = await middlewareHandler(request, {
+              waitUntil: context.waitUntil,
+              requestMeta: {
+                // we use '.' for relative project dir since we process.chdir
+                // to the same directory as the handler file so everything is
+                // relative to that/project dir
+                relativeProjectDir: '.',
               },
             });
-
-            if (result.waitUntil && context.waitUntil) {
-              context.waitUntil(result.waitUntil);
-            }
-
-            return result.response;
+            return response;
           };
         }
       : (() => {
@@ -257,25 +140,15 @@ export const getHandlerSource = (ctx: {
             {} as Record<string, string>
           );
 
-          function addRequestMeta(
-            req: IncomingMessage,
-            key: string,
-            value: any
-          ) {
-            const NEXT_REQUEST_META = Symbol.for('NextInternalRequestMeta');
-            const meta = (req as any)[NEXT_REQUEST_META] || {};
-            meta[key] = value;
-            (req as any)[NEXT_REQUEST_META] = meta;
-            return meta;
-          }
-
           function normalizeLocalePath(
-            req: IncomingMessage,
             pathname: string,
             locales?: readonly string[]
-          ): string {
+          ): {
+            pathname: string;
+            locale?: string;
+          } {
             // If locales is undefined, return the pathname as is.
-            if (!locales) return pathname;
+            if (!locales) return { pathname };
 
             // Get the cached lowercased locales or create a new cache entry.
             const lowercasedLocales = locales.map((locale) =>
@@ -285,7 +158,7 @@ export const getHandlerSource = (ctx: {
             // The first segment will be empty, because it has a leading `/`. If
             // there is no further segment, there is no locale (or it's the default).
             const segments = pathname.split('/', 2);
-            if (!segments[1]) return pathname;
+            if (!segments[1]) return { pathname };
 
             // The second segment will contain the locale part if any.
             const segment = segments[1].toLowerCase();
@@ -293,19 +166,17 @@ export const getHandlerSource = (ctx: {
             // See if the segment matches one of the locales. If it doesn't,
             // there is no locale (or it's the default).
             const index = lowercasedLocales.indexOf(segment);
-            if (index < 0) return pathname;
+            if (index < 0) return { pathname };
 
             // Return the case-sensitive locale.
             const detectedLocale = locales[index];
             // Remove the `/${locale}` part of the pathname.
             pathname = pathname.slice(detectedLocale.length + 1) || '/';
 
-            addRequestMeta(req, 'locale', detectedLocale);
-
-            return pathname;
+            return { pathname, locale: detectedLocale };
           }
 
-          function normalizeDataPath(req: IncomingMessage, pathname: string) {
+          function normalizeDataPath(pathname: string) {
             if (!(pathname || '/').startsWith('/_next/data')) {
               return pathname;
             }
@@ -319,21 +190,30 @@ export const getHandlerSource = (ctx: {
             return pathname;
           }
 
-          function matchUrlToPage(req: IncomingMessage, urlPathname: string) {
+          function matchUrlToPage(
+            req: IncomingMessage,
+            urlPathname: string
+          ): {
+            matchedPathname: string;
+            locale?: string;
+          } {
             // normalize first
-            urlPathname = normalizeDataPath(req, urlPathname);
+            urlPathname = normalizeDataPath(urlPathname);
 
             console.log('before normalize', urlPathname);
             for (const suffixRegex of [
               /\.segments(\/.*)\.segment\.rsc$/,
-              /\.prefetch\.rsc$/,
               /\.rsc$/,
             ]) {
               urlPathname = urlPathname.replace(suffixRegex, '');
             }
             const urlPathnameWithLocale = urlPathname;
-            urlPathname = normalizeLocalePath(req, urlPathname, i18n?.locales);
-            console.log('after normalize', urlPathname);
+            const normalizeResult = normalizeLocalePath(
+              urlPathname,
+              i18n?.locales
+            );
+            urlPathname = normalizeResult.pathname;
+            console.log('after normalize', normalizeResult);
 
             urlPathname = urlPathname.replace(/\/$/, '') || '/';
 
@@ -362,12 +242,20 @@ export const getHandlerSource = (ctx: {
                 }
 
                 console.log('matched route', route, urlPathname);
-                return inversedAppRoutesManifest[route.page] || route.page;
+                return {
+                  matchedPathname:
+                    inversedAppRoutesManifest[route.page] || route.page,
+                  locale: normalizeResult.locale,
+                };
               }
             }
 
             // we should have matched above but if not return back
-            return inversedAppRoutesManifest[urlPathname] || urlPathname;
+            return {
+              matchedPathname:
+                inversedAppRoutesManifest[urlPathname] || urlPathname,
+              locale: normalizeResult.locale,
+            };
           }
 
           type Context = {
@@ -451,6 +339,14 @@ export const getHandlerSource = (ctx: {
                   waitUntil: getRequestContext().waitUntil,
                 });
               } else {
+                console.log(
+                  'failed to find 404 module',
+                  await require('fs')
+                    .promises.readdir(
+                      path.posix.join(relativeDistDir, 'server', 'pages')
+                    )
+                    .catch((err: any) => err)
+                );
                 res.end('This page could not be found');
               }
             },
@@ -461,19 +357,17 @@ export const getHandlerSource = (ctx: {
             res: import('http').ServerResponse
           ) {
             try {
-              // we use '.' for relative project dir since we process.chdir
-              // to the same directory as the handler file so everything is
-              // relative to that/project dir
-              addRequestMeta(req, 'relativeProjectDir', '.');
-
+              const parsedUrl = new URL(req.url || '/', 'http://n');
               let urlPathname = req.headers['x-matched-path'];
 
               if (typeof urlPathname !== 'string') {
                 console.log('no x-matched-path', { url: req.url });
-                const parsedUrl = new URL(req.url || '/', 'http://n');
                 urlPathname = parsedUrl.pathname || '/';
               }
-              const page = matchUrlToPage(req, urlPathname);
+              const { matchedPathname: page, locale } = matchUrlToPage(
+                req,
+                urlPathname
+              );
               const isAppDir = page.match(/\/(page|route)$/);
 
               console.log('invoking handler', {
@@ -494,6 +388,14 @@ export const getHandlerSource = (ctx: {
 
               await mod.handler(req, res, {
                 waitUntil: getRequestContext().waitUntil,
+                requestMeta: {
+                  minimalMode: true,
+                  // we use '.' for relative project dir since we process.chdir
+                  // to the same directory as the handler file so everything is
+                  // relative to that/project dir
+                  relativeProjectDir: '.',
+                  locale,
+                },
               });
             } catch (error) {
               console.error(`Failed to handle ${req.url}`, error);

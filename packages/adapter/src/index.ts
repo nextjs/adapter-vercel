@@ -1,12 +1,14 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import type { NextAdapter } from 'next';
 import type { VercelConfig } from './types';
-import { MAX_AGE_ONE_YEAR } from './constants';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 import {
   denormalizeNextDataRoutes,
+  extractHeaders,
+  extractOnMatchRoutes,
+  extractRedirects,
   modifyWithRewriteHeaders,
   normalizeNextDataRoutes,
   normalizeRewrites,
@@ -25,7 +27,7 @@ import {
 const myAdapter: NextAdapter = {
   name: 'Vercel',
   async onBuildComplete({
-    routes,
+    routing,
     config,
     buildId,
     outputs,
@@ -44,7 +46,7 @@ const myAdapter: NextAdapter = {
       outputs.appPages.length > 0 || outputs.appRoutes.length > 0;
 
     const hasPagesDir = outputs.pages.length > 0 || outputs.pagesApi.length > 0;
-    const shouldHandleMiddlewareDataResolving = hasPagesDir && hasMiddleware;
+    const shouldHandleMiddlewareDataResolving = routing.shouldNormalizeNextData;
 
     const i18nConfig = config.i18n;
     const vercelConfig: VercelConfig = {
@@ -146,7 +148,9 @@ const myAdapter: NextAdapter = {
 
         if (!parentOutput) {
           throw new Error(
-            `Invariant: missing parent output ${prerender.parentOutputId} for prerender ${JSON.stringify(prerender)}`
+            `Invariant: missing parent output ${
+              prerender.parentOutputId
+            } for prerender ${JSON.stringify(prerender)}`
           );
         }
         const parentPage = parentOutput.pathname.substring(
@@ -189,85 +193,39 @@ const myAdapter: NextAdapter = {
 
     // handle prerenders (must come after handle node outputs)
     await handlePrerenderOutputs(outputs.prerenders, {
+      config,
       vercelOutputDir,
       nodeOutputsParentMap,
     });
-
-    // TODO: should these be signaled to onBuildComplete directly
-    // somehow or should they be derived from outputs?
-    const shouldHandlePrefetchRsc = Boolean(
-      config.experimental.cacheComponents
-    );
-    const shouldHandleSegmentPrefetches = Boolean(
-      config.experimental.clientSegmentCache ||
-        config.experimental.cacheComponents
-    );
+    const shouldHandleSegmentPrefetches = outputs.appPages.length > 0;
 
     // create routes
-    const convertedRewrites = normalizeRewrites(routes.rewrites);
+    const convertedRewrites = normalizeRewrites(routing);
 
-    if (shouldHandlePrefetchRsc || shouldHandleSegmentPrefetches) {
+    if (shouldHandleSegmentPrefetches) {
       modifyWithRewriteHeaders(convertedRewrites.beforeFiles, {
-        shouldHandlePrefetchRsc,
         shouldHandleSegmentPrefetches,
       });
 
       modifyWithRewriteHeaders(convertedRewrites.afterFiles, {
         isAfterFilesRewrite: true,
-        shouldHandlePrefetchRsc,
         shouldHandleSegmentPrefetches,
       });
 
       modifyWithRewriteHeaders(convertedRewrites.fallback, {
-        shouldHandlePrefetchRsc,
         shouldHandleSegmentPrefetches,
       });
     }
 
-    const priorityRedirects: RouteWithSrc[] = [];
-    const redirects: RouteWithSrc[] = [];
-
-    for (const redirect of routes.redirects) {
-      const route: RouteWithSrc = {
-        src: redirect.sourceRegex,
-        headers: {
-          Location: redirect.destination,
-        },
-        status: redirect.statusCode,
-        has: redirect.has,
-        missing: redirect.missing,
-      };
-      if (redirect.priority) {
-        // we set continue here to prevent the redirect from
-        // moving underneath i18n routes
-        route.continue = true;
-        priorityRedirects.push(route);
-      } else {
-        redirects.push(route);
-      }
-    }
-    const headers: RouteWithSrc[] = [];
-
-    for (const route of routes.headers) {
-      headers.push({
-        src: route.sourceRegex,
-        headers: route.headers,
-        continue: true,
-        has: route.has,
-        missing: route.missing,
-
-        ...(route.priority
-          ? {
-              important: true,
-            }
-          : {}),
-      });
-    }
+    const { priority: priorityRedirects, normal: redirects } =
+      extractRedirects(routing);
+    const headers = extractHeaders(routing);
+    const onMatchRoutes = extractOnMatchRoutes(routing);
 
     const dynamicRoutes: RouteWithSrc[] = [];
     let addedNextData404Route = false;
 
-    for (const route of routes.dynamicRoutes) {
+    for (const route of routing.dynamicRoutes) {
       // add route to ensure we 404 for non-existent _next/data
       // routes before trying page dynamic routes
       if (hasPagesDir && !hasMiddleware) {
@@ -535,19 +493,77 @@ const myAdapter: NextAdapter = {
       // RSC and prefetch request handling for App Router
       ...(hasAppDir
         ? [
-            // Full RSC request rewriting
+            {
+              src: path.posix.join(
+                '/',
+                config.basePath,
+                '/(?<path>.+?)(?:/)?$'
+              ),
+              dest: path.posix.join(
+                '/',
+                config.basePath,
+                `/$path${routing.rsc.prefetchSegmentDirSuffix}/$segmentPath${routing.rsc.prefetchSegmentSuffix}`
+              ),
+              has: [
+                {
+                  type: 'header' as const,
+                  key: routing.rsc.header,
+                  value: '1',
+                },
+                {
+                  type: 'header' as const,
+                  key: routing.rsc.prefetchHeader,
+                  value: '1',
+                },
+                {
+                  type: 'header' as const,
+                  key: routing.rsc.prefetchSegmentHeader,
+                  value: '/(?<segmentPath>.+)',
+                },
+              ],
+              continue: true,
+              override: true,
+            },
+            {
+              src: path.posix.join('^/', config.basePath, '/?$'),
+              dest: path.posix.join(
+                '/',
+                config.basePath,
+                `/index${routing.rsc.prefetchSegmentDirSuffix}/$segmentPath${routing.rsc.prefetchSegmentSuffix}`
+              ),
+              has: [
+                {
+                  type: 'header' as const,
+                  key: routing.rsc.header,
+                  value: '1',
+                },
+                {
+                  type: 'header' as const,
+                  key: routing.rsc.prefetchHeader,
+                  value: '1',
+                },
+                {
+                  type: 'header' as const,
+                  key: routing.rsc.prefetchSegmentHeader,
+                  value: '/(?<segmentPath>.+)',
+                },
+              ],
+              continue: true,
+              override: true,
+            },
+
             {
               src: `^${path.posix.join('/', config.basePath, '/?')}`,
               has: [
                 {
                   type: 'header' as const,
-                  key: 'rsc',
+                  key: routing.rsc.header,
                   value: '1',
                 },
               ],
               dest: path.posix.join('/', config.basePath, '/index.rsc'),
               headers: {
-                vary: 'RSC, Next-Router-State-Tree, Next-Router-Prefetch',
+                vary: routing.rsc.varyHeader,
               },
               continue: true,
               override: true,
@@ -561,13 +577,13 @@ const myAdapter: NextAdapter = {
               has: [
                 {
                   type: 'header' as const,
-                  key: 'rsc',
+                  key: routing.rsc.header,
                   value: '1',
                 },
               ],
               dest: path.posix.join('/', config.basePath, '/$1.rsc'),
               headers: {
-                vary: 'RSC, Next-Router-State-Tree, Next-Router-Prefetch',
+                vary: routing.rsc.varyHeader,
               },
               continue: true,
               override: true,
@@ -717,7 +733,10 @@ const myAdapter: NextAdapter = {
               check: true,
             },
             {
-              src: `^${path.posix.join('/', config.basePath)}/?(?:${config.i18n.locales
+              src: `^${path.posix.join(
+                '/',
+                config.basePath
+              )}/?(?:${config.i18n.locales
                 .map((locale) => escapeStringRegexp(locale))
                 .join('|')})/(.*)`,
               dest: `${path.posix.join('/', config.basePath, '/')}$1`,
@@ -732,9 +751,7 @@ const myAdapter: NextAdapter = {
         ? [
             {
               src: '^/(?<path>.+)(?<rscSuffix>\\.segments/.+\\.segment\\.rsc)(?:/)?$',
-              dest: `/$path${
-                shouldHandlePrefetchRsc ? '.prefetch.rsc' : '.rsc'
-              }`,
+              dest: `/$path.rsc`,
               check: true,
             },
           ]
@@ -791,23 +808,9 @@ const myAdapter: NextAdapter = {
 
       { handle: 'hit' },
 
-      // Before we handle static files we need to set proper caching headers
-      {
-        // This ensures we only match known emitted-by-Next.js files and not
-        // user-emitted files which may be missing a hash in their filename.
-        src: path.posix.join(
-          '/',
-          config.basePath || '',
-          `_next/static/(?:[^/]+/pages|pages|chunks|runtime|css|image|media|${escapedBuildId})/.+`
-        ),
-        // Next.js assets contain a hash or entropy in their filenames, so they
-        // are guaranteed to be unique and cacheable indefinitely.
-        headers: {
-          'cache-control': `public,max-age=${MAX_AGE_ONE_YEAR},immutable`,
-        },
-        continue: true,
-        important: true,
-      },
+      ...onMatchRoutes,
+
+      // add internal matched path header for function bundle mapping
       {
         src:
           config.basePath && config.basePath !== '/'
@@ -823,7 +826,7 @@ const myAdapter: NextAdapter = {
         src: path.posix.join(
           '/',
           config.basePath || '',
-          `/((?!index$|_error$|500$).*?)(?:/)?$`
+          `/((?!index$).*?)(?:/)?$`
         ),
         headers: {
           'x-matched-path': '/$1',

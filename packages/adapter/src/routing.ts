@@ -1,19 +1,19 @@
 import type { NextAdapter, NextConfig } from 'next';
 import type { RouteWithSrc } from '@vercel/routing-utils';
 
-type AdapterRoutes = Parameters<
+type AdapterRouting = Parameters<
   NonNullable<NextAdapter['onBuildComplete']>
->[0]['routes'];
+>[0]['routing'];
+
+type AdapterRoute = AdapterRouting['beforeFiles'][0];
 
 export function modifyWithRewriteHeaders(
   rewrites: RouteWithSrc[],
   {
     isAfterFilesRewrite = false,
-    shouldHandlePrefetchRsc,
     shouldHandleSegmentPrefetches,
   }: {
     isAfterFilesRewrite?: boolean;
-    shouldHandlePrefetchRsc?: boolean;
     shouldHandleSegmentPrefetches?: boolean;
   }
 ) {
@@ -69,9 +69,6 @@ export function modifyWithRewriteHeaders(
       // PPR should match .prefetch.rsc, .rsc
       // non-PPR should match .rsc
       const parts = ['\\.rsc'];
-      if (shouldHandlePrefetchRsc) {
-        parts.push('\\.prefetch\\.rsc');
-      }
       if (shouldHandleSegmentPrefetches) {
         parts.push('\\.segments/.+\\.segment\\.rsc');
       }
@@ -116,14 +113,33 @@ export function modifyWithRewriteHeaders(
   }
 }
 
-export function normalizeRewrites(rewrites: AdapterRoutes['rewrites']): {
+/**
+ * Check if a route is a rewrite (has destination but not a redirect status)
+ */
+function isRewriteRoute(route: AdapterRoute): boolean {
+  return Boolean(route.destination) && !isRedirectStatus(route.status);
+}
+
+/**
+ * Check if a status code is a redirect status
+ */
+function isRedirectStatus(status: number | undefined): boolean {
+  return status !== undefined && [301, 302, 303, 307, 308].includes(status);
+}
+
+/**
+ * Filter and normalize rewrite routes from a routing phase
+ */
+export function normalizeRewrites(routing: {
+  beforeFiles: AdapterRoute[];
+  afterFiles: AdapterRoute[];
+  fallback: AdapterRoute[];
+}): {
   beforeFiles: RouteWithSrc[];
   afterFiles: RouteWithSrc[];
   fallback: RouteWithSrc[];
 } {
-  const normalize = (
-    item: (typeof rewrites)['beforeFiles'][0]
-  ): RouteWithSrc => ({
+  const normalize = (item: AdapterRoute): RouteWithSrc => ({
     src: item.sourceRegex,
     dest: item.destination,
     has: item.has,
@@ -132,16 +148,89 @@ export function normalizeRewrites(rewrites: AdapterRoutes['rewrites']): {
   });
 
   return {
-    beforeFiles: rewrites.beforeFiles.map((item) => {
+    beforeFiles: routing.beforeFiles.filter(isRewriteRoute).map((item) => {
       const route = normalize(item);
       delete route.check;
       route.continue = true;
       route.override = true;
       return route;
     }),
-    afterFiles: rewrites.afterFiles.map(normalize),
-    fallback: rewrites.fallback.map(normalize),
+    afterFiles: routing.afterFiles.filter(isRewriteRoute).map(normalize),
+    fallback: routing.fallback.filter(isRewriteRoute).map(normalize),
   };
+}
+
+/**
+ * Extract redirect routes from routing phases
+ */
+export function extractRedirects(routing: {
+  beforeMiddleware: AdapterRoute[];
+  beforeFiles: AdapterRoute[];
+}): {
+  priority: RouteWithSrc[];
+  normal: RouteWithSrc[];
+} {
+  const priorityRedirects: RouteWithSrc[] = [];
+  const normalRedirects: RouteWithSrc[] = [];
+
+  const processRedirects = (routes: AdapterRoute[]) => {
+    for (const route of routes) {
+      if (!isRedirectStatus(route.status)) continue;
+
+      const vercelRoute: RouteWithSrc = {
+        src: route.sourceRegex,
+        headers: route.headers,
+        status: route.status,
+        has: route.has,
+        missing: route.missing,
+      };
+
+      if (route.priority) {
+        vercelRoute.continue = true;
+        priorityRedirects.push(vercelRoute);
+      } else {
+        normalRedirects.push(vercelRoute);
+      }
+    }
+  };
+
+  processRedirects(routing.beforeMiddleware);
+  processRedirects(routing.beforeFiles);
+
+  return { priority: priorityRedirects, normal: normalRedirects };
+}
+
+/**
+ * Extract header routes from routing phases
+ */
+export function extractHeaders(routing: {
+  beforeMiddleware: AdapterRoute[];
+  beforeFiles: AdapterRoute[];
+}): RouteWithSrc[] {
+  const headers: RouteWithSrc[] = [];
+
+  const processHeaders = (routes: AdapterRoute[]) => {
+    for (const route of routes) {
+      // Headers have headers but are not redirects
+      if (!route.headers || isRedirectStatus(route.status)) continue;
+      // Skip if this is a rewrite (has destination)
+      if (route.destination) continue;
+
+      headers.push({
+        src: route.sourceRegex,
+        headers: route.headers,
+        continue: true,
+        has: route.has,
+        missing: route.missing,
+        ...(route.priority ? { important: true } : {}),
+      });
+    }
+  };
+
+  processHeaders(routing.beforeMiddleware);
+  processHeaders(routing.beforeFiles);
+
+  return headers;
 }
 
 export function normalizeNextDataRoutes(
@@ -216,6 +305,23 @@ export function normalizeNextDataRoutes(
       continue: true,
     },
   ];
+}
+
+/**
+ * Extract onMatch routes for the hit handle phase
+ */
+export function extractOnMatchRoutes(routing: {
+  onMatch: AdapterRoute[];
+}): RouteWithSrc[] {
+  return routing.onMatch.map((route) => ({
+    src: route.sourceRegex,
+    ...(route.destination ? { dest: route.destination } : {}),
+    ...(route.headers ? { headers: route.headers } : {}),
+    ...(route.has ? { has: route.has } : {}),
+    ...(route.missing ? { missing: route.missing } : {}),
+    continue: true,
+    important: true,
+  }));
 }
 
 export function denormalizeNextDataRoutes(

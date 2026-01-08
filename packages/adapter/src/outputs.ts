@@ -15,6 +15,20 @@ import { AdapterOutputType } from 'next/dist/shared/lib/constants';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { INTERNAL_PAGES } from './constants';
 
+/**
+ * Type guard to check if a prerender fallback has a filePath.
+ * The fallback can be one of two types:
+ * 1. With filePath (and optional postponedState)
+ * 2. With only postponedState (no filePath)
+ */
+function fallbackHasFilePath(
+  fallback: AdapterOutput['PRERENDER']['fallback']
+): fallback is NonNullable<AdapterOutput['PRERENDER']['fallback']> & {
+  filePath: string;
+} {
+  return fallback !== undefined && 'filePath' in fallback;
+}
+
 const copy = async (src: string, dest: string) => {
   await fse.remove(dest);
   await fse.copy(src, dest);
@@ -36,6 +50,16 @@ const writeIfNotExists = async (filePath: string, content: string) => {
   writeLock.set(filePath, writePromise);
   return writePromise;
 };
+
+function normalizeIndexPathname(pathname: string, config: NextConfig) {
+  if (pathname === config.basePath && config.basePath !== '/') {
+    return path.posix.join(config.basePath, '/index');
+  }
+  if (pathname === '/') {
+    return '/index';
+  }
+  return pathname;
+}
 
 export async function handlePublicFiles(
   publicFolder: string,
@@ -185,7 +209,7 @@ export async function handleNodeOutputs(
 
       const functionDir = path.join(
         functionsDir,
-        `${output.pathname === '/' ? '/index' : output.pathname}.func`
+        `${normalizeIndexPathname(output.pathname, config)}.func`
       );
       await fs.mkdir(functionDir, { recursive: true });
 
@@ -280,9 +304,11 @@ export async function handleNodeOutputs(
 export async function handlePrerenderOutputs(
   prerenderOutputs: Array<AdapterOutput['PRERENDER']>,
   {
+    config,
     vercelOutputDir,
     nodeOutputsParentMap,
   }: {
+    config: NextConfig;
     vercelOutputDir: string;
     nodeOutputsParentMap: Map<string, FuncOutputs[0]>;
   }
@@ -298,16 +324,18 @@ export async function handlePrerenderOutputs(
       try {
         const prerenderConfigPath = path.join(
           functionsDir,
-          `${
-            output.pathname === '/' ? '/index' : output.pathname
-          }.prerender-config.json`
+          `${normalizeIndexPathname(
+            output.pathname,
+            config
+          )}.prerender-config.json`
         );
-        const prerenderFallbackPath = output.fallback?.filePath
+        const prerenderFallbackPath = fallbackHasFilePath(output.fallback)
           ? path.join(
               functionsDir,
-              `${
-                output.pathname === '/' ? '/index' : output.pathname
-              }.prerender-fallback${path.extname(output.fallback.filePath)}`
+              `${normalizeIndexPathname(
+                output.pathname,
+                config
+              )}.prerender-fallback${path.extname(output.fallback.filePath)}`
             )
           : undefined;
 
@@ -327,15 +355,11 @@ export async function handlePrerenderOutputs(
 
         const parentFunctionDir = path.join(
           functionsDir,
-          `${
-            parentNodeOutput.pathname === '/'
-              ? '/index'
-              : parentNodeOutput.pathname
-          }.func`
+          `${normalizeIndexPathname(parentNodeOutput.pathname, config)}.func`
         );
         const prerenderFunctionDir = path.join(
           functionsDir,
-          `${output.pathname === '/' ? '/index' : output.pathname}.func`
+          `${normalizeIndexPathname(output.pathname, config)}.func`
         );
 
         if (output.pathname !== parentNodeOutput.pathname) {
@@ -365,7 +389,7 @@ export async function handlePrerenderOutputs(
 
         if (
           output.fallback?.postponedState &&
-          output.fallback.filePath &&
+          fallbackHasFilePath(output.fallback) &&
           prerenderFallbackPath
         ) {
           const fallbackHtml = await fs.readFile(
@@ -426,7 +450,7 @@ export async function handlePrerenderOutputs(
         );
 
         if (
-          output.fallback?.filePath &&
+          fallbackHasFilePath(output.fallback) &&
           prerenderFallbackPath &&
           // if postponed state is present we write the fallback file above
           !output.fallback.postponedState
@@ -484,7 +508,7 @@ export async function handleEdgeOutputs(
 
       const functionDir = path.join(
         functionsDir,
-        `${output.pathname === '/' ? 'index' : output.pathname}.func`
+        `${normalizeIndexPathname(output.pathname, config)}.func`
       );
       await fs.mkdir(functionDir, { recursive: true });
 

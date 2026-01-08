@@ -24,13 +24,13 @@
     "convert-source-map": "1.8.0",
     "esbuild": "0.25.10",
     "fs-extra": "11.2.0",
-    "next": "16.0.9",
+    "next": "16.1.1-canary.18",
     "picomatch": "4.0.1",
     "source-map": "0.7.4",
     "webpack-sources": "3.2.3"
   },
   "peerDependencies": {
-    "next": "*"
+    "next": ">= 16.1.1-canary.18"
   },
   "engines": {
     "node": ">= 20.6.0"

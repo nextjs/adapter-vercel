@@ -10,7 +10,7 @@ await build({
   write: true,
   format: 'cjs',
   outdir: path.join(process.cwd(), 'dist'),
-  external: ['./node-handler'],
+  external: ['./node-handler', '@vercel/build-utils'],
 });
 
 await build({
