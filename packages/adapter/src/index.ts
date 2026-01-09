@@ -1,19 +1,7 @@
-import path from 'node:path';
 import fs from 'node:fs/promises';
-import type { NextAdapter } from 'next';
-import type { VercelConfig } from './types';
+import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
-import { escapeStringRegexp, getImagesConfig } from './utils';
-import {
-  denormalizeNextDataRoutes,
-  extractHeaders,
-  extractOnMatchRoutes,
-  extractRedirects,
-  modifyWithRewriteHeaders,
-  normalizeNextDataRoutes,
-  normalizeRewrites,
-} from './routing';
-
+import type { NextAdapter } from 'next';
 import {
   type FuncOutputs,
   handleEdgeOutputs,
@@ -23,6 +11,17 @@ import {
   handlePublicFiles,
   handleStaticOutputs,
 } from './outputs';
+import {
+  denormalizeNextDataRoutes,
+  extractHeaders,
+  extractOnMatchRoutes,
+  extractRedirects,
+  modifyWithRewriteHeaders,
+  normalizeNextDataRoutes,
+  normalizeRewrites,
+} from './routing';
+import type { VercelConfig } from './types';
+import { escapeStringRegexp, getImagesConfig } from './utils';
 
 const myAdapter: NextAdapter = {
   name: 'Vercel',

@@ -1,5 +1,5 @@
-import type { NextAdapter, NextConfig } from 'next';
 import type { RouteWithSrc } from '@vercel/routing-utils';
+import type { NextAdapter, NextConfig } from 'next';
 
 type AdapterRouting = Parameters<
   NonNullable<NextAdapter['onBuildComplete']>

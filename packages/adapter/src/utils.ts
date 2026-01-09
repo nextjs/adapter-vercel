@@ -1,5 +1,5 @@
-import { makeRe } from 'picomatch';
 import type { NextConfig } from 'next';
+import { makeRe } from 'picomatch';
 
 export function getImagesConfig(config: NextConfig) {
   const images = config.images || {};

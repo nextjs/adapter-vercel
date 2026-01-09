@@ -1,19 +1,19 @@
-import path from 'node:path';
 import fs from 'node:fs/promises';
-import fse from 'fs-extra';
-import { Sema } from 'async-sema';
-import type { AdapterOutput, NextConfig } from 'next';
-import type { VercelConfig } from './types';
-import type { RouteWithSrc } from '@vercel/routing-utils';
-import type { NextjsParams } from './get-edge-function';
-import { getHandlerSource } from './node-handler';
+import path from 'node:path';
 import {
   getLambdaOptionsFromFunction,
   getNodeVersion,
 } from '@vercel/build-utils';
+import type { RouteWithSrc } from '@vercel/routing-utils';
+import { Sema } from 'async-sema';
+import fse from 'fs-extra';
+import type { AdapterOutput, NextConfig } from 'next';
 import { AdapterOutputType } from 'next/dist/shared/lib/constants';
-import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { INTERNAL_PAGES } from './constants';
+import type { NextjsParams } from './get-edge-function';
+import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
+import { getHandlerSource } from './node-handler';
+import type { VercelConfig } from './types';
 
 /**
  * Type guard to check if a prerender fallback has a filePath.

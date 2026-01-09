@@ -12,9 +12,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - run: pnpm install
-      - name: Check formatting
+      - name: Check formatting and lint
         run: pnpm run format
-      - name: Verify no formatting changes
+      - name: Verify no changes
         run: git diff --exit-code
       - name: Run typecheck
         run: pnpm run typecheck
