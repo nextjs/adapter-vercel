@@ -4,5 +4,5 @@
   "initialVersions": {
     "@next-community/adapter-vercel": "0.0.0"
   },
-  "changesets": []
+  "changesets": ["shaky-mammals-kick"]
 }
