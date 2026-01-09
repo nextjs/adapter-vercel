@@ -1,0 +1,31 @@
+name: Lint
+
+on:
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install
+      - name: Check formatting
+        run: pnpm run format
+      - name: Verify no formatting changes
+        run: git diff --exit-code
+      - name: Run typecheck
+        run: pnpm run typecheck
+
+  enforce-changeset:
+    name: Enforce Changeset
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.title != 'chore: version packages'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install
+      - run: pnpm exec changeset status --since=origin/main
