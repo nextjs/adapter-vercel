@@ -20,7 +20,7 @@
     "typescript": "^5.8.3"
   },
   "lint-staged": {
-    "**/*": "biome format --write"
+    "*.{js,ts,jsx,tsx,json,jsonc}": "biome format --write"
   },
   "license": "MIT",
   "engines": {
