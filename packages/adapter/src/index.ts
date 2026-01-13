@@ -90,11 +90,10 @@ const myAdapter: NextAdapter = {
       ...outputs.pages,
       ...outputs.pagesApi,
     ]) {
-      if (output.pathname.endsWith('/_not-found')) {
-        hasNotFoundOutput = true;
-      }
       if (output.pathname.endsWith('/404')) {
         has404Output = true;
+      } else if (output.pathname.endsWith('/_not-found')) {
+        hasNotFoundOutput = true;
       }
       if (output.pathname.endsWith('/500')) {
         has500Output = true;
@@ -193,8 +192,11 @@ const myAdapter: NextAdapter = {
     // handle prerenders (must come after handle node outputs)
     await handlePrerenderOutputs(outputs.prerenders, {
       config,
+      hasAppEntries: outputs.appPages.length > 0,
+      varyHeader: routing.rsc.varyHeader,
       vercelOutputDir,
       nodeOutputsParentMap,
+      rscContentType: routing.rsc.contentTypeHeader,
     });
     const shouldHandleSegmentPrefetches = outputs.appPages.length > 0;
 

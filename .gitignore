@@ -26,3 +26,5 @@ target
 .next
 test/**/*/package-lock.json
 test/**/*/pnpm-lock.yaml
+
+packages/adapter/*.tgz

@@ -24,7 +24,7 @@ export const getHandlerSource = (ctx: {
   
   process.chdir(__dirname);
   
-  module.exports = (${
+  const _n_handler = (${
     ctx.isMiddleware
       ? () => {
           const path = require('path') as typeof import('path');
@@ -94,10 +94,12 @@ export const getHandlerSource = (ctx: {
           ) as {
             dynamicRoutes: Array<{
               regex: string;
+              namedRegex?: string;
               page: string;
             }>;
             staticRoutes: Array<{
               regex: string;
+              namedRegex?: string;
               page: string;
             }>;
             i18n?: {
@@ -106,15 +108,30 @@ export const getHandlerSource = (ctx: {
           };
           const hydrateRoutesManifestItem = (item: {
             regex: string;
+            namedRegex?: string;
             page: string;
           }) => {
             return {
               ...item,
-              regex: new RegExp(item.regex),
+              namedRegex: new RegExp(item.namedRegex || item.regex),
             };
           };
+
+          const matchOperatorsRegex = /[|\\{}()[\]^$+*?.-]/g;
+
+          function escapeStringRegexp(str: string): string {
+            return str.replace(matchOperatorsRegex, '\\$&');
+          }
+
           const dynamicRoutes = dynamicRoutesRaw.map(hydrateRoutesManifestItem);
-          const staticRoutes = staticRoutesRaw.map(hydrateRoutesManifestItem);
+          const staticRoutes = staticRoutesRaw.map((route) => {
+            return {
+              ...route,
+              namedRegex: new RegExp(
+                '^' + escapeStringRegexp(route.page) + '$'
+              ),
+            };
+          });
 
           // maps un-normalized to normalized app path
           // e.g. /hello/(foo)/page -> /hello
@@ -190,10 +207,7 @@ export const getHandlerSource = (ctx: {
             return pathname;
           }
 
-          function matchUrlToPage(
-            req: IncomingMessage,
-            urlPathname: string
-          ): {
+          function matchUrlToPage(urlPathname: string): {
             matchedPathname: string;
             locale?: string;
           } {
@@ -219,7 +233,8 @@ export const getHandlerSource = (ctx: {
 
             // check all routes considering fallback false entries
             for (const route of [...staticRoutes, ...dynamicRoutes]) {
-              if (route.regex.test(urlPathname)) {
+              console.log('testing', route.namedRegex, 'against', urlPathname);
+              if (route.namedRegex.test(urlPathname)) {
                 const fallbackFalseMap = prerenderFallbackFalseMap[route.page];
 
                 // if this matches a dynamic route that uses fallback: false
@@ -354,7 +369,8 @@ export const getHandlerSource = (ctx: {
 
           return async function handler(
             req: import('http').IncomingMessage,
-            res: import('http').ServerResponse
+            res: import('http').ServerResponse,
+            internalMetadata: any
           ) {
             try {
               const parsedUrl = new URL(req.url || '/', 'http://n');
@@ -364,10 +380,8 @@ export const getHandlerSource = (ctx: {
                 console.log('no x-matched-path', { url: req.url });
                 urlPathname = parsedUrl.pathname || '/';
               }
-              const { matchedPathname: page, locale } = matchUrlToPage(
-                req,
-                urlPathname
-              );
+              const { matchedPathname: page, locale } =
+                matchUrlToPage(urlPathname);
               const isAppDir = page.match(/\/(page|route)$/);
 
               console.log('invoking handler', {
@@ -389,6 +403,7 @@ export const getHandlerSource = (ctx: {
               await mod.handler(req, res, {
                 waitUntil: getRequestContext().waitUntil,
                 requestMeta: {
+                  ...internalMetadata,
                   minimalMode: true,
                   // we use '.' for relative project dir since we process.chdir
                   // to the same directory as the handler file so everything is
@@ -406,7 +421,22 @@ export const getHandlerSource = (ctx: {
             }
           };
         }).toString()
-  })()`
+  })()
+  
+  module.exports = _n_handler
+  
+  ${
+    ctx.isMiddleware
+      ? ''
+      : `
+    module.exports.getRequestHandlerWithMetadata = (metadata) => {
+      console.log('using getRequestHandlerWithMetadata', metadata)
+      return (req, res) => _n_handler(req, res, metadata)
+    }
+  `
+  }
+  
+  `
     .replaceAll(
       'process.env.__PRIVATE_RELATIVE_DIST_DIR',
       `"${ctx.projectRelativeDistDir}"`

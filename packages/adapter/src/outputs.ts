@@ -26,7 +26,11 @@ function fallbackHasFilePath(
 ): fallback is NonNullable<AdapterOutput['PRERENDER']['fallback']> & {
   filePath: string;
 } {
-  return fallback !== undefined && 'filePath' in fallback;
+  return (
+    fallback !== undefined &&
+    'filePath' in fallback &&
+    typeof fallback.filePath === 'string'
+  );
 }
 
 const copy = async (src: string, dest: string) => {
@@ -305,12 +309,18 @@ export async function handlePrerenderOutputs(
   prerenderOutputs: Array<AdapterOutput['PRERENDER']>,
   {
     config,
+    hasAppEntries,
     vercelOutputDir,
     nodeOutputsParentMap,
+    rscContentType,
+    varyHeader,
   }: {
+    hasAppEntries?: boolean;
     config: NextConfig;
     vercelOutputDir: string;
     nodeOutputsParentMap: Map<string, FuncOutputs[0]>;
+    rscContentType: string;
+    varyHeader: string;
   }
 ) {
   const prerenderParentIds = new Set<string>();
@@ -337,7 +347,20 @@ export async function handlePrerenderOutputs(
                 config
               )}.prerender-fallback${path.extname(output.fallback.filePath)}`
             )
-          : undefined;
+          : // Use the fallback value for the RSC route if the route doesn't
+            // vary based on the route parameters and there's an actual postponed
+            // state to fallback to.
+            output.fallback?.postponedState &&
+              output.config.allowQuery &&
+              output.config.allowQuery.length === 0
+            ? path.join(
+                functionsDir,
+                `${normalizeIndexPathname(
+                  output.pathname,
+                  config
+                )}.prerender-fallback${path.extname(output.pathname)}`
+              )
+            : undefined;
 
         const { parentOutputId } = output;
         prerenderParentIds.add(parentOutputId);
@@ -384,24 +407,47 @@ export async function handlePrerenderOutputs(
 
         const initialHeaders = Object.assign(
           {},
+          hasAppEntries ? { vary: varyHeader } : {},
           output.fallback?.initialHeaders
         );
+        const isRscOutput = path.extname(output.pathname) === '.rsc';
 
         if (
           output.fallback?.postponedState &&
           fallbackHasFilePath(output.fallback) &&
           prerenderFallbackPath
         ) {
-          const fallbackHtml = await fs.readFile(
+          const fallbackContent = await fs.readFile(
             output.fallback.filePath,
             'utf8'
           );
           await writeIfNotExists(
             prerenderFallbackPath,
-            `${output.fallback.postponedState}${fallbackHtml}`
+            `${output.fallback.postponedState}${fallbackContent}`
+          );
+          const originContentType = isRscOutput
+            ? rscContentType
+            : 'text/html; charset=utf-8';
+
+          initialHeaders['content-type'] =
+            `application/x-nextjs-pre-render; state-length=${
+              output.fallback.postponedState.length
+            }; origin=${JSON.stringify(originContentType)}`;
+        } else if (
+          output.fallback?.postponedState &&
+          !fallbackHasFilePath(output.fallback) &&
+          prerenderFallbackPath
+        ) {
+          // When there's postponedState but no filePath (e.g. RSC routes),
+          // write the postponed state directly as the fallback
+          await writeIfNotExists(
+            prerenderFallbackPath,
+            output.fallback.postponedState
           );
           initialHeaders['content-type'] =
-            `application/x-nextjs-pre-render; state-length=${output.fallback.postponedState.length}; origin="text/html; charset=utf-8"`;
+            `application/x-nextjs-pre-render; state-length=${
+              output.fallback.postponedState.length
+            }; origin=${JSON.stringify(rscContentType)}`;
         }
 
         await fs.mkdir(path.dirname(prerenderConfigPath), { recursive: true });
@@ -437,12 +483,15 @@ export async function handlePrerenderOutputs(
                     path.dirname(prerenderConfigPath),
                     prerenderFallbackPath
                   )
-                : undefined,
+                : null,
 
               chain: output.pprChain
                 ? {
                     ...output.pprChain,
-                    outputPath: path.posix.join(parentNodeOutput.pathname),
+                    outputPath: path.posix.join(
+                      './',
+                      `${normalizeIndexPathname(parentNodeOutput.pathname, config)}${isRscOutput ? '.rsc' : ''}`
+                    ),
                   }
                 : undefined,
             }
@@ -452,11 +501,15 @@ export async function handlePrerenderOutputs(
         if (
           fallbackHasFilePath(output.fallback) &&
           prerenderFallbackPath &&
-          // if postponed state is present we write the fallback file above
+          // if postponed state is not present we write the fallback file above
           !output.fallback.postponedState
         ) {
           // we use link to avoid copying files un-necessarily
           await copy(output.fallback.filePath, prerenderFallbackPath);
+        }
+
+        if (output.fallback && Object.keys(initialHeaders || {}).length === 0) {
+          throw new Error('empty initialHeaders');
         }
       } catch (err) {
         console.error(`Failed to handle output:`, output);
