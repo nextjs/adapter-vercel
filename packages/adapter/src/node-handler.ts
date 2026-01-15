@@ -328,17 +328,34 @@ export const getHandlerSource = (ctx: {
                       }
                     ) => Promise<void>;
                   };
+
               try {
-                mod = await require(
-                  './' +
-                    path.posix.join(
-                      relativeDistDir,
-                      'server',
-                      'pages',
-                      `404.js`
-                    )
-                );
-                console.log('using 404.js for render404');
+                try {
+                  mod = await require(
+                    './' +
+                      path.posix.join(
+                        relativeDistDir,
+                        'server',
+                        'app',
+                        `_not-found`,
+                        'page.js'
+                      )
+                  );
+                  console.log('using _not-found.js for render404');
+                } catch {}
+
+                if (!mod) {
+                  mod = await require(
+                    './' +
+                      path.posix.join(
+                        relativeDistDir,
+                        'server',
+                        'pages',
+                        `404.js`
+                      )
+                  );
+                  console.log('using 404.js for render404');
+                }
               } catch (_) {
                 mod = await require(
                   './' +
