@@ -13,6 +13,7 @@ export const getHandlerSource = (ctx: {
   nextConfig?: NextConfig;
 }) =>
   `
+  process.env.NODE_ENV = 'production';
   require('next/dist/server/node-environment');
   require('next/dist/server/node-polyfill-crypto');
   
@@ -234,7 +235,10 @@ export const getHandlerSource = (ctx: {
             // check all routes considering fallback false entries
             for (const route of [...staticRoutes, ...dynamicRoutes]) {
               console.log('testing', route.namedRegex, 'against', urlPathname);
-              if (route.namedRegex.test(urlPathname)) {
+              if (
+                route.namedRegex.test(urlPathname) ||
+                (urlPathname === '/index' && route.namedRegex.test('/'))
+              ) {
                 const fallbackFalseMap = prerenderFallbackFalseMap[route.page];
 
                 // if this matches a dynamic route that uses fallback: false

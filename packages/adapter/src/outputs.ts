@@ -490,7 +490,10 @@ export async function handlePrerenderOutputs(
                     ...output.pprChain,
                     outputPath: path.posix.join(
                       './',
-                      `${normalizeIndexPathname(parentNodeOutput.pathname, config)}${isRscOutput ? '.rsc' : ''}`
+                      `${normalizeIndexPathname(
+                        parentNodeOutput.pathname,
+                        config
+                      )}${isRscOutput ? '.rsc' : ''}`
                     ),
                   }
                 : undefined,
@@ -574,13 +577,10 @@ export async function handleEdgeOutputs(
         if (jsRegex.test(fsPath)) {
           files[relPath] = path.posix.relative(repoRoot, fsPath);
         } else {
-          const assetPath = path.posix.join('assets', relPath);
-
-          files[assetPath] = path.posix.relative(repoRoot, fsPath);
-
+          files[`assets/${relPath}`] = path.posix.relative(repoRoot, fsPath);
           nonJsAssetFiles.push({
             name: relPath,
-            path: assetPath,
+            path: `assets/${relPath}`,
           });
         }
       }
