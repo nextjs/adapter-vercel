@@ -593,10 +593,10 @@ export async function handleEdgeOutputs(
       // Get file paths for the edge function source generation
 
       const filePaths = [
-        path.posix.relative(projectDir, output.filePath),
         ...Object.values(output.assets)
           .map((item) => path.posix.relative(projectDir, item))
           .filter((item) => jsRegex.test(item)),
+        path.posix.relative(projectDir, output.filePath),
       ];
 
       // Create Next.js parameters for the edge function
