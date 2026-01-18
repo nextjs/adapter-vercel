@@ -211,6 +211,7 @@ export const getHandlerSource = (ctx: {
           function matchUrlToPage(urlPathname: string): {
             matchedPathname: string;
             locale?: string;
+            matches?: RegExpMatchArray | null;
           } {
             // normalize first
             urlPathname = normalizeDataPath(urlPathname);
@@ -232,11 +233,26 @@ export const getHandlerSource = (ctx: {
 
             urlPathname = urlPathname.replace(/\/$/, '') || '/';
 
+            const combinedRoutes = [...staticRoutes, ...dynamicRoutes];
+
+            // attempt matching literal page first
+            for (const route of combinedRoutes) {
+              if (route.page === urlPathname) {
+                console.log('matched direct page', route);
+                return {
+                  matchedPathname:
+                    inversedAppRoutesManifest[route.page] || route.page,
+                  locale: normalizeResult.locale,
+                };
+              }
+            }
+
             // check all routes considering fallback false entries
             for (const route of [...staticRoutes, ...dynamicRoutes]) {
               console.log('testing', route.namedRegex, 'against', urlPathname);
+              const matches = urlPathname.match(route.namedRegex);
               if (
-                route.namedRegex.test(urlPathname) ||
+                matches ||
                 (urlPathname === '/index' && route.namedRegex.test('/'))
               ) {
                 const fallbackFalseMap = prerenderFallbackFalseMap[route.page];
@@ -260,11 +276,12 @@ export const getHandlerSource = (ctx: {
                   continue;
                 }
 
-                console.log('matched route', route, urlPathname);
+                console.log('matched route', route, urlPathname, matches);
                 return {
                   matchedPathname:
                     inversedAppRoutesManifest[route.page] || route.page,
                   locale: normalizeResult.locale,
+                  matches,
                 };
               }
             }
@@ -401,9 +418,28 @@ export const getHandlerSource = (ctx: {
                 console.log('no x-matched-path', { url: req.url });
                 urlPathname = parsedUrl.pathname || '/';
               }
-              const { matchedPathname: page, locale } =
-                matchUrlToPage(urlPathname);
+              const {
+                matchedPathname: page,
+                locale,
+                matches,
+              } = matchUrlToPage(urlPathname);
               const isAppDir = page.match(/\/(page|route)$/);
+              let addedMatchesToUrl = false;
+
+              // apply missing matches to query if urlPathname is not
+              // literal dynamic route. this is mostly to parse params
+              // for PPR resume from a rewrite
+              for (const matchKey in matches?.groups || {}) {
+                const matchValue = matches?.groups?.[matchKey];
+                if (!parsedUrl.searchParams.has(matchKey) && matchValue) {
+                  parsedUrl.searchParams.set(matchKey, matchValue);
+                  addedMatchesToUrl = true;
+                }
+              }
+              if (addedMatchesToUrl) {
+                console.log('updating URL with new matches', matches, req.url);
+                req.url = `${parsedUrl.pathname}${parsedUrl.searchParams.size > 0 ? '?' : ''}${parsedUrl.searchParams.toString()}`;
+              }
 
               console.log('invoking handler', {
                 page,

@@ -490,10 +490,7 @@ export async function handlePrerenderOutputs(
                     ...output.pprChain,
                     outputPath: path.posix.join(
                       './',
-                      `${normalizeIndexPathname(
-                        parentNodeOutput.pathname,
-                        config
-                      )}${isRscOutput ? '.rsc' : ''}`
+                      `${normalizeIndexPathname(output.pathname, config)}`
                     ),
                   }
                 : undefined,
