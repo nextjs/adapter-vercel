@@ -68,6 +68,41 @@ export const getHandlerSource = (ctx: {
           };
         }
       : (() => {
+          const REACT_POSTPONE_TYPE = Symbol.for('react.postpone');
+
+          function isPostpone(error: any) {
+            return (
+              typeof error === 'object' &&
+              error !== null &&
+              error.$$typeof === REACT_POSTPONE_TYPE
+            );
+          }
+          process.removeAllListeners('uncaughtException');
+          process.removeAllListeners('unhandledRejection');
+
+          process.on('unhandledRejection', (reason: unknown) => {
+            if (isPostpone(reason)) {
+              return;
+            }
+            console.error(reason);
+          });
+
+          process.on('rejectionHandled', () => {
+            // TODO: See note in the unhandledRejection handler above. In the future,
+            // we may use the "rejectionHandled" event to de-queue an error from
+            // being logged.
+          });
+
+          // Unhandled exceptions are errors triggered by non-async functions, so this
+          // is unrelated to the late-awaiting pattern. However, for similar reasons,
+          // we still shouldn't crash the process. Just log it.
+          process.on('uncaughtException', (reason: unknown) => {
+            if (isPostpone(reason)) {
+              return;
+            }
+            console.error(reason);
+          });
+
           const path = require('path') as typeof import('path');
           const relativeDistDir = process.env
             .__PRIVATE_RELATIVE_DIST_DIR as string;

@@ -55,6 +55,16 @@ export function modifyWithRewriteHeaders(
         if (index !== -1) {
           query = query.substring(0, index);
         }
+
+        // Filter out internal Next.js query params (nxtP* and nxtI*)
+        query =
+          query
+            .split('&')
+            .filter((part) => {
+              const key = part.split('=')[0];
+              return !key.startsWith('nxtP') && !key.startsWith('nxtI');
+            })
+            .join('&') || null;
       } else {
         // If there's a hash, we should remove it.
         index = pathname.indexOf('#');
