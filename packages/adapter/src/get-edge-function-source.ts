@@ -1,15 +1,9 @@
 import { readFile } from 'fs-extra';
 import { join } from 'path';
-import { promisify } from 'util';
 import { ConcatSource, type Source } from 'webpack-sources';
-import zlib from 'zlib';
-import { EDGE_FUNCTION_SIZE_LIMIT } from './constants';
 import { template } from './edge-function-template';
 import type { NextjsParams } from './get-edge-function';
-import { prettyBytes } from './pretty-bytes';
 import { fileToSource, raw, sourcemapped } from './sourcemapped';
-
-const gzip = promisify<zlib.InputType, Buffer>(zlib.gzip);
 
 /**
  * Allows to get the source code for a Next.js Edge Function where the output
@@ -36,15 +30,6 @@ export async function getNextjsEdgeFunctionSource(
     chunks.add(await fileToSource(content, filePath, fullFilePath));
   }
 
-  const text = chunks.source();
-
-  /**
-   * We validate at this point because we want to verify against user code.
-   * It should not count the Worker wrapper nor the Next.js wrapper.
-   */
-  const wasmFiles = Object.values(wasm || {});
-  await validateSize(text, wasmFiles);
-
   // Wrap to fake module.exports
   const getPageMatchCode = `(function () {
     const module = { exports: {}, loaded: false };
@@ -69,21 +54,4 @@ function getWasmImportStatements(wasm: Record<string, string>) {
       return `const ${name} = require(${JSON.stringify(pathname)});`;
     })
     .join('\n');
-}
-
-async function validateSize(script: string, wasmFiles: string[]) {
-  const buffers = [Buffer.from(script, 'utf8')];
-  for (const filePath of wasmFiles) {
-    buffers.push(await readFile(filePath));
-  }
-  const content = Buffer.concat(buffers);
-
-  const gzipped = await gzip(content);
-  if (gzipped.length > EDGE_FUNCTION_SIZE_LIMIT) {
-    throw new Error(
-      `Exceeds maximum edge function size: ${prettyBytes(
-        gzipped.length
-      )} / ${prettyBytes(EDGE_FUNCTION_SIZE_LIMIT)}`
-    );
-  }
 }
