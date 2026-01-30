@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.3
+
+### Patch Changes
+
+- [#15](https://github.com/nextjs/adapter-vercel/pull/15) [`40d87c2`](https://github.com/nextjs/adapter-vercel/commit/40d87c216cdcf4d9bb78bff77541a9500550ab59) Thanks [@ijjk](https://github.com/ijjk)! - Leverage setup-node-env instead of internal paths
+
 ## 0.0.1-beta.2
 
 ### Patch Changes

@@ -4,5 +4,10 @@
   "initialVersions": {
     "@next-community/adapter-vercel": "0.0.0"
   },
-  "changesets": ["early-foxes-ring", "shaky-mammals-kick", "social-files-tie"]
+  "changesets": [
+    "early-foxes-ring",
+    "frank-apes-end",
+    "shaky-mammals-kick",
+    "social-files-tie"
+  ]
 }
