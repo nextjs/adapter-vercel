@@ -14,16 +14,9 @@ export const getHandlerSource = (ctx: {
 }) =>
   `
   process.env.NODE_ENV = 'production';
-  require('next/dist/server/node-environment');
-  require('next/dist/server/node-polyfill-crypto');
-  
-  try {
-    // this can fail to install if styled-jsx is not discoverable
-    // but this is tolerable as the require-hook is handling edge cases
-    require('next/dist/server/require-hook');
-  } catch (_) {}
-  
   process.chdir(__dirname);
+  
+  require('next/setup-node-env')
   
   const _n_handler = (${
     ctx.isMiddleware
@@ -405,6 +398,18 @@ export const getHandlerSource = (ctx: {
             },
           };
 
+          function fixMojibake(input: string): string {
+            // Convert each character's char code to a byte
+            const bytes = new Uint8Array(input.length);
+            for (let i = 0; i < input.length; i++) {
+              bytes[i] = input.charCodeAt(i);
+            }
+
+            // Decode the bytes as proper UTF-8
+            const decoder = new TextDecoder('utf-8');
+            return decoder.decode(bytes);
+          }
+
           return async function handler(
             req: import('http').IncomingMessage,
             res: import('http').ServerResponse,
@@ -412,7 +417,10 @@ export const getHandlerSource = (ctx: {
           ) {
             try {
               const parsedUrl = new URL(req.url || '/', 'http://n');
-              let urlPathname = req.headers['x-matched-path'];
+              let urlPathname =
+                typeof req.headers['x-matched-path'] === 'string'
+                  ? fixMojibake(req.headers['x-matched-path'])
+                  : undefined;
 
               if (typeof urlPathname !== 'string') {
                 console.log('no x-matched-path', { url: req.url });
