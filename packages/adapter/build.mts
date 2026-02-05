@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { build } from 'esbuild';
 
@@ -22,3 +24,10 @@ await build({
   format: 'cjs',
   outdir: path.join(process.cwd(), 'dist'),
 });
+
+await fs.copyFile(
+  createRequire(path.join(process.cwd(), 'packages/adapter')).resolve(
+    'source-map/lib/mappings.wasm'
+  ),
+  path.join(process.cwd(), 'dist', 'mappings.wasm')
+);
