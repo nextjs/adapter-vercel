@@ -8,6 +8,7 @@ import type { RouteWithSrc } from '@vercel/routing-utils';
 import { Sema } from 'async-sema';
 import fse from 'fs-extra';
 import type { AdapterOutput, NextConfig } from 'next';
+import type { RoutesManifest } from 'next/dist/build';
 import { AdapterOutputType } from 'next/dist/shared/lib/constants';
 import { INTERNAL_PAGES } from './constants';
 import type { NextjsParams } from './get-edge-function';
@@ -161,6 +162,28 @@ export type FuncOutputs = Array<
   | AdapterOutput['MIDDLEWARE']
 >;
 
+/**
+ * Filter `headers` and `deploymentId` out of the routes-manifest.json for deterministic functions.
+ * In minimal mode, they aren't used (the adapter reads them and generates the config.json for
+ * Vercel).
+ */
+async function writeDeterministicRoutesManifest(
+  projectDir: string,
+  relativeManifestPath: string,
+  functionDir: string
+) {
+  const manifest: RoutesManifest = require(
+    path.join(projectDir, relativeManifestPath)
+  );
+  manifest.headers = [];
+  // @ts-expect-error only recently added
+  delete manifest.deploymentId;
+
+  const outputManifestPath = path.join(functionDir, relativeManifestPath);
+  await fs.mkdir(path.dirname(outputManifestPath), { recursive: true });
+  await fs.writeFile(outputManifestPath, JSON.stringify(manifest));
+}
+
 export async function handleNodeOutputs(
   nodeOutputs: FuncOutputs,
   {
@@ -239,6 +262,19 @@ export async function handleNodeOutputs(
           files[path.posix.relative(repoRoot, notFoundOutput.filePath)] =
             path.posix.relative(repoRoot, notFoundOutput.filePath);
         }
+      }
+
+      const routesManifestRelativePath = path.posix.join(
+        path.posix.relative(projectDir, distDir),
+        'routes-manifest.json'
+      );
+      if (files[routesManifestRelativePath]) {
+        delete files[routesManifestRelativePath];
+        await writeDeterministicRoutesManifest(
+          projectDir,
+          routesManifestRelativePath,
+          functionDir
+        );
       }
 
       const handlerFilePath = path.join(
