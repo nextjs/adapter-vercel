@@ -167,21 +167,21 @@ export type FuncOutputs = Array<
  * In minimal mode, they aren't used (the adapter reads them and generates the config.json for
  * Vercel).
  */
-async function writeDeterministicRoutesManifest(
-  projectDir: string,
-  relativeManifestPath: string,
-  functionDir: string
-) {
+async function writeDeterministicRoutesManifest(distDir: string) {
   const manifest: RoutesManifest = require(
-    path.join(projectDir, relativeManifestPath)
+    path.join(distDir, 'routes-manifest.json')
   );
+
   manifest.headers = [];
   // @ts-expect-error only recently added
   delete manifest.deploymentId;
 
-  const outputManifestPath = path.join(functionDir, relativeManifestPath);
-  await fs.mkdir(path.dirname(outputManifestPath), { recursive: true });
+  const outputManifestPath = path.join(
+    distDir,
+    'routes-manifest-deterministic.json'
+  );
   await fs.writeFile(outputManifestPath, JSON.stringify(manifest));
+  return outputManifestPath;
 }
 
 export async function handleNodeOutputs(
@@ -230,6 +230,15 @@ export async function handleNodeOutputs(
     }
   }
 
+  const routesManifestDeterministicRelativePath = path.posix.relative(
+    repoRoot,
+    await writeDeterministicRoutesManifest(distDir)
+  );
+  const routesManifestRelativePath = path.posix.join(
+    path.posix.relative(repoRoot, distDir),
+    'routes-manifest.json'
+  );
+
   await Promise.all(
     nodeOutputs.map(async (output) => {
       await fsSema.acquire();
@@ -264,17 +273,9 @@ export async function handleNodeOutputs(
         }
       }
 
-      const routesManifestRelativePath = path.posix.join(
-        path.posix.relative(projectDir, distDir),
-        'routes-manifest.json'
-      );
       if (files[routesManifestRelativePath]) {
-        delete files[routesManifestRelativePath];
-        await writeDeterministicRoutesManifest(
-          projectDir,
-          routesManifestRelativePath,
-          functionDir
-        );
+        files[routesManifestRelativePath] =
+          routesManifestDeterministicRelativePath;
       }
 
       const handlerFilePath = path.join(
