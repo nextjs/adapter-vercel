@@ -38,7 +38,7 @@ const copy = async (src: string, dest: string) => {
   await fse.copy(src, dest);
 };
 
-const writeLock = new Map<string, Promise<any>>();
+const writeLock = new Map<string, Promise<void>>();
 
 const writeIfNotExists = async (filePath: string, content: string) => {
   await writeLock.get(filePath);

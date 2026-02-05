@@ -4,6 +4,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'http';
 import type { NextConfig } from 'next';
+import type { RoutesManifest } from 'next/dist/build';
 
 export const getHandlerSource = (ctx: {
   // relative to launcher file
@@ -85,31 +86,7 @@ export const getHandlerSource = (ctx: {
             i18n,
           } = require(
             './' + path.posix.join(relativeDistDir, 'routes-manifest.json')
-          ) as {
-            dynamicRoutes: Array<{
-              regex: string;
-              namedRegex?: string;
-              page: string;
-            }>;
-            staticRoutes: Array<{
-              regex: string;
-              namedRegex?: string;
-              page: string;
-            }>;
-            i18n?: {
-              locales: string[];
-            };
-          };
-          const hydrateRoutesManifestItem = (item: {
-            regex: string;
-            namedRegex?: string;
-            page: string;
-          }) => {
-            return {
-              ...item,
-              namedRegex: new RegExp(item.namedRegex || item.regex),
-            };
-          };
+          ) as RoutesManifest;
 
           const matchOperatorsRegex = /[|\\{}()[\]^$+*?.-]/g;
 
@@ -117,7 +94,12 @@ export const getHandlerSource = (ctx: {
             return str.replace(matchOperatorsRegex, '\\$&');
           }
 
-          const dynamicRoutes = dynamicRoutesRaw.map(hydrateRoutesManifestItem);
+          const dynamicRoutes = dynamicRoutesRaw.map((item) => {
+            return {
+              ...item,
+              namedRegex: new RegExp(item.namedRegex || item.regex),
+            };
+          });
           const staticRoutes = staticRoutesRaw.map((route) => {
             return {
               ...route,
