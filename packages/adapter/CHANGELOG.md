@@ -1,5 +1,13 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.4
+
+### Patch Changes
+
+- [#17](https://github.com/nextjs/adapter-vercel/pull/17) [`98bc1a3`](https://github.com/nextjs/adapter-vercel/commit/98bc1a33abe9ae41d30c20c0bbecf8380a94432b) Thanks [@mischnic](https://github.com/mischnic)! - Strip routes-manifest.json for determinism
+
+- [#18](https://github.com/nextjs/adapter-vercel/pull/18) [`fbd123b`](https://github.com/nextjs/adapter-vercel/commit/fbd123b897df6249b0cc4432c75d8408b9b00d23) Thanks [@mischnic](https://github.com/mischnic)! - Fix build to make flattenSourceMap work
+
 ## 0.0.1-beta.3
 
 ### Patch Changes
