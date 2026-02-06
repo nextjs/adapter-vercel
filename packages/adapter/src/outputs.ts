@@ -636,7 +636,11 @@ export async function handleEdgeOutputs(
 
       // Create Next.js parameters for the edge function
       const params = {
-        name: output.id.replace(/\.rsc$/, ''),
+        // the edge entries has this hardcoded to "middleware" so match that
+        name: output.id
+          .replace(/\.rsc$/, '')
+          .replace('_middleware', 'middleware')
+          .replace(/^\//, ''),
         staticRoutes: [],
         dynamicRoutes: [],
         nextConfig: {
