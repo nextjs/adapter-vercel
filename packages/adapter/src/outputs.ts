@@ -174,6 +174,7 @@ async function writeDeterministicRoutesManifest(distDir: string) {
 
   manifest.headers = [];
   // @ts-expect-error only recently added
+  manifest.onMatchHeaders = [];
   delete manifest.deploymentId;
 
   const outputManifestPath = path.join(
