@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.5
+
+### Patch Changes
+
+- [#20](https://github.com/nextjs/adapter-vercel/pull/20) [`68a7427`](https://github.com/nextjs/adapter-vercel/commit/68a74276f1d47951d5b5f19125ea65b6fe269c97) Thanks [@mischnic](https://github.com/mischnic)! - Strip routes-manifest.json for determinism more
+
 ## 0.0.1-beta.4
 
 ### Patch Changes
