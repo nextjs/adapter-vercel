@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.6
+
+### Patch Changes
+
+- [#22](https://github.com/nextjs/adapter-vercel/pull/22) [`42146f3`](https://github.com/nextjs/adapter-vercel/commit/42146f3d0e283b20eb7c349f3741f7b893816230) Thanks [@ijjk](https://github.com/ijjk)! - Fix edge middleware entry name
+
 ## 0.0.1-beta.5
 
 ### Patch Changes
