@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -234,6 +235,7 @@ type NodeFunctionConfig = Pick<
   filePathMap: Record<string, string>;
   useWebApi?: boolean;
   launcherType: 'Nodejs';
+  fileHashes?: Record<string, string>;
 };
 
 let hasWarnedAboutDotEnv = false;
@@ -337,8 +339,15 @@ async function writeDeterministicRoutesManifest(distDir: string) {
     distDir,
     'routes-manifest-deterministic.json'
   );
-  await fs.writeFile(outputManifestPath, JSON.stringify(manifest));
-  return outputManifestPath;
+  const manifestJson = JSON.stringify(manifest);
+  await fs.writeFile(outputManifestPath, manifestJson);
+  return {
+    routesManifestPath: outputManifestPath,
+    routesManifestHash: crypto
+      .createHash('sha256')
+      .update(manifestJson)
+      .digest('hex'),
+  };
 }
 
 async function getProjectEnvFiles(projectDir: string): Promise<string[]> {
@@ -430,10 +439,9 @@ export async function handleNodeOutputs(
     }
   }
 
-  const routesManifestDeterministicRelativePath = path.posix.relative(
-    repoRoot,
-    await writeDeterministicRoutesManifest(distDir)
-  );
+  const { routesManifestPath, routesManifestHash } =
+    await writeDeterministicRoutesManifest(distDir);
+
   const routesManifestRelativePath = path.posix.join(
     path.posix.relative(repoRoot, distDir),
     'routes-manifest.json'
@@ -477,6 +485,9 @@ export async function handleNodeOutputs(
       await fs.mkdir(functionDir, { recursive: true });
 
       const files: Record<string, string> = {};
+      const filesHashes: Record<string, string> | undefined =
+        // @ts-expect-error not released yet
+        output.assetsHashes;
 
       for (const [relPath, fsPath] of Object.entries(output.assets)) {
         files[relPath] = path.posix.relative(repoRoot, fsPath);
@@ -497,15 +508,22 @@ export async function handleNodeOutputs(
             notFoundOutput.assets
           )) {
             files[relPath] = path.posix.relative(repoRoot, fsPath);
+            if (filesHashes) {
+              // @ts-expect-error not released yet
+              filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
+            }
           }
           files[path.posix.relative(repoRoot, notFoundOutput.filePath)] =
             path.posix.relative(repoRoot, notFoundOutput.filePath);
         }
       }
 
-      if (files[routesManifestRelativePath]) {
-        files[routesManifestRelativePath] =
-          routesManifestDeterministicRelativePath;
+      files[routesManifestRelativePath] = path.posix.relative(
+        repoRoot,
+        routesManifestPath
+      );
+      if (filesHashes) {
+        filesHashes[routesManifestRelativePath] = routesManifestHash;
       }
 
       const handlerFilePath = path.join(
@@ -515,16 +533,20 @@ export async function handleNodeOutputs(
       );
 
       await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
-      await writeIfNotExists(
-        handlerFilePath,
-        getHandlerSource({
-          projectRelativeDistDir: path.posix.relative(projectDir, distDir),
-          prerenderFallbackFalseMap,
-          isMiddleware,
-          nextConfig: config,
-          nextEnvLoaderPathRelativeToProjectDir,
-        })
-      );
+      const handlerSource = getHandlerSource({
+        projectRelativeDistDir: path.posix.relative(projectDir, distDir),
+        prerenderFallbackFalseMap,
+        isMiddleware,
+        nextConfig: config,
+        nextEnvLoaderPathRelativeToProjectDir,
+      });
+      await writeIfNotExists(handlerFilePath, handlerSource);
+      if (filesHashes) {
+        filesHashes[path.posix.relative(repoRoot, handlerFilePath)] = crypto
+          .createHash('sha256')
+          .update(handlerSource)
+          .digest('hex');
+      }
 
       const operationType =
         output.type === AdapterOutputType.APP_PAGE || AdapterOutputType.PAGES
@@ -574,6 +596,7 @@ export async function handleNodeOutputs(
         // middleware handler always expects Request/Response interface
         useWebApi: isMiddleware,
         launcherType: 'Nodejs',
+        fileHashes: filesHashes,
       };
 
       await writeIfNotExists(
