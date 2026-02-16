@@ -192,6 +192,21 @@ export async function handleStaticOutputs(
     ),
     'Not Found'
   );
+
+  const immutableFiles = outputs
+    // @ts-expect-error immutable not yet published
+    .filter((output) => output.immutable)
+    .map((output) => [
+      path.posix.join('static', output.pathname),
+      // @ts-expect-error immutable not yet published
+      output.immutable,
+    ]);
+  if (immutableFiles.length > 0) {
+    await fs.writeFile(
+      path.posix.join(vercelOutputDir, 'immutable.json'),
+      JSON.stringify(Object.fromEntries(immutableFiles))
+    );
+  }
 }
 
 const vercelConfig = JSON.parse(process.env.NEXT_ADAPTER_VERCEL_CONFIG || '{}');
