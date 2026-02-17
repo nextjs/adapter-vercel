@@ -153,6 +153,66 @@ export async function handleStaticOutputs(
 }
 
 const vercelConfig = JSON.parse(process.env.NEXT_ADAPTER_VERCEL_CONFIG || '{}');
+type LambdaOptionOverrides = Awaited<
+  ReturnType<typeof getLambdaOptionsFromFunction>
+>;
+
+function isGeneratedStep(routeName: string) {
+  return (
+    routeName.includes('.well-known/workflow/v1/step') ||
+    routeName.includes('api/generated/steps')
+  );
+}
+
+function isGeneratedWorkflow(routeName: string) {
+  return (
+    routeName.includes('.well-known/workflow/v1/flow') ||
+    routeName.includes('api/generated/workflows')
+  );
+}
+
+async function getGeneratedWorkflowLambdaOptions({
+  projectDir,
+  routeName,
+  sourceFile,
+}: {
+  projectDir: string;
+  routeName: string;
+  sourceFile: string;
+}): Promise<LambdaOptionOverrides | undefined> {
+  const generatedStep = isGeneratedStep(routeName);
+  const generatedWorkflow = isGeneratedWorkflow(routeName);
+
+  if (!generatedStep && !generatedWorkflow) {
+    return;
+  }
+
+  // For App Router, source file is like `step/route.js` so config is at `../config.json`
+  // For Pages Router, source file is like `step.js` so config is at `./config.json`
+  const isAppRouterRoute =
+    sourceFile.endsWith('/route.js') || sourceFile.endsWith('/route.ts');
+  const configRelativePath = isAppRouterRoute
+    ? '../config.json'
+    : './config.json';
+  const generatedConfig = JSON.parse(
+    await fs
+      .readFile(
+        path.join(projectDir, path.dirname(sourceFile), configRelativePath),
+        'utf8'
+      )
+      .catch(() => '{}')
+  ) as {
+    steps?: LambdaOptionOverrides;
+    workflows?: LambdaOptionOverrides;
+  };
+
+  if (generatedStep && generatedConfig.steps) {
+    return generatedConfig.steps;
+  }
+  if (generatedWorkflow && generatedConfig.workflows) {
+    return generatedConfig.workflows;
+  }
+}
 
 export type FuncOutputs = Array<
   | AdapterOutput['PAGES']
@@ -310,6 +370,17 @@ export async function handleNodeOutputs(
         sourceFile,
         config: vercelConfig,
       });
+      const generatedConfigOpts = await getGeneratedWorkflowLambdaOptions({
+        projectDir,
+        routeName: output.pathname,
+        sourceFile,
+      });
+
+      if (generatedConfigOpts) {
+        Object.assign(vercelConfigOpts, generatedConfigOpts);
+      }
+      const maxDuration =
+        generatedConfigOpts?.maxDuration ?? output.config.maxDuration;
 
       await writeIfNotExists(
         path.join(functionDir, `.vc-config.json`),
@@ -328,7 +399,7 @@ export async function handleNodeOutputs(
               '___next_launcher.cjs'
             ),
             runtime: nodeVersion.runtime,
-            maxDuration: output.config.maxDuration,
+            maxDuration,
             supportsResponseStreaming: true,
             experimentalAllowBundling: true,
             // middleware handler always expects Request/Response interface
