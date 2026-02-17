@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.7
+
+### Patch Changes
+
+- [#26](https://github.com/nextjs/adapter-vercel/pull/26) [`1ed977f`](https://github.com/nextjs/adapter-vercel/commit/1ed977f778bce54eda866d6383bd763d86e58401) Thanks [@ijjk](https://github.com/ijjk)! - adapter: apply generated step/workflow config overrides
+
 ## 0.0.1-beta.6
 
 ### Patch Changes
