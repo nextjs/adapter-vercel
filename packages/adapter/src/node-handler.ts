@@ -398,7 +398,8 @@ export const getHandlerSource = (ctx: {
             internalMetadata: any
           ) {
             try {
-              const initURL = req.url;
+              const initURL = `https://${req.headers.host || 'localhost'}${req.url}`;
+
               const parsedUrl = new URL(req.url || '/', 'http://n');
               let urlPathname =
                 typeof req.headers['x-matched-path'] === 'string'
