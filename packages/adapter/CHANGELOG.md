@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.8
+
+### Patch Changes
+
+- [#28](https://github.com/nextjs/adapter-vercel/pull/28) [`798e7df`](https://github.com/nextjs/adapter-vercel/commit/798e7df93112b99452d2ed2f7b5cf64f13d1e799) Thanks [@ijjk](https://github.com/ijjk)! - Ensure initURL is initialized
+
 ## 0.0.1-beta.7
 
 ### Patch Changes
