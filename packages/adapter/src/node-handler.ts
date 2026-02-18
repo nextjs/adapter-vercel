@@ -398,6 +398,7 @@ export const getHandlerSource = (ctx: {
             internalMetadata: any
           ) {
             try {
+              const initURL = req.url;
               const parsedUrl = new URL(req.url || '/', 'http://n');
               let urlPathname =
                 typeof req.headers['x-matched-path'] === 'string'
@@ -457,6 +458,7 @@ export const getHandlerSource = (ctx: {
                   // relative to that/project dir
                   relativeProjectDir: '.',
                   locale,
+                  initURL,
                 },
               });
             } catch (error) {
