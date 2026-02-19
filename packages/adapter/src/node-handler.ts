@@ -41,8 +41,6 @@ export const getHandlerSource = (ctx: {
           }
 
           return async function handler(request: Request): Promise<Response> {
-            console.log('middleware handler', request);
-
             let middlewareHandler = await require(
               './' + path.posix.join(relativeDistDir, 'server', 'middleware.js')
             );
@@ -191,7 +189,6 @@ export const getHandlerSource = (ctx: {
             // normalize first
             urlPathname = normalizeDataPath(urlPathname);
 
-            console.log('before normalize', urlPathname);
             for (const suffixRegex of [
               /\.segments(\/.*)\.segment\.rsc$/,
               /\.rsc$/,
@@ -204,8 +201,6 @@ export const getHandlerSource = (ctx: {
               i18n?.locales
             );
             urlPathname = normalizeResult.pathname;
-            console.log('after normalize', normalizeResult);
-
             urlPathname = urlPathname.replace(/\/$/, '') || '/';
 
             const combinedRoutes = [...staticRoutes, ...dynamicRoutes];
@@ -213,7 +208,6 @@ export const getHandlerSource = (ctx: {
             // attempt matching literal page first
             for (const route of combinedRoutes) {
               if (route.page === urlPathname) {
-                console.log('matched direct page', route);
                 return {
                   matchedPathname:
                     inversedAppRoutesManifest[route.page] || route.page,
@@ -224,7 +218,6 @@ export const getHandlerSource = (ctx: {
 
             // check all routes considering fallback false entries
             for (const route of [...staticRoutes, ...dynamicRoutes]) {
-              console.log('testing', route.namedRegex, 'against', urlPathname);
               const matches = urlPathname.match(route.namedRegex);
               if (
                 matches ||
@@ -242,16 +235,9 @@ export const getHandlerSource = (ctx: {
                     fallbackFalseMap.includes(urlPathnameWithLocale)
                   )
                 ) {
-                  console.log('fallback: false but not prerendered', {
-                    page: route.page,
-                    urlPathname,
-                    urlPathnameWithLocale,
-                    paths: Object.values(fallbackFalseMap),
-                  });
                   continue;
                 }
 
-                console.log('matched route', route, urlPathname, matches);
                 return {
                   matchedPathname:
                     inversedAppRoutesManifest[route.page] || route.page,
@@ -333,7 +319,6 @@ export const getHandlerSource = (ctx: {
                         'page.js'
                       )
                   );
-                  console.log('using _not-found.js for render404');
                 } catch {}
 
                 if (!mod) {
@@ -346,7 +331,6 @@ export const getHandlerSource = (ctx: {
                         `404.js`
                       )
                   );
-                  console.log('using 404.js for render404');
                 }
               } catch (_) {
                 mod = await require(
@@ -358,7 +342,6 @@ export const getHandlerSource = (ctx: {
                       `_error.js`
                     )
                 );
-                console.log('using _error for render404');
               }
               res.statusCode = 404;
 
@@ -367,14 +350,6 @@ export const getHandlerSource = (ctx: {
                   waitUntil: getRequestContext().waitUntil,
                 });
               } else {
-                console.log(
-                  'failed to find 404 module',
-                  await require('fs')
-                    .promises.readdir(
-                      path.posix.join(relativeDistDir, 'server', 'pages')
-                    )
-                    .catch((err: any) => err)
-                );
                 res.end('This page could not be found');
               }
             },
@@ -407,7 +382,6 @@ export const getHandlerSource = (ctx: {
                   : undefined;
 
               if (typeof urlPathname !== 'string') {
-                console.log('no x-matched-path', { url: req.url });
                 urlPathname = parsedUrl.pathname || '/';
               }
               const {
@@ -429,15 +403,8 @@ export const getHandlerSource = (ctx: {
                 }
               }
               if (addedMatchesToUrl) {
-                console.log('updating URL with new matches', matches, req.url);
                 req.url = `${parsedUrl.pathname}${parsedUrl.searchParams.size > 0 ? '?' : ''}${parsedUrl.searchParams.toString()}`;
               }
-
-              console.log('invoking handler', {
-                page,
-                url: req.url,
-                matchedPath: req.headers['x-matched-path'],
-              });
 
               const mod = await require(
                 './' +
@@ -480,7 +447,6 @@ export const getHandlerSource = (ctx: {
       ? ''
       : `
     module.exports.getRequestHandlerWithMetadata = (metadata) => {
-      console.log('using getRequestHandlerWithMetadata', metadata)
       return (req, res) => _n_handler(req, res, metadata)
     }
   `
