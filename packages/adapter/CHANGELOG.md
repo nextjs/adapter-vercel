@@ -1,5 +1,13 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.9
+
+### Patch Changes
+
+- [#32](https://github.com/nextjs/adapter-vercel/pull/32) [`3c0b285`](https://github.com/nextjs/adapter-vercel/commit/3c0b2851058581214f8a513210bda7eaafd1afc9) Thanks [@ijjk](https://github.com/ijjk)! - Remove debug logs
+
+- [#30](https://github.com/nextjs/adapter-vercel/pull/30) [`1917018`](https://github.com/nextjs/adapter-vercel/commit/1917018dc9473fd306b4504b265d383f710f40b4) Thanks [@ijjk](https://github.com/ijjk)! - Make sure initURL is absolute
+
 ## 0.0.1-beta.8
 
 ### Patch Changes
