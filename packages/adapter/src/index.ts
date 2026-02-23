@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
+import { PHASE_PRODUCTION_BUILD } from 'next/dist/shared/lib/constants';
 import {
   type FuncOutputs,
   handleEdgeOutputs,
@@ -25,6 +26,17 @@ import { escapeStringRegexp, getImagesConfig } from './utils';
 
 const myAdapter: NextAdapter = {
   name: 'Vercel',
+  modifyConfig(config, ctx) {
+    if (
+      ctx.phase === PHASE_PRODUCTION_BUILD &&
+      process.env.VERCEL_IMMUTABLE_DEPLOYMENT_ID
+    ) {
+      // @ts-expect-error immutable not yet published
+      config.experimental.immutableAssetToken =
+        process.env.VERCEL_IMMUTABLE_DEPLOYMENT_ID;
+    }
+    return config;
+  },
   async onBuildComplete({
     routing,
     config,
