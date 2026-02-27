@@ -373,9 +373,9 @@ export const getHandlerSource = (ctx: {
             internalMetadata: any
           ) {
             try {
-              const initURL = `https://${req.headers.host || 'localhost'}${req.url}`;
-
               const parsedUrl = new URL(req.url || '/', 'http://n');
+              const initURL = `https://${req.headers.host || 'localhost'}${parsedUrl.pathname}${parsedUrl.search}`;
+
               let urlPathname =
                 typeof req.headers['x-matched-path'] === 'string'
                   ? fixMojibake(req.headers['x-matched-path'])
