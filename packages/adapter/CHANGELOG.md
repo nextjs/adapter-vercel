@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.10
+
+### Patch Changes
+
+- [#33](https://github.com/nextjs/adapter-vercel/pull/33) [`38a9bb5`](https://github.com/nextjs/adapter-vercel/commit/38a9bb541ae174254773a2c9a8e7317ce52a118a) Thanks [@ijjk](https://github.com/ijjk)! - Fix initURL including empty query
+
 ## 0.0.1-beta.9
 
 ### Patch Changes
