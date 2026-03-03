@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.11
+
+### Patch Changes
+
+- [#35](https://github.com/nextjs/adapter-vercel/pull/35) [`3329c8f`](https://github.com/nextjs/adapter-vercel/commit/3329c8f15764cbe0e35c1e8ea306d64563355abc) Thanks [@ijjk](https://github.com/ijjk)! - Ensure supportsMultiPayload field set
+
 ## 0.0.1-beta.10
 
 ### Patch Changes
