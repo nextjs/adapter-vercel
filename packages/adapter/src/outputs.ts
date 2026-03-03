@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   getLambdaOptionsFromFunction,
   getNodeVersion,
+  type Lambda,
 } from '@vercel/build-utils';
 import type { RouteWithSrc } from '@vercel/routing-utils';
 import { Sema } from 'async-sema';
@@ -156,6 +157,36 @@ const vercelConfig = JSON.parse(process.env.NEXT_ADAPTER_VERCEL_CONFIG || '{}');
 type LambdaOptionOverrides = Awaited<
   ReturnType<typeof getLambdaOptionsFromFunction>
 >;
+type NodeFunctionConfig = Pick<
+  Lambda,
+  | 'memory'
+  | 'maxDuration'
+  | 'experimentalTriggers'
+  | 'supportsCancellation'
+  | 'handler'
+  | 'runtime'
+  | 'regions'
+  | 'allowQuery'
+  | 'framework'
+  | 'operationType'
+  | 'supportsResponseStreaming'
+  | 'experimentalAllowBundling'
+> & {
+  filePathMap: Record<string, string>;
+  operationType: 'PAGE' | 'API';
+  framework: {
+    slug: 'nextjs';
+    version: string;
+  };
+  handler: string;
+  runtime: string;
+  maxDuration?: number;
+  supportsMultiPayload: true;
+  supportsResponseStreaming: true;
+  experimentalAllowBundling: true;
+  useWebApi?: boolean;
+  launcherType: 'Nodejs';
+};
 
 function isGeneratedStep(routeName: string) {
   return (
@@ -381,32 +412,31 @@ export async function handleNodeOutputs(
       }
       const maxDuration =
         generatedConfigOpts?.maxDuration ?? output.config.maxDuration;
+      const nodeConfig: NodeFunctionConfig = {
+        ...vercelConfigOpts,
+        filePathMap: files,
+        operationType,
+        framework: {
+          slug: 'nextjs',
+          version: nextVersion,
+        },
+        handler: path.posix.join(
+          path.posix.relative(repoRoot, projectDir),
+          '___next_launcher.cjs'
+        ),
+        runtime: nodeVersion.runtime,
+        maxDuration,
+        supportsMultiPayload: true,
+        supportsResponseStreaming: true,
+        experimentalAllowBundling: true,
+        // middleware handler always expects Request/Response interface
+        useWebApi: isMiddleware,
+        launcherType: 'Nodejs',
+      };
 
       await writeIfNotExists(
         path.join(functionDir, `.vc-config.json`),
-        JSON.stringify(
-          // TODO: strongly type this
-          {
-            ...vercelConfigOpts,
-            filePathMap: files,
-            operationType,
-            framework: {
-              slug: 'nextjs',
-              version: nextVersion,
-            },
-            handler: path.posix.join(
-              path.posix.relative(repoRoot, projectDir),
-              '___next_launcher.cjs'
-            ),
-            runtime: nodeVersion.runtime,
-            maxDuration,
-            supportsResponseStreaming: true,
-            experimentalAllowBundling: true,
-            // middleware handler always expects Request/Response interface
-            useWebApi: isMiddleware,
-            launcherType: 'Nodejs',
-          }
-        )
+        JSON.stringify(nodeConfig)
       );
 
       fsSema.release();
