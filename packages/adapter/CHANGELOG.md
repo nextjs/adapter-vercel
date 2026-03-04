@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.13
+
+### Patch Changes
+
+- [#39](https://github.com/nextjs/adapter-vercel/pull/39) [`1b25751`](https://github.com/nextjs/adapter-vercel/commit/1b25751f6a61e6533a99f776c7016e8e0cea2d8d) Thanks [@ijjk](https://github.com/ijjk)! - Update `@vercel/build-utils` to `13.6.2` and include `partialFallback` in prerender config output.
+
 ## 0.0.1-beta.12
 
 ### Patch Changes
