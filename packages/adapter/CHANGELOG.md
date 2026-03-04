@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.12
+
+### Patch Changes
+
+- [#37](https://github.com/nextjs/adapter-vercel/pull/37) [`610e7c2`](https://github.com/nextjs/adapter-vercel/commit/610e7c2ddb98abbcbb4bc688b822d3afc5a48810) Thanks [@ijjk](https://github.com/ijjk)! - Fix lambda typing and payloads field
+
 ## 0.0.1-beta.11
 
 ### Patch Changes
