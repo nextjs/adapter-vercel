@@ -254,7 +254,6 @@ async function writeDeterministicRoutesManifest(distDir: string) {
   );
 
   manifest.headers = [];
-  // @ts-expect-error only recently added
   manifest.onMatchHeaders = [];
   delete manifest.deploymentId;
 
@@ -600,6 +599,7 @@ export async function handlePrerenderOutputs(
               passQuery: true,
               allowQuery: output.config.allowQuery,
               allowHeader: output.config.allowHeader,
+              partialFallback: output.config.partialFallback || undefined,
 
               bypassToken: output.config.bypassToken,
               experimentalBypassFor: output.config.bypassFor,
