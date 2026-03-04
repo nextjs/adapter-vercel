@@ -3,7 +3,7 @@ import path from 'node:path';
 import {
   getLambdaOptionsFromFunction,
   getNodeVersion,
-  type Lambda,
+  type NodejsLambda,
 } from '@vercel/build-utils';
 import type { RouteWithSrc } from '@vercel/routing-utils';
 import { Sema } from 'async-sema';
@@ -11,7 +11,6 @@ import fse from 'fs-extra';
 import type { AdapterOutput, NextConfig } from 'next';
 import type { RoutesManifest } from 'next/dist/build';
 import { AdapterOutputType } from 'next/dist/shared/lib/constants';
-import { INTERNAL_PAGES } from './constants';
 import type { NextjsParams } from './get-edge-function';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { getHandlerSource } from './node-handler';
@@ -158,7 +157,7 @@ type LambdaOptionOverrides = Awaited<
   ReturnType<typeof getLambdaOptionsFromFunction>
 >;
 type NodeFunctionConfig = Pick<
-  Lambda,
+  NodejsLambda,
   | 'memory'
   | 'maxDuration'
   | 'experimentalTriggers'
@@ -169,21 +168,12 @@ type NodeFunctionConfig = Pick<
   | 'allowQuery'
   | 'framework'
   | 'operationType'
+  | 'supportsMultiPayloads'
   | 'supportsResponseStreaming'
   | 'experimentalAllowBundling'
 > & {
+  // these are build output API specific not on Lambda class
   filePathMap: Record<string, string>;
-  operationType: 'PAGE' | 'API';
-  framework: {
-    slug: 'nextjs';
-    version: string;
-  };
-  handler: string;
-  runtime: string;
-  maxDuration?: number;
-  supportsMultiPayload: true;
-  supportsResponseStreaming: true;
-  experimentalAllowBundling: true;
   useWebApi?: boolean;
   launcherType: 'Nodejs';
 };
@@ -426,7 +416,7 @@ export async function handleNodeOutputs(
         ),
         runtime: nodeVersion.runtime,
         maxDuration,
-        supportsMultiPayload: true,
+        supportsMultiPayloads: true,
         supportsResponseStreaming: true,
         experimentalAllowBundling: true,
         // middleware handler always expects Request/Response interface
