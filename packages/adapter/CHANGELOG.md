@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.14
+
+### Patch Changes
+
+- [#41](https://github.com/nextjs/adapter-vercel/pull/41) [`50a522a`](https://github.com/nextjs/adapter-vercel/commit/50a522ae3f75849faedc57ed4443e3ce9e96b028) Thanks [@ijjk](https://github.com/ijjk)! - Normalize regions for edge outputs
+
 ## 0.0.1-beta.13
 
 ### Patch Changes
