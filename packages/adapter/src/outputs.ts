@@ -56,6 +56,48 @@ const writeIfNotExists = async (filePath: string, content: string) => {
   return writePromise;
 };
 
+type Regions = string | string[];
+
+const vercelFunctionRegionsVar = process.env.VERCEL_FUNCTION_REGIONS;
+let vercelFunctionRegions: string[] | undefined;
+if (vercelFunctionRegionsVar) {
+  vercelFunctionRegions = vercelFunctionRegionsVar.split(',');
+}
+
+function normalizeRegions(
+  regions: Regions
+): undefined | 'all' | 'auto' | string[] {
+  if (typeof regions === 'string') {
+    regions = [regions];
+  }
+
+  const newRegions: string[] = [];
+  for (const region of regions) {
+    if (region === 'home') {
+      if (vercelFunctionRegions) {
+        newRegions.push(...vercelFunctionRegions);
+      }
+      continue;
+    }
+
+    if (region === 'global') {
+      return 'all';
+    }
+
+    if (region === 'auto') {
+      return 'auto';
+    }
+
+    newRegions.push(region);
+  }
+
+  if (newRegions.length === 0) {
+    return undefined;
+  }
+
+  return newRegions;
+}
+
 function normalizeIndexPathname(pathname: string, config: NextConfig) {
   if (pathname === config.basePath && config.basePath !== '/') {
     return path.posix.join(config.basePath, '/index');
@@ -165,6 +207,7 @@ type NodeFunctionConfig = Pick<
   | 'handler'
   | 'runtime'
   | 'regions'
+  | 'functionFailoverRegions'
   | 'allowQuery'
   | 'framework'
   | 'operationType'
@@ -658,7 +701,7 @@ type EdgeFunctionConfig = {
   filePathMap: Record<string, string>;
   assets?: Array<{ name: string; path: string }>;
   deploymentTarget: string;
-  regions?: 'all' | string | string[];
+  regions?: 'all' | 'auto' | string[];
   framework?: { slug: string; version: string };
 };
 
@@ -666,13 +709,11 @@ export async function handleEdgeOutputs(
   edgeOutputs: FuncOutputs,
   {
     config,
-    distDir,
     repoRoot,
     projectDir,
     nextVersion,
     vercelOutputDir,
   }: {
-    distDir: string;
     config: NextConfig;
     repoRoot: string;
     projectDir: string;
@@ -769,7 +810,9 @@ export async function handleEdgeOutputs(
         assets: nonJsAssetFiles,
         deploymentTarget: 'v8-worker',
         environment: output.config.env || {},
-        regions: output.config.preferredRegion,
+        regions: output.config.preferredRegion
+          ? normalizeRegions(output.config.preferredRegion)
+          : undefined,
         framework: {
           slug: 'nextjs',
           version: nextVersion,

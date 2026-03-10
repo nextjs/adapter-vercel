@@ -136,7 +136,6 @@ const myAdapter: NextAdapter = {
       vercelOutputDir,
       nextVersion,
       config,
-      distDir,
     });
 
     const prerenderFallbackFalseMap: Record<string, string[]> = {};
