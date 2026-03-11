@@ -31,7 +31,6 @@ const myAdapter: NextAdapter = {
       ctx.phase === PHASE_PRODUCTION_BUILD &&
       process.env.VERCEL_IMMUTABLE_DEPLOYMENT_ID
     ) {
-      // @ts-expect-error immutable not yet published
       config.experimental.immutableAssetToken =
         process.env.VERCEL_IMMUTABLE_DEPLOYMENT_ID;
     }

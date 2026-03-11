@@ -194,11 +194,9 @@ export async function handleStaticOutputs(
   );
 
   const immutableFiles = outputs
-    // @ts-expect-error immutable not yet published
     .filter((output) => output.immutableHash)
     .map((output) => [
       path.posix.join('static', output.pathname),
-      // @ts-expect-error immutable not yet published
       output.immutableHash,
     ]);
   if (immutableFiles.length > 0) {
