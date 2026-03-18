@@ -416,6 +416,82 @@ export const getHandlerSource = (ctx: {
             );
           }
 
+          function normalizeNextQueryParam(key: string) {
+            for (const prefix of ['nxtP', 'nxtI']) {
+              if (key !== prefix && key.startsWith(prefix)) {
+                return key.substring(prefix.length);
+              }
+            }
+            return null;
+          }
+
+          function decodeQueryPathParameter(value: string) {
+            try {
+              return decodeURIComponent(value);
+            } catch {
+              return value;
+            }
+          }
+
+          function getDynamicRouteParams(
+            pathname: string,
+            searchParams: URLSearchParams
+          ) {
+            const params: Record<string, string | string[]> = {};
+
+            for (const [key, value] of searchParams.entries()) {
+              const normalizedKey = normalizeNextQueryParam(key);
+              if (!normalizedKey) continue;
+
+              const decodedValue = decodeQueryPathParameter(value);
+              const isCatchAll =
+                pathname.includes(`[...${normalizedKey}]`) ||
+                pathname.includes(`[[...${normalizedKey}]]`);
+              const normalizedValue =
+                isCatchAll && decodedValue.includes('/')
+                  ? decodedValue.split('/')
+                  : decodedValue;
+              const existingValue = params[normalizedKey];
+
+              if (typeof existingValue === 'undefined') {
+                params[normalizedKey] = normalizedValue;
+              } else if (Array.isArray(existingValue)) {
+                existingValue.push(
+                  ...(Array.isArray(normalizedValue)
+                    ? normalizedValue
+                    : [normalizedValue])
+                );
+              } else {
+                params[normalizedKey] = [
+                  existingValue,
+                  ...(Array.isArray(normalizedValue)
+                    ? normalizedValue
+                    : [normalizedValue]),
+                ];
+              }
+            }
+
+            return params;
+          }
+
+          function interpolateDynamicPath(
+            pathname: string,
+            params: Record<string, string | string[]>
+          ) {
+            for (const key of Object.keys(params)) {
+              const value = params[key];
+              const encodedValue = Array.isArray(value)
+                ? value.map((item) => encodeURIComponent(item)).join('/')
+                : encodeURIComponent(value);
+
+              pathname = pathname.replaceAll(`[[...${key}]]`, encodedValue);
+              pathname = pathname.replaceAll(`[...${key}]`, encodedValue);
+              pathname = pathname.replaceAll(`[${key}]`, encodedValue);
+            }
+
+            return pathname;
+          }
+
           return async function handler(
             req: import('http').IncomingMessage,
             res: import('http').ServerResponse,
@@ -423,7 +499,7 @@ export const getHandlerSource = (ctx: {
           ) {
             try {
               const parsedUrl = new URL(req.url || '/', 'http://n');
-              const initURL = `https://${req.headers.host || 'localhost'}${parsedUrl.pathname}${parsedUrl.search}`;
+              let initURL = `https://${req.headers.host || 'localhost'}${parsedUrl.pathname}${parsedUrl.search}`;
 
               const matchedPathHeader =
                 typeof req.headers['x-matched-path'] === 'string'
@@ -540,11 +616,37 @@ export const getHandlerSource = (ctx: {
                 req.url = `${parsedUrl.pathname}${parsedUrl.searchParams.size > 0 ? '?' : ''}${parsedUrl.searchParams.toString()}`;
               }
 
+              const dynamicRouteParams = getDynamicRouteParams(
+                sourcePathname,
+                parsedUrl.searchParams
+              );
+
+              if (
+                sourcePathname.includes('[') &&
+                Object.keys(dynamicRouteParams).length > 0
+              ) {
+                req.url = interpolateDynamicPath(
+                  req.url || '/',
+                  dynamicRouteParams
+                );
+
+                if (typeof matchedPathHeader === 'string') {
+                  req.headers['x-matched-path'] = interpolateDynamicPath(
+                    matchedPathHeader,
+                    dynamicRouteParams
+                  );
+                }
+              }
+
               if (shouldRenderFallbackShell) {
                 // Match the NextServer minimal-mode contract for a prerendered
                 // dynamic source route handling a non-pregenerated pathname.
                 req.headers['x-now-route-matches'] = '';
               }
+
+              initURL = `https://${req.headers.host || 'localhost'}${
+                new URL(req.url || '/', 'http://n').pathname
+              }${new URL(req.url || '/', 'http://n').search}`;
 
               if (shouldTraceRequest) {
                 logAdapterTrace('resolved-request', {
@@ -556,6 +658,10 @@ export const getHandlerSource = (ctx: {
                   ),
                   addedMatchesToUrl,
                   didSynthesizeRscHeader,
+                  dynamicRouteParams,
+                  matchedPathHeader: getHeaderValue(
+                    req.headers['x-matched-path']
+                  ),
                   renderFallbackShell:
                     internalMetadata?.renderFallbackShell ||
                     shouldRenderFallbackShell,
