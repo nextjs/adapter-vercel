@@ -181,23 +181,45 @@ export const getHandlerSource = (ctx: {
             return pathname;
           }
 
+          function normalizePathnameForLookup(
+            pathname: string,
+            stripLocale: boolean
+          ) {
+            pathname = normalizeDataPath(pathname);
+
+            for (const suffixRegex of [
+              /\.segments(\/.*)\.segment\.rsc$/,
+              /\.rsc$/,
+            ]) {
+              pathname = pathname.replace(suffixRegex, '');
+            }
+
+            if (stripLocale) {
+              pathname = normalizeLocalePath(pathname, i18n?.locales).pathname;
+            }
+
+            return pathname.replace(/\/$/, '') || '/';
+          }
+
+          function getSourcePathname(page: string) {
+            if (page === '/index') {
+              return '/';
+            }
+            return page.replace(/\/(page|route)$/, '') || '/';
+          }
+
           function matchUrlToPage(urlPathname: string): {
             matchedPathname: string;
             locale?: string;
             matches?: RegExpMatchArray | null;
           } {
             // normalize first
-            urlPathname = normalizeDataPath(urlPathname);
-
-            for (const suffixRegex of [
-              /\.segments(\/.*)\.segment\.rsc$/,
-              /\.rsc$/,
-            ]) {
-              urlPathname = urlPathname.replace(suffixRegex, '');
-            }
-            const urlPathnameWithLocale = urlPathname;
-            const normalizeResult = normalizeLocalePath(
+            const urlPathnameWithLocale = normalizePathnameForLookup(
               urlPathname,
+              false
+            );
+            const normalizeResult = normalizeLocalePath(
+              urlPathnameWithLocale,
               i18n?.locales
             );
             urlPathname = normalizeResult.pathname;
@@ -390,6 +412,27 @@ export const getHandlerSource = (ctx: {
                 matches,
               } = matchUrlToPage(urlPathname);
               const isAppDir = page.match(/\/(page|route)$/);
+              const sourcePathname = getSourcePathname(page);
+              const fallbackFalseMap =
+                prerenderFallbackFalseMap[sourcePathname];
+              const requestPathname = normalizePathnameForLookup(
+                parsedUrl.pathname || '/',
+                true
+              );
+              const requestPathnameWithLocale = normalizePathnameForLookup(
+                parsedUrl.pathname || '/',
+                false
+              );
+              const shouldRenderFallbackShell =
+                typeof req.headers['x-matched-path'] === 'string' &&
+                sourcePathname.includes('[') &&
+                !!fallbackFalseMap &&
+                requestPathname !== sourcePathname &&
+                requestPathnameWithLocale !== sourcePathname &&
+                !(
+                  fallbackFalseMap.includes(requestPathname) ||
+                  fallbackFalseMap.includes(requestPathnameWithLocale)
+                );
               let addedMatchesToUrl = false;
 
               // apply missing matches to query if urlPathname is not
@@ -406,6 +449,12 @@ export const getHandlerSource = (ctx: {
                 req.url = `${parsedUrl.pathname}${parsedUrl.searchParams.size > 0 ? '?' : ''}${parsedUrl.searchParams.toString()}`;
               }
 
+              if (shouldRenderFallbackShell) {
+                // Match the NextServer minimal-mode contract for a prerendered
+                // dynamic source route handling a non-pregenerated pathname.
+                req.headers['x-now-route-matches'] = '';
+              }
+
               const mod = await require(
                 './' +
                   path.posix.join(
@@ -420,6 +469,9 @@ export const getHandlerSource = (ctx: {
                 waitUntil: getRequestContext().waitUntil,
                 requestMeta: {
                   ...internalMetadata,
+                  renderFallbackShell:
+                    internalMetadata?.renderFallbackShell ||
+                    shouldRenderFallbackShell,
                   minimalMode: true,
                   // we use '.' for relative project dir since we process.chdir
                   // to the same directory as the handler file so everything is
