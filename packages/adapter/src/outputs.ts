@@ -56,6 +56,14 @@ const writeIfNotExists = async (filePath: string, content: string) => {
   return writePromise;
 };
 
+function logAdapterTrace(stage: string, payload: Record<string, unknown>) {
+  try {
+    console.log('[ADAPTER-RSC-TRACE]', stage, JSON.stringify(payload));
+  } catch (error) {
+    console.log('[ADAPTER-RSC-TRACE]', stage, payload, error);
+  }
+}
+
 type Regions = string | string[];
 
 const vercelFunctionRegionsVar = process.env.VERCEL_FUNCTION_REGIONS;
@@ -619,6 +627,39 @@ export async function handlePrerenderOutputs(
             `application/x-nextjs-pre-render; state-length=${
               output.fallback.postponedState.length
             }; origin=${JSON.stringify(rscContentType)}`;
+        }
+
+        if (output.pathname.includes('[') || output.pathname.endsWith('.rsc')) {
+          logAdapterTrace('prerender-config', {
+            pathname: output.pathname,
+            type: output.type,
+            groupId: output.groupId,
+            parentOutputId: output.parentOutputId,
+            sourcePath: parentNodeOutput?.pathname,
+            passQuery: true,
+            allowQuery: output.config.allowQuery,
+            allowHeader: output.config.allowHeader,
+            partialFallback: output.config.partialFallback,
+            fallback: prerenderFallbackPath
+              ? path.posix.relative(
+                  path.dirname(prerenderConfigPath),
+                  prerenderFallbackPath
+                )
+              : null,
+            hasPostponedState: !!output.fallback?.postponedState,
+            hasFallbackFilePath: fallbackHasFilePath(output.fallback),
+            initialHeaders,
+            initialStatus: output.fallback?.initialStatus,
+            pprChain: output.pprChain
+              ? {
+                  ...output.pprChain,
+                  outputPath: path.posix.join(
+                    './',
+                    `${normalizeIndexPathname(output.pathname, config)}`
+                  ),
+                }
+              : undefined,
+          });
         }
 
         await fs.mkdir(path.dirname(prerenderConfigPath), { recursive: true });

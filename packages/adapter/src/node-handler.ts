@@ -291,6 +291,25 @@ export const getHandlerSource = (ctx: {
             return fromSymbol[SYMBOL_FOR_REQ_CONTEXT]?.get?.() ?? {};
           }
 
+          function logAdapterTrace(
+            stage: string,
+            payload: Record<string, any>
+          ) {
+            try {
+              console.log(
+                '[ADAPTER-RSC-TRACE]',
+                stage,
+                JSON.stringify(payload)
+              );
+            } catch (error) {
+              console.log('[ADAPTER-RSC-TRACE]', stage, payload, error);
+            }
+          }
+
+          function getHeaderValue(value: string | string[] | undefined) {
+            return Array.isArray(value) ? value.join(',') : value;
+          }
+
           const RouterServerContextSymbol = Symbol.for(
             '@next/router-server-methods'
           );
@@ -433,7 +452,60 @@ export const getHandlerSource = (ctx: {
                   fallbackFalseMap.includes(requestPathname) ||
                   fallbackFalseMap.includes(requestPathnameWithLocale)
                 );
+              const shouldTraceRequest =
+                sourcePathname.includes('[') ||
+                req.headers['rsc'] === '1' ||
+                typeof req.headers['x-matched-path'] === 'string';
               let addedMatchesToUrl = false;
+
+              if (shouldTraceRequest) {
+                res.on('finish', () => {
+                  logAdapterTrace('response', {
+                    requestUrl: req.url,
+                    initURL,
+                    page,
+                    sourcePathname,
+                    statusCode: res.statusCode,
+                    contentType: res.getHeader('content-type'),
+                    renderFallbackShell:
+                      internalMetadata?.renderFallbackShell ||
+                      shouldRenderFallbackShell,
+                    matchedPathHeader: getHeaderValue(
+                      req.headers['x-matched-path']
+                    ),
+                    routeMatchesHeader: getHeaderValue(
+                      req.headers['x-now-route-matches']
+                    ),
+                    rscHeader: getHeaderValue(req.headers['rsc']),
+                    nextUrlHeader: getHeaderValue(req.headers['next-url']),
+                  });
+                });
+
+                logAdapterTrace('request', {
+                  requestUrl: req.url,
+                  initURL,
+                  page,
+                  sourcePathname,
+                  locale,
+                  requestPathname,
+                  requestPathnameWithLocale,
+                  matchedPathHeader: getHeaderValue(
+                    req.headers['x-matched-path']
+                  ),
+                  routeMatchesHeader: getHeaderValue(
+                    req.headers['x-now-route-matches']
+                  ),
+                  rscHeader: getHeaderValue(req.headers['rsc']),
+                  nextUrlHeader: getHeaderValue(req.headers['next-url']),
+                  matches:
+                    matches?.groups &&
+                    Object.fromEntries(Object.entries(matches.groups)),
+                  fallbackFalseMap,
+                  shouldRenderFallbackShell,
+                  internalRenderFallbackShell:
+                    internalMetadata?.renderFallbackShell,
+                });
+              }
 
               // apply missing matches to query if urlPathname is not
               // literal dynamic route. this is mostly to parse params
@@ -453,6 +525,21 @@ export const getHandlerSource = (ctx: {
                 // Match the NextServer minimal-mode contract for a prerendered
                 // dynamic source route handling a non-pregenerated pathname.
                 req.headers['x-now-route-matches'] = '';
+              }
+
+              if (shouldTraceRequest) {
+                logAdapterTrace('resolved-request', {
+                  requestUrl: req.url,
+                  page,
+                  sourcePathname,
+                  routeMatchesHeader: getHeaderValue(
+                    req.headers['x-now-route-matches']
+                  ),
+                  addedMatchesToUrl,
+                  renderFallbackShell:
+                    internalMetadata?.renderFallbackShell ||
+                    shouldRenderFallbackShell,
+                });
               }
 
               const mod = await require(
@@ -481,6 +568,17 @@ export const getHandlerSource = (ctx: {
                   initURL,
                 },
               });
+
+              if (shouldTraceRequest) {
+                logAdapterTrace('handler-complete', {
+                  requestUrl: req.url,
+                  page,
+                  sourcePathname,
+                  statusCode: res.statusCode,
+                  headersSent: res.headersSent,
+                  writableEnded: res.writableEnded,
+                });
+              }
             } catch (error) {
               console.error(`Failed to handle ${req.url}`, error);
 
