@@ -408,6 +408,14 @@ export const getHandlerSource = (ctx: {
             return decoder.decode(bytes);
           }
 
+          function isFullRouteRSCPath(pathname: string | undefined) {
+            return (
+              typeof pathname === 'string' &&
+              pathname.endsWith('.rsc') &&
+              !pathname.includes('.segments/')
+            );
+          }
+
           return async function handler(
             req: import('http').IncomingMessage,
             res: import('http').ServerResponse,
@@ -417,10 +425,23 @@ export const getHandlerSource = (ctx: {
               const parsedUrl = new URL(req.url || '/', 'http://n');
               const initURL = `https://${req.headers.host || 'localhost'}${parsedUrl.pathname}${parsedUrl.search}`;
 
-              let urlPathname =
+              const matchedPathHeader =
                 typeof req.headers['x-matched-path'] === 'string'
                   ? fixMojibake(req.headers['x-matched-path'])
                   : undefined;
+              const didSynthesizeRscHeader =
+                typeof req.headers['rsc'] === 'undefined' &&
+                (isFullRouteRSCPath(parsedUrl.pathname || '/') ||
+                  isFullRouteRSCPath(matchedPathHeader));
+
+              if (didSynthesizeRscHeader) {
+                // NextServer derives this from the .rsc pathname in minimal
+                // mode. The adapter invokes the page module directly, so we
+                // need to preserve the same request semantics here.
+                req.headers['rsc'] = '1';
+              }
+
+              let urlPathname = matchedPathHeader;
 
               if (typeof urlPathname !== 'string') {
                 urlPathname = parsedUrl.pathname || '/';
@@ -470,13 +491,12 @@ export const getHandlerSource = (ctx: {
                     renderFallbackShell:
                       internalMetadata?.renderFallbackShell ||
                       shouldRenderFallbackShell,
-                    matchedPathHeader: getHeaderValue(
-                      req.headers['x-matched-path']
-                    ),
+                    matchedPathHeader,
                     routeMatchesHeader: getHeaderValue(
                       req.headers['x-now-route-matches']
                     ),
                     rscHeader: getHeaderValue(req.headers['rsc']),
+                    didSynthesizeRscHeader,
                     nextUrlHeader: getHeaderValue(req.headers['next-url']),
                   });
                 });
@@ -489,13 +509,12 @@ export const getHandlerSource = (ctx: {
                   locale,
                   requestPathname,
                   requestPathnameWithLocale,
-                  matchedPathHeader: getHeaderValue(
-                    req.headers['x-matched-path']
-                  ),
+                  matchedPathHeader,
                   routeMatchesHeader: getHeaderValue(
                     req.headers['x-now-route-matches']
                   ),
                   rscHeader: getHeaderValue(req.headers['rsc']),
+                  didSynthesizeRscHeader,
                   nextUrlHeader: getHeaderValue(req.headers['next-url']),
                   matches:
                     matches?.groups &&
@@ -536,6 +555,7 @@ export const getHandlerSource = (ctx: {
                     req.headers['x-now-route-matches']
                   ),
                   addedMatchesToUrl,
+                  didSynthesizeRscHeader,
                   renderFallbackShell:
                     internalMetadata?.renderFallbackShell ||
                     shouldRenderFallbackShell,
