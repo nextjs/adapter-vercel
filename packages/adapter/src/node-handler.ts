@@ -416,6 +416,10 @@ export const getHandlerSource = (ctx: {
             );
           }
 
+          function normalizeFullRouteRSCPath(pathname: string) {
+            return pathname.replace(/\.rsc$/, '') || '/';
+          }
+
           function normalizeNextQueryParam(key: string) {
             for (const prefix of ['nxtP', 'nxtI']) {
               if (key !== prefix && key.startsWith(prefix)) {
@@ -509,6 +513,7 @@ export const getHandlerSource = (ctx: {
                 typeof req.headers['rsc'] === 'undefined' &&
                 (isFullRouteRSCPath(parsedUrl.pathname || '/') ||
                   isFullRouteRSCPath(matchedPathHeader));
+              let didNormalizeFullRouteRscPath = false;
 
               if (didSynthesizeRscHeader) {
                 // NextServer derives this from the .rsc pathname in minimal
@@ -573,6 +578,7 @@ export const getHandlerSource = (ctx: {
                     ),
                     rscHeader: getHeaderValue(req.headers['rsc']),
                     didSynthesizeRscHeader,
+                    didNormalizeFullRouteRscPath,
                     nextUrlHeader: getHeaderValue(req.headers['next-url']),
                   });
                 });
@@ -591,6 +597,7 @@ export const getHandlerSource = (ctx: {
                   ),
                   rscHeader: getHeaderValue(req.headers['rsc']),
                   didSynthesizeRscHeader,
+                  didNormalizeFullRouteRscPath,
                   nextUrlHeader: getHeaderValue(req.headers['next-url']),
                   matches:
                     matches?.groups &&
@@ -638,6 +645,20 @@ export const getHandlerSource = (ctx: {
                 }
               }
 
+              if (req.url) {
+                const resolvedUrl = new URL(req.url, 'http://n');
+
+                if (isFullRouteRSCPath(resolvedUrl.pathname)) {
+                  // Match NextServer.handleRSCRequest(), which strips the
+                  // full-route .rsc suffix before invoking the page module.
+                  resolvedUrl.pathname = normalizeFullRouteRSCPath(
+                    resolvedUrl.pathname
+                  );
+                  req.url = `${resolvedUrl.pathname}${resolvedUrl.search}`;
+                  didNormalizeFullRouteRscPath = true;
+                }
+              }
+
               if (shouldRenderFallbackShell) {
                 // Match the NextServer minimal-mode contract for a prerendered
                 // dynamic source route handling a non-pregenerated pathname.
@@ -658,6 +679,7 @@ export const getHandlerSource = (ctx: {
                   ),
                   addedMatchesToUrl,
                   didSynthesizeRscHeader,
+                  didNormalizeFullRouteRscPath,
                   dynamicRouteParams,
                   matchedPathHeader: getHeaderValue(
                     req.headers['x-matched-path']
