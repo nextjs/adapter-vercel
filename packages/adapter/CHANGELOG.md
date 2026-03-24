@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.15
+
+### Patch Changes
+
+- [#44](https://github.com/nextjs/adapter-vercel/pull/44) [`bf92584`](https://github.com/nextjs/adapter-vercel/commit/bf9258497bc69d6ba9a966b33d09d8e05e50c095) Thanks [@ijjk](https://github.com/ijjk)! - fix(adapter): pass vercel config into getNodeVersion
+
 ## 0.0.1-beta.14
 
 ### Patch Changes
