@@ -330,7 +330,12 @@ export async function handleNodeOutputs(
     vercelOutputDir: string;
   }
 ) {
-  const nodeVersion = await getNodeVersion(projectDir, undefined, {}, {});
+  const nodeVersion = await getNodeVersion(
+    projectDir,
+    undefined,
+    vercelConfig,
+    {}
+  );
 
   const fsSema = new Sema(16, { capacity: nodeOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
