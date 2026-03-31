@@ -12,12 +12,20 @@ export const getHandlerSource = (ctx: {
   prerenderFallbackFalseMap: Record<string, string[]>;
   isMiddleware?: boolean;
   nextConfig?: NextConfig;
+  nextEnvLoaderPathRelativeToProjectDir?: string;
 }) =>
   `
   process.env.NODE_ENV = 'production';
   process.chdir(__dirname);
-  
-  require('next/setup-node-env')
+
+  require('next/setup-node-env');
+
+  if (process.env.__PRIVATE_NEXT_ENV_LOADER_PATH) {
+    const { loadEnvConfig } = require(
+      './' + process.env.__PRIVATE_NEXT_ENV_LOADER_PATH
+    );
+    loadEnvConfig('.', process.env.NODE_ENV === 'development');
+  }
   
   const _n_handler = (${
     ctx.isMiddleware
@@ -464,4 +472,8 @@ export const getHandlerSource = (ctx: {
     .replaceAll(
       'process.env.__PRIVATE_NEXT_CONFIG',
       JSON.stringify(ctx.nextConfig)
+    )
+    .replaceAll(
+      'process.env.__PRIVATE_NEXT_ENV_LOADER_PATH',
+      JSON.stringify(ctx.nextEnvLoaderPathRelativeToProjectDir || '')
     );

@@ -221,6 +221,8 @@ type NodeFunctionConfig = Pick<
   launcherType: 'Nodejs';
 };
 
+let hasWarnedAboutDotEnv = false;
+
 function isGeneratedStep(routeName: string) {
   return (
     routeName.includes('.well-known/workflow/v1/step') ||
@@ -308,6 +310,37 @@ async function writeDeterministicRoutesManifest(distDir: string) {
   return outputManifestPath;
 }
 
+async function getProjectEnvFiles(projectDir: string): Promise<string[]> {
+  const envFiles: string[] = [];
+  const projectFiles = (await fs.readdir(projectDir).catch(() => [])).sort();
+
+  for (const file of projectFiles) {
+    const isEnv = file === '.env' || file.startsWith('.env.');
+
+    if (!isEnv) {
+      continue;
+    }
+
+    const statResult = await fs.lstat(path.join(projectDir, file)).catch(() => {
+      return undefined;
+    });
+
+    if (statResult?.isFile()) {
+      envFiles.push(file);
+    }
+  }
+
+  return envFiles;
+}
+
+function resolveNextEnvLoaderPath(projectDir: string): string {
+  const { createRequire } = require('module') as typeof import('module');
+  const projectRequire = createRequire(path.join(projectDir, 'package.json'));
+  const nextPackagePath = projectRequire.resolve('next/package.json');
+  const requireFromNext = createRequire(nextPackagePath);
+  return requireFromNext.resolve('@next/env');
+}
+
 export async function handleNodeOutputs(
   nodeOutputs: FuncOutputs,
   {
@@ -367,6 +400,33 @@ export async function handleNodeOutputs(
     path.posix.relative(repoRoot, distDir),
     'routes-manifest.json'
   );
+  const envFiles = await getProjectEnvFiles(projectDir);
+  const hasProjectEnvFiles = envFiles.length > 0;
+  const envFilePathMap: Record<string, string> = {};
+  let nextEnvLoaderPathRelativeToProjectDir: string | undefined;
+
+  for (const envFile of envFiles) {
+    envFilePathMap[
+      path.posix.join(path.posix.relative(repoRoot, projectDir), envFile)
+    ] = path.posix.relative(repoRoot, path.join(projectDir, envFile));
+  }
+
+  if (hasProjectEnvFiles) {
+    if (!hasWarnedAboutDotEnv) {
+      console.warn(
+        "Detected .env file, it is strongly recommended to use Vercel's env handling instead"
+      );
+      hasWarnedAboutDotEnv = true;
+    }
+
+    const nextEnvLoaderPath = resolveNextEnvLoaderPath(projectDir);
+    envFilePathMap[path.posix.relative(repoRoot, nextEnvLoaderPath)] =
+      path.posix.relative(repoRoot, nextEnvLoaderPath);
+    nextEnvLoaderPathRelativeToProjectDir = path.posix.relative(
+      projectDir,
+      nextEnvLoaderPath
+    );
+  }
 
   await Promise.all(
     nodeOutputs.map(async (output) => {
@@ -385,6 +445,9 @@ export async function handleNodeOutputs(
       }
       files[path.posix.relative(repoRoot, output.filePath)] =
         path.posix.relative(repoRoot, output.filePath);
+      if (hasProjectEnvFiles) {
+        Object.assign(files, envFilePathMap);
+      }
 
       // ensure 404 handler is included in function for rendering
       // not-found in pages router
@@ -421,6 +484,7 @@ export async function handleNodeOutputs(
           prerenderFallbackFalseMap,
           isMiddleware,
           nextConfig: config,
+          nextEnvLoaderPathRelativeToProjectDir,
         })
       );
 
