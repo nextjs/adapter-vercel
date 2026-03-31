@@ -29,10 +29,10 @@ const myAdapter: NextAdapter = {
   modifyConfig(config, ctx) {
     if (
       ctx.phase === PHASE_PRODUCTION_BUILD &&
-      process.env.VERCEL_IMMUTABLE_DEPLOYMENT_ID
+      process.env.VERCEL_IMMUTABLE_STATIC_FILES
     ) {
-      config.experimental.immutableAssetToken =
-        process.env.VERCEL_IMMUTABLE_DEPLOYMENT_ID;
+      // @ts-expect-error not merged yet
+      config.experimental.supportsImmutableAssets = true;
     }
     return config;
   },
