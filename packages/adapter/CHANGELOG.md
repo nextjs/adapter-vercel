@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.16
+
+### Patch Changes
+
+- [#46](https://github.com/nextjs/adapter-vercel/pull/46) [`99a684d`](https://github.com/nextjs/adapter-vercel/commit/99a684dd678418b9e9b870a1fb90d03938663709) Thanks [@ijjk](https://github.com/ijjk)! - Handle .env files in node output path
+
 ## 0.0.1-beta.15
 
 ### Patch Changes
