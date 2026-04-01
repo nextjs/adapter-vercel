@@ -195,10 +195,7 @@ export async function handleStaticOutputs(
 
   const immutableFiles = outputs
     .filter((output) => output.immutableHash)
-    .map((output) => [
-      path.posix.join('static', output.pathname),
-      output.immutableHash,
-    ]);
+    .map((output) => [output.pathname, output.immutableHash]);
   if (immutableFiles.length > 0) {
     await fs.writeFile(
       path.posix.join(vercelOutputDir, 'immutable.json'),
