@@ -199,7 +199,7 @@ export async function handleStaticOutputs(
   if (immutableFiles.length > 0) {
     await fs.writeFile(
       path.posix.join(vercelOutputDir, 'immutable.json'),
-      JSON.stringify(Object.fromEntries(immutableFiles))
+      JSON.stringify({ version: 1, hashes: Object.fromEntries(immutableFiles) })
     );
   }
 }
