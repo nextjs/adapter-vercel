@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.17
+
+### Patch Changes
+
+- [#48](https://github.com/nextjs/adapter-vercel/pull/48) [`2dc4ff5`](https://github.com/nextjs/adapter-vercel/commit/2dc4ff54d4bb4c43f9839b036c2ab8b8daef227a) Thanks [@ijjk](https://github.com/ijjk)! - Normalize `x-nextjs-data` headers by removing them on non-`/_next/data` requests before route resolution.
+
 ## 0.0.1-beta.16
 
 ### Patch Changes
