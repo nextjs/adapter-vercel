@@ -29,7 +29,7 @@ const myAdapter: NextAdapter = {
   modifyConfig(config, ctx) {
     if (
       ctx.phase === PHASE_PRODUCTION_BUILD &&
-      process.env.VERCEL_IMMUTABLE_STATIC_FILES === '1'
+      process.env.VERCEL_IMMUTABLE_STATIC_FILES_ENABLED === '1'
     ) {
       config.experimental.supportsImmutableAssets = true;
     }
