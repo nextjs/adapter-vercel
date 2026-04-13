@@ -193,13 +193,18 @@ export async function handleStaticOutputs(
     'Not Found'
   );
 
-  const immutableFiles = outputs
-    .filter((output) => output.immutableHash)
-    .map((output) => [output.pathname, output.immutableHash]);
-  if (immutableFiles.length > 0) {
+  const immutableFiles: Record<string, string> = {};
+  let hasImmutableFiles = false;
+  for (const output of outputs) {
+    if (output.immutableHash) {
+      immutableFiles[output.pathname] = output.immutableHash;
+      hasImmutableFiles = true;
+    }
+  }
+  if (hasImmutableFiles) {
     await fs.writeFile(
       path.posix.join(vercelOutputDir, 'immutable.json'),
-      JSON.stringify({ version: 1, hashes: Object.fromEntries(immutableFiles) })
+      JSON.stringify({ version: 1, hashes: immutableFiles })
     );
   }
 }
