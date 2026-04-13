@@ -27,7 +27,7 @@
     "convert-source-map": "1.8.0",
     "esbuild": "0.25.10",
     "fs-extra": "11.2.0",
-    "next": "16.2.0-canary.79",
+    "next": "16.2.1-canary.34",
     "picomatch": "4.0.1",
     "source-map": "0.7.4",
     "webpack-sources": "3.2.3"

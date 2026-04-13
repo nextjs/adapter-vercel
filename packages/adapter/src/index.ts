@@ -31,7 +31,6 @@ const myAdapter: NextAdapter = {
       ctx.phase === PHASE_PRODUCTION_BUILD &&
       process.env.VERCEL_IMMUTABLE_STATIC_FILES === '1'
     ) {
-      // @ts-expect-error not merged yet
       config.experimental.supportsImmutableAssets = true;
     }
     return config;
