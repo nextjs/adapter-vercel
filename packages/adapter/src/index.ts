@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
-import { PHASE_PRODUCTION_BUILD } from 'next/dist/shared/lib/constants';
+import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import {
   type FuncOutputs,
   handleEdgeOutputs,
