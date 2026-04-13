@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.18
+
+### Patch Changes
+
+- [`eaa7309`](https://github.com/nextjs/adapter-vercel/commit/eaa7309d106e0410bc7b27471f09e43d3428ecd7) Thanks [@ijjk](https://github.com/ijjk)! - Support VERCEL_IMMUTABLE_STATIC_FILES_ENABLED and VERCEL_HASH_SALT
+
 ## 0.0.1-beta.17
 
 ### Patch Changes
