@@ -33,6 +33,13 @@ const myAdapter: NextAdapter = {
     ) {
       config.experimental.supportsImmutableAssets = true;
     }
+
+    if (process.env.VERCEL_HASH_SALT != null) {
+      config.experimental.outputHashSalt =
+        (config.experimental.outputHashSalt ?? '') +
+        process.env.VERCEL_HASH_SALT;
+    }
+
     return config;
   },
   async onBuildComplete({
