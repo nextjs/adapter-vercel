@@ -46,3 +46,102 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN_ELEVATED }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_ELEVATED }}
+
+      - name: Resolve Published Adapter Version
+        if: steps.changesets.outputs.published == 'true'
+        id: adapter-version
+        env:
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
+        run: |
+          set -euo pipefail
+
+          version=$(
+            node -e '
+              const packages = JSON.parse(process.env.PUBLISHED_PACKAGES ?? "[]");
+              const adapter = packages.find(
+                (pkg) => pkg.name === "@next-community/adapter-vercel"
+              );
+              if (!adapter?.version) {
+                console.error("Published adapter version was not found.");
+                process.exit(1);
+              }
+              process.stdout.write(adapter.version);
+            '
+          )
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Bump Adapter Version In vercel/vercel
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          ADAPTER_VERSION: ${{ steps.adapter-version.outputs.version }}
+          VERCEL_CLI_PR_TOKEN: ${{ secrets.VERCEL_CLI_PR_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          branch_name="nextjs/bump-adapter-$ADAPTER_VERSION"
+          repo_dir="$(mktemp -d)/vercel"
+
+          git clone \
+            --branch main \
+            --depth=1 \
+            "https://x-access-token:${VERCEL_CLI_PR_TOKEN}@github.com/vercel/vercel.git" \
+            "$repo_dir"
+
+          git -C "$repo_dir" config user.name "Nextjs bot"
+          git -C "$repo_dir" config user.email "it+nextjs-bot@vercel.com"
+
+          if git -C "$repo_dir" ls-remote --exit-code --heads origin "$branch_name" >/dev/null 2>&1; then
+            git -C "$repo_dir" fetch origin "$branch_name"
+            git -C "$repo_dir" checkout -B "$branch_name" "origin/$branch_name"
+          else
+            git -C "$repo_dir" checkout -b "$branch_name"
+          fi
+
+          PACKAGE_JSON_PATH="$repo_dir/packages/next/package.json" node <<'NODE'
+          const fs = require("node:fs");
+
+          const path = process.env.PACKAGE_JSON_PATH;
+          const version = process.env.ADAPTER_VERSION;
+          const packageJson = JSON.parse(fs.readFileSync(path, "utf8"));
+
+          if (!packageJson.devDependencies?.["@next-community/adapter-vercel"]) {
+            throw new Error(
+              "Expected @next-community/adapter-vercel in packages/next/package.json devDependencies"
+            );
+          }
+
+          packageJson.devDependencies["@next-community/adapter-vercel"] = version;
+          fs.writeFileSync(path, `${JSON.stringify(packageJson, null, 2)}\n`);
+          NODE
+
+          if git -C "$repo_dir" diff --quiet -- packages/next/package.json; then
+            echo "packages/next/package.json is already set to $ADAPTER_VERSION"
+            exit 0
+          fi
+
+          pnpm_version=$(
+            node -p '
+              const packageManager = require(process.argv[1]).packageManager;
+              if (!packageManager) {
+                throw new Error("packageManager is missing from vercel/vercel package.json");
+              }
+              if (!packageManager.startsWith("pnpm@")) {
+                throw new Error(`Expected a pnpm packageManager, received ${packageManager}`);
+              }
+              packageManager;
+            ' "$repo_dir/package.json"
+          )
+
+          corepack enable
+          corepack prepare "$pnpm_version" --activate
+          (
+            cd "$repo_dir"
+            CI=1 pnpm install --no-frozen-lockfile
+          )
+
+          git -C "$repo_dir" add packages/next/package.json pnpm-lock.yaml
+          git -C "$repo_dir" commit \
+            --author="Nextjs bot <it+nextjs-bot@vercel.com>" \
+            -m "chore: bump @next-community/adapter-vercel to $ADAPTER_VERSION"
+          git -C "$repo_dir" push --set-upstream origin "$branch_name"
