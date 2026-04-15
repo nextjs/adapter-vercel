@@ -295,6 +295,22 @@ async function getGeneratedWorkflowLambdaOptions({
   }
 }
 
+function resolveNodeFunctionMaxDuration({
+  generatedConfigOpts,
+  outputConfigMaxDuration,
+  vercelConfigMaxDuration,
+}: {
+  generatedConfigOpts?: LambdaOptionOverrides;
+  outputConfigMaxDuration?: number;
+  vercelConfigMaxDuration?: number;
+}) {
+  return (
+    generatedConfigOpts?.maxDuration ??
+    outputConfigMaxDuration ??
+    vercelConfigMaxDuration
+  );
+}
+
 export type FuncOutputs = Array<
   | AdapterOutput['PAGES']
   | AdapterOutput['APP_PAGE']
@@ -526,8 +542,11 @@ export async function handleNodeOutputs(
       if (generatedConfigOpts) {
         Object.assign(vercelConfigOpts, generatedConfigOpts);
       }
-      const maxDuration =
-        generatedConfigOpts?.maxDuration ?? output.config.maxDuration;
+      const maxDuration = resolveNodeFunctionMaxDuration({
+        generatedConfigOpts,
+        outputConfigMaxDuration: output.config.maxDuration,
+        vercelConfigMaxDuration: vercelConfigOpts.maxDuration,
+      });
       const nodeConfig: NodeFunctionConfig = {
         ...vercelConfigOpts,
         filePathMap: files,
