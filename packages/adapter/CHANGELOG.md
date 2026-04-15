@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.19
+
+### Patch Changes
+
+- [#52](https://github.com/nextjs/adapter-vercel/pull/52) [`60d936f`](https://github.com/nextjs/adapter-vercel/commit/60d936fe443ec55beec224db5d2e5a1ef9aa4012) Thanks [@ijjk](https://github.com/ijjk)! - Preserve `maxDuration` from `vercel.json` in generated node function config.
+
 ## 0.0.1-beta.18
 
 ### Patch Changes
