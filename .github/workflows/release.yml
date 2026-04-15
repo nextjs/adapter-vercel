@@ -80,6 +80,8 @@ jobs:
           set -euo pipefail
 
           branch_name="nextjs/bump-adapter-$ADAPTER_VERSION"
+          commit_message="chore: bump @next-community/adapter-vercel to $ADAPTER_VERSION"
+          changeset_slug="bump-adapter-${ADAPTER_VERSION//[^a-zA-Z0-9]/-}"
           repo_dir="$(mktemp -d)/vercel"
 
           git clone \
@@ -115,10 +117,13 @@ jobs:
           fs.writeFileSync(path, `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
-          if git -C "$repo_dir" diff --quiet -- packages/next/package.json; then
-            echo "packages/next/package.json is already set to $ADAPTER_VERSION"
-            exit 0
-          fi
+          cat > "$repo_dir/.changeset/$changeset_slug.md" <<EOF
+          ---
+          '@vercel/next': patch
+          ---
+
+          $commit_message
+          EOF
 
           pnpm_version=$(
             node -p '
@@ -140,8 +145,13 @@ jobs:
             CI=1 pnpm install --no-frozen-lockfile
           )
 
-          git -C "$repo_dir" add packages/next/package.json pnpm-lock.yaml
+          if git -C "$repo_dir" diff --quiet -- .changeset "packages/next/package.json" pnpm-lock.yaml; then
+            echo "vercel/vercel already contains the adapter bump for $ADAPTER_VERSION"
+            exit 0
+          fi
+
+          git -C "$repo_dir" add .changeset/"$changeset_slug.md" packages/next/package.json pnpm-lock.yaml
           git -C "$repo_dir" commit \
             --author="Nextjs bot <it+nextjs-bot@vercel.com>" \
-            -m "chore: bump @next-community/adapter-vercel to $ADAPTER_VERSION"
+            -m "$commit_message"
           git -C "$repo_dir" push --set-upstream origin "$branch_name"
