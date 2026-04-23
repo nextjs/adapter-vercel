@@ -1,11 +1,20 @@
 import type { RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter, NextConfig } from 'next';
+import { escapeStringRegexp } from './utils';
 
 type AdapterRouting = Parameters<
   NonNullable<NextAdapter['onBuildComplete']>
 >[0]['routing'];
 
 type AdapterRoute = AdapterRouting['beforeFiles'][0];
+
+const documentRequestHas = [
+  {
+    type: 'header' as const,
+    key: 'accept',
+    value: '.*text/html.*',
+  },
+];
 
 export function modifyWithRewriteHeaders(
   rewrites: RouteWithSrc[],
@@ -167,6 +176,38 @@ export function normalizeRewrites(routing: {
     }),
     afterFiles: routing.afterFiles.filter(isRewriteRoute).map(normalize),
     fallback: routing.fallback.filter(isRewriteRoute).map(normalize),
+  };
+}
+
+export function getStaticExportGlobalFallbackRoute({
+  config,
+  staticFilePathnames,
+}: {
+  config: {
+    basePath?: string;
+    output?: string;
+  };
+  staticFilePathnames: Iterable<string>;
+}): RouteWithSrc | undefined {
+  if (config.output !== 'export') {
+    return undefined;
+  }
+
+  const basePath =
+    config.basePath && config.basePath !== '/' ? config.basePath : '';
+  const destination = `${basePath}/_fallback`;
+
+  if (!new Set(staticFilePathnames).has(destination)) {
+    return undefined;
+  }
+
+  return {
+    src: basePath
+      ? `^${escapeStringRegexp(basePath)}(?:/(?!_next(?:/|$)).*)?$`
+      : '^/(?!_next(?:/|$)).*',
+    dest: destination,
+    has: documentRequestHas,
+    check: true,
   };
 }
 

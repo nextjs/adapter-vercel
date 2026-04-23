@@ -17,6 +17,7 @@ import {
   extractHeaders,
   extractOnMatchRoutes,
   extractRedirects,
+  getStaticExportGlobalFallbackRoute,
   modifyWithRewriteHeaders,
   normalizeNextDataRoutes,
   normalizeRewrites,
@@ -223,6 +224,10 @@ const myAdapter: NextAdapter = {
 
     // create routes
     const convertedRewrites = normalizeRewrites(routing);
+    const staticExportGlobalFallbackRoute = getStaticExportGlobalFallbackRoute({
+      config,
+      staticFilePathnames: outputs.staticFiles.map((output) => output.pathname),
+    });
 
     if (shouldHandleSegmentPrefetches) {
       modifyWithRewriteHeaders(convertedRewrites.beforeFiles, {
@@ -794,6 +799,10 @@ const myAdapter: NextAdapter = {
 
       // apply normal dynamic routes
       ...dynamicRoutes,
+
+      ...(staticExportGlobalFallbackRoute
+        ? [staticExportGlobalFallbackRoute]
+        : []),
 
       // apply x-nextjs-matched-path header and __next_data_catchall rewrite
       // if middleware + pages - placeholder for middleware handling
