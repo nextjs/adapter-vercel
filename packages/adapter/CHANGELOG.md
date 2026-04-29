@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.20
+
+### Patch Changes
+
+- [#60](https://github.com/nextjs/adapter-vercel/pull/60) [`c727b5e`](https://github.com/nextjs/adapter-vercel/commit/c727b5e38c483bf24afff31cfa7959fbb0e640ef) Thanks [@ijjk](https://github.com/ijjk)! - Ignore example environment variables
+
 ## 0.0.1-beta.19
 
 ### Patch Changes
