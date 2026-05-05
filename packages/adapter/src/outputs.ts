@@ -411,6 +411,11 @@ export async function handleNodeOutputs(
   const fsSema = new Sema(16, { capacity: nodeOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
   const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
+  const distPackageJsonPath = path.join(distDir, 'package.json');
+  const distPackageJsonRelativePath = path.posix.join(
+    path.posix.relative(repoRoot, distDir),
+    'package.json'
+  );
 
   let pages404Output: undefined | FuncOutputs[0];
   let pagesErrorOutput: undefined | FuncOutputs[0];
@@ -481,6 +486,10 @@ export async function handleNodeOutputs(
       for (const [relPath, fsPath] of Object.entries(output.assets)) {
         files[relPath] = path.posix.relative(repoRoot, fsPath);
       }
+      files[distPackageJsonRelativePath] = path.posix.relative(
+        repoRoot,
+        distPackageJsonPath
+      );
       files[path.posix.relative(repoRoot, output.filePath)] =
         path.posix.relative(repoRoot, output.filePath);
       if (hasProjectEnvFiles) {
@@ -525,6 +534,20 @@ export async function handleNodeOutputs(
           nextEnvLoaderPathRelativeToProjectDir,
         })
       );
+
+      const distPackageJsonStat = await fs
+        .lstat(distPackageJsonPath)
+        .catch(() => undefined);
+      if (distPackageJsonStat?.isFile()) {
+        const functionDistPackageJsonPath = path.join(
+          functionDir,
+          distPackageJsonRelativePath
+        );
+        await fs.mkdir(path.dirname(functionDistPackageJsonPath), {
+          recursive: true,
+        });
+        await copy(distPackageJsonPath, functionDistPackageJsonPath);
+      }
 
       const operationType =
         output.type === AdapterOutputType.APP_PAGE || AdapterOutputType.PAGES
