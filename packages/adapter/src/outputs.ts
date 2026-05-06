@@ -542,7 +542,8 @@ export async function handleNodeOutputs(
       });
       await writeIfNotExists(handlerFilePath, handlerSource);
       if (filesHashes) {
-        filesHashes[path.posix.relative(repoRoot, handlerFilePath)] = crypto
+        // The handler is emitted in the same folder as the config file anyway.
+        filesHashes['___next_launcher.cjs'] = crypto
           .createHash('sha256')
           .update(handlerSource)
           .digest('hex');
