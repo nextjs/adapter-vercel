@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -16,6 +15,7 @@ import type { NextjsParams } from './get-edge-function';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { getHandlerSource } from './node-handler';
 import type { VercelConfig } from './types';
+import { sha256 } from './utils';
 
 /**
  * Type guard to check if a prerender fallback has a filePath.
@@ -343,10 +343,7 @@ async function writeDeterministicRoutesManifest(distDir: string) {
   await fs.writeFile(outputManifestPath, manifestJson);
   return {
     routesManifestPath: outputManifestPath,
-    routesManifestHash: crypto
-      .createHash('sha256')
-      .update(manifestJson)
-      .digest('hex'),
+    routesManifestHash: sha256(manifestJson),
   };
 }
 
@@ -449,12 +446,16 @@ export async function handleNodeOutputs(
   const envFiles = await getProjectEnvFiles(projectDir);
   const hasProjectEnvFiles = envFiles.length > 0;
   const envFilePathMap: Record<string, string> = {};
+  const envFileHashes: Record<string, string> = {};
   let nextEnvLoaderPathRelativeToProjectDir: string | undefined;
 
   for (const envFile of envFiles) {
     envFilePathMap[
       path.posix.join(path.posix.relative(repoRoot, projectDir), envFile)
     ] = path.posix.relative(repoRoot, path.join(projectDir, envFile));
+    envFileHashes[envFile] = sha256(
+      await fs.readFile(path.join(projectDir, envFile))
+    );
   }
 
   if (hasProjectEnvFiles) {
@@ -468,6 +469,9 @@ export async function handleNodeOutputs(
     const nextEnvLoaderPath = resolveNextEnvLoaderPath(projectDir);
     envFilePathMap[path.posix.relative(repoRoot, nextEnvLoaderPath)] =
       path.posix.relative(repoRoot, nextEnvLoaderPath);
+    envFileHashes[path.posix.relative(repoRoot, nextEnvLoaderPath)] = sha256(
+      await fs.readFile(nextEnvLoaderPath)
+    );
     nextEnvLoaderPathRelativeToProjectDir = path.posix.relative(
       projectDir,
       nextEnvLoaderPath
@@ -496,6 +500,9 @@ export async function handleNodeOutputs(
         path.posix.relative(repoRoot, output.filePath);
       if (hasProjectEnvFiles) {
         Object.assign(files, envFilePathMap);
+        if (filesHashes) {
+          Object.assign(filesHashes, envFileHashes);
+        }
       }
 
       // ensure 404 handler is included in function for rendering
@@ -543,10 +550,7 @@ export async function handleNodeOutputs(
       await writeIfNotExists(handlerFilePath, handlerSource);
       if (filesHashes) {
         // The handler is emitted in the same folder as the config file anyway.
-        filesHashes['___next_launcher.cjs'] = crypto
-          .createHash('sha256')
-          .update(handlerSource)
-          .digest('hex');
+        filesHashes['___next_launcher.cjs'] = sha256(handlerSource);
       }
 
       const operationType =
@@ -602,7 +606,7 @@ export async function handleNodeOutputs(
 
       await writeIfNotExists(
         path.join(functionDir, `.vc-config.json`),
-        JSON.stringify(nodeConfig)
+        JSON.stringify(nodeConfig, null, 2)
       );
 
       fsSema.release();
