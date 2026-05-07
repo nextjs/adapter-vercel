@@ -549,7 +549,6 @@ export async function handleNodeOutputs(
       });
       await writeIfNotExists(handlerFilePath, handlerSource);
       if (filesHashes) {
-        // The handler is emitted in the same folder as the config file anyway.
         filesHashes['___next_launcher.cjs'] = sha256(handlerSource);
       }
 
