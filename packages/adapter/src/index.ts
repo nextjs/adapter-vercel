@@ -57,7 +57,7 @@ const myAdapter: NextAdapter = {
       config.instrumentationClientInject ??= [];
       // @ts-expect-error nextjs not upgraded yet
       config.instrumentationClientInject.push(
-        path.join(__dirname, '../toolbar', toolbarScript)
+        path.join(__dirname, 'toolbar', toolbarScript)
       );
     }
 

@@ -26,8 +26,14 @@ await build({
 });
 
 await fs.copyFile(
-  createRequire(path.join(process.cwd(), 'packages/adapter')).resolve(
+  createRequire(path.join(process.cwd(), '_')).resolve(
     'source-map/lib/mappings.wasm'
   ),
   path.join(process.cwd(), 'dist', 'mappings.wasm')
+);
+
+await fs.cp(
+  path.join(process.cwd(), 'src/toolbar'),
+  path.join(process.cwd(), 'dist/toolbar'),
+  { recursive: true }
 );

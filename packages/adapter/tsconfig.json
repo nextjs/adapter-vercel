@@ -21,6 +21,6 @@
     "module": "es2022",
     "moduleResolution": "node"
   },
-  "include": ["src", "toolbar", "build.mts"],
+  "include": ["src", "build.mts"],
   "exclude": ["node_modules", "**/*.test.ts"]
 }
