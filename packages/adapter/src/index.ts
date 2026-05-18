@@ -40,6 +40,27 @@ const myAdapter: NextAdapter = {
         process.env.VERCEL_HASH_SALT;
     }
 
+    if (
+      ctx.phase === PHASE_PRODUCTION_BUILD &&
+      process.env.VERCEL_PREVIEW_COMMENTS_ENABLED === '1'
+    ) {
+      let toolbarScript: string;
+      if (process.env.VERCEL_ENV === 'production') {
+        toolbarScript = 'production.js';
+      } else if (process.env.VERCEL_PREVIEW_COMMENTS_OPT_IN === '1') {
+        toolbarScript = 'preview-opt-in.js';
+      } else {
+        toolbarScript = 'preview.js';
+      }
+
+      // @ts-expect-error nextjs not upgraded yet
+      config.instrumentationClientInject ??= [];
+      // @ts-expect-error nextjs not upgraded yet
+      config.instrumentationClientInject.push(
+        path.join(__dirname, 'toolbar', toolbarScript)
+      );
+    }
+
     return config;
   },
   async onBuildComplete({
