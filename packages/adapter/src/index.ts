@@ -21,12 +21,13 @@ import {
   normalizeNextDataRoutes,
   normalizeRewrites,
 } from './routing';
+import { generateToolbarScript } from './toolbar';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
 const myAdapter: NextAdapter = {
   name: 'Vercel',
-  modifyConfig(config, ctx) {
+  async modifyConfig(config, ctx) {
     if (
       ctx.phase === PHASE_PRODUCTION_BUILD &&
       process.env.VERCEL_IMMUTABLE_STATIC_FILES_ENABLED === '1'
@@ -44,20 +45,29 @@ const myAdapter: NextAdapter = {
       ctx.phase === PHASE_PRODUCTION_BUILD &&
       process.env.VERCEL_PREVIEW_COMMENTS_ENABLED === '1'
     ) {
-      let toolbarScript: string;
-      if (process.env.VERCEL_ENV === 'production') {
-        toolbarScript = 'production.js';
-      } else if (process.env.VERCEL_PREVIEW_COMMENTS_OPT_IN === '1') {
-        toolbarScript = 'preview-opt-in.js';
-      } else {
-        toolbarScript = 'preview.js';
-      }
+      // This script has to live inside of the project directory since Turbopack can't read file
+      // files outside of the project directory.
+      const dir = path.join(
+        // @ts-expect-error nextjs not upgraded yet
+        ctx.projectDir,
+        '.vercel/'
+      );
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(
+        path.join(dir, 'adapter-toolbar-script.js'),
+        generateToolbarScript(
+          process.env.VERCEL_ENV === 'production',
+          process.env.VERCEL_PREVIEW_COMMENTS_OPT_IN === '1',
+          // TODO what if skew protection is disabled?
+          'process.env.NEXT_DEPLOYMENT_ID'
+        )
+      );
 
       // @ts-expect-error nextjs not upgraded yet
       config.instrumentationClientInject ??= [];
       // @ts-expect-error nextjs not upgraded yet
       config.instrumentationClientInject.push(
-        path.join(__dirname, 'toolbar', toolbarScript)
+        `./.vercel/adapter-toolbar-script.js`
       );
     }
 

@@ -13,7 +13,6 @@
     "noUnusedParameters": false,
     "preserveWatchOutput": true,
     "skipLibCheck": true,
-    "checkJs": true,
     "lib": ["es2022"],
     "strict": true,
     "outDir": "dist",

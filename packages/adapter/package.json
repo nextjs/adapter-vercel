@@ -17,7 +17,7 @@
     "@types/bytes": "3.1.1",
     "@types/convert-source-map": "1.5.2",
     "@types/fs-extra": "8.0.0",
-    "@types/node": "22.13.14",
+    "@types/node": "14.18.33",
     "@types/picomatch": "2.3.3",
     "@types/webpack-sources": "3.2.0",
     "@vercel/build-utils": "13.6.2",
