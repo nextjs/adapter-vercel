@@ -4,7 +4,8 @@
   "type": "commonjs",
   "main": "dist/index.js",
   "files": [
-    "dist"
+    "dist",
+    "toolbar"
   ],
   "repository": {
     "url": "https://github.com/nextjs/adapter-vercel"
