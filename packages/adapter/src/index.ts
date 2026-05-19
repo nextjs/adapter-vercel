@@ -58,8 +58,10 @@ const myAdapter: NextAdapter = {
         generateToolbarScript(
           process.env.VERCEL_ENV === 'production',
           process.env.VERCEL_PREVIEW_COMMENTS_OPT_IN === '1',
-          // TODO what if skew protection is disabled?
-          'process.env.NEXT_DEPLOYMENT_ID'
+          process.env.VERCEL_SKEW_PROTECTION_ENABLED === '1'
+            ? 'process.env.NEXT_DEPLOYMENT_ID'
+            : // Fallback to burning in the deployment id if skew protection is disabled
+              'process.env.NEXT_PUBLIC_VERCEL_DEPLOYMENT_ID'
         )
       );
 
