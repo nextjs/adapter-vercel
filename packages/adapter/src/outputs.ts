@@ -490,7 +490,6 @@ export async function handleNodeOutputs(
 
       const files: Record<string, string> = {};
       const filesHashes: Record<string, string> | undefined =
-        // @ts-expect-error not released yet
         output.assetsHashes;
 
       for (const [relPath, fsPath] of Object.entries(output.assets)) {
@@ -516,7 +515,6 @@ export async function handleNodeOutputs(
           )) {
             files[relPath] = path.posix.relative(repoRoot, fsPath);
             if (filesHashes) {
-              // @ts-expect-error not released yet
               filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
             }
           }
