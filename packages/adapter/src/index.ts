@@ -47,11 +47,7 @@ const myAdapter: NextAdapter = {
     ) {
       // This script has to live inside of the project directory since Turbopack can't read file
       // files outside of the project directory.
-      const dir = path.join(
-        // @ts-expect-error nextjs not upgraded yet
-        ctx.projectDir,
-        '.vercel/'
-      );
+      const dir = path.join(ctx.projectDir, '.vercel/');
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(
         path.join(dir, 'adapter-toolbar-script.js'),
@@ -65,9 +61,7 @@ const myAdapter: NextAdapter = {
         )
       );
 
-      // @ts-expect-error nextjs not upgraded yet
       config.instrumentationClientInject ??= [];
-      // @ts-expect-error nextjs not upgraded yet
       config.instrumentationClientInject.push(
         `./.vercel/adapter-toolbar-script.js`
       );
