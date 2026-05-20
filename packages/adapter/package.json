@@ -1,6 +1,6 @@
 {
   "name": "@next-community/adapter-vercel",
-  "version": "0.0.1-beta.20",
+  "version": "0.0.1-beta.21",
   "type": "commonjs",
   "main": "dist/index.js",
   "files": [

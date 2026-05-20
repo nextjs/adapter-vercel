@@ -1,5 +1,13 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.21
+
+### Patch Changes
+
+- [#24](https://github.com/nextjs/adapter-vercel/pull/24) [`d7dd58d`](https://github.com/nextjs/adapter-vercel/commit/d7dd58d3747aa155bf5381a8ad055766db73b456) Thanks [@mischnic](https://github.com/mischnic)! - Include fileHashes for function files
+
+- [#65](https://github.com/nextjs/adapter-vercel/pull/65) [`54b2026`](https://github.com/nextjs/adapter-vercel/commit/54b202610df9b611433d3a104f67c6627db68ac0) Thanks [@mischnic](https://github.com/mischnic)! - Pass through vercel-toolbar to instrumentationClientInject
+
 ## 0.0.1-beta.20
 
 ### Patch Changes
