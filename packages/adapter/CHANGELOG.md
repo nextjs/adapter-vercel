@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.22
+
+### Patch Changes
+
+- [#66](https://github.com/nextjs/adapter-vercel/pull/66) [`74e1c0c`](https://github.com/nextjs/adapter-vercel/commit/74e1c0c8357d31da2bc792833098cf89f7120689) Thanks [@mischnic](https://github.com/mischnic)! - ctx.projectDir might be undefined on older versions
+
 ## 0.0.1-beta.21
 
 ### Patch Changes
