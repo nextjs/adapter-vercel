@@ -43,7 +43,9 @@ const myAdapter: NextAdapter = {
 
     if (
       ctx.phase === PHASE_PRODUCTION_BUILD &&
-      process.env.VERCEL_PREVIEW_COMMENTS_ENABLED === '1'
+      process.env.VERCEL_PREVIEW_COMMENTS_ENABLED === '1' &&
+      // Only available in newer Next.js versions
+      typeof ctx.projectDir !== 'undefined'
     ) {
       // This script has to live inside of the project directory since Turbopack can't read file
       // files outside of the project directory.
