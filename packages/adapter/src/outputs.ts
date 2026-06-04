@@ -551,7 +551,8 @@ export async function handleNodeOutputs(
       }
 
       const operationType =
-        output.type === AdapterOutputType.APP_PAGE || AdapterOutputType.PAGES
+        output.type === AdapterOutputType.APP_PAGE ||
+        output.type === AdapterOutputType.PAGES
           ? 'PAGE'
           : 'API';
 
