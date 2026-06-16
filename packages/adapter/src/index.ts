@@ -28,11 +28,12 @@ import { escapeStringRegexp, getImagesConfig } from './utils';
 const myAdapter: NextAdapter = {
   name: 'Vercel',
   async modifyConfig(config, ctx) {
-    if (
-      ctx.phase === PHASE_PRODUCTION_BUILD &&
-      process.env.VERCEL_IMMUTABLE_STATIC_FILES_ENABLED === '1'
-    ) {
-      config.experimental.supportsImmutableAssets = true;
+    if (ctx.phase === PHASE_PRODUCTION_BUILD) {
+      config.experimental.supportsImmutableAssets =
+        // Default to true, allow users to opt-out
+        (config.experimental.supportsImmutableAssets ?? true) &&
+        // AND with infra support to allow disabling via feature flag if necessary.
+        process.env.VERCEL_IMMUTABLE_STATIC_FILES_ENABLED === '1';
     }
 
     if (process.env.VERCEL_HASH_SALT != null) {
