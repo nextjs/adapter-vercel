@@ -72,7 +72,7 @@ export const getHandlerSource = (ctx: {
           const relativeDistDir = process.env
             .__PRIVATE_RELATIVE_DIST_DIR as string;
           const prerenderFallbackFalseMap = process.env
-            .__PRIVATE_PRERENDER_FALLBACK_MAP as any as Record<
+            .__PRIVATE_PRERENDER_FALLBACK_MAP as unknown as Record<
             string,
             string[]
           >;
@@ -377,7 +377,7 @@ export const getHandlerSource = (ctx: {
           return async function handler(
             req: import('http').IncomingMessage,
             res: import('http').ServerResponse,
-            internalMetadata: any
+            internalMetadata: Record<string, unknown>
           ) {
             try {
               const parsedUrl = new URL(req.url || '/', 'http://n');
