@@ -50,7 +50,7 @@ export const getHandlerSource = (ctx: {
 
           return async function handler(request: Request): Promise<Response> {
             let middlewareHandler = await require(
-              './' + path.posix.join(relativeDistDir, 'server', 'middleware.js')
+              `./${path.posix.join(relativeDistDir, 'server', 'middleware.js')}`
             );
             middlewareHandler = middlewareHandler.handler || middlewareHandler;
 
@@ -91,7 +91,7 @@ export const getHandlerSource = (ctx: {
             staticRoutes: staticRoutesRaw,
             i18n,
           } = require(
-            './' + path.posix.join(relativeDistDir, 'routes-manifest.json')
+            `./${path.posix.join(relativeDistDir, 'routes-manifest.json')}`
           ) as RoutesManifest;
 
           const matchOperatorsRegex = /[|\\{}()[\]^$+*?.-]/g;
@@ -109,9 +109,7 @@ export const getHandlerSource = (ctx: {
           const staticRoutes = staticRoutesRaw.map((route) => {
             return {
               ...route,
-              namedRegex: new RegExp(
-                '^' + escapeStringRegexp(route.page) + '$'
-              ),
+              namedRegex: new RegExp(`^${escapeStringRegexp(route.page)}$`),
             };
           });
 
@@ -310,6 +308,7 @@ export const getHandlerSource = (ctx: {
                       req: IncomingMessage,
                       res: ServerResponse,
                       ctx: {
+                        // biome-ignore lint/suspicious/noExplicitAny: this really is any
                         waitUntil?: (prom: Promise<any>) => void;
                       }
                     ) => Promise<void>;

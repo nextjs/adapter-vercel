@@ -110,13 +110,13 @@ export function modifyWithRewriteHeaders(
 
       ...(pathname
         ? {
-            ['x-nextjs-rewritten-path']: pathname,
+            'x-nextjs-rewritten-path': pathname,
           }
         : {}),
 
       ...(query
         ? {
-            ['x-nextjs-rewritten-query']: query,
+            'x-nextjs-rewritten-query': query,
           }
         : {}),
     };

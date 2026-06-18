@@ -164,7 +164,7 @@ export async function handleStaticOutputs(
 
       if (isHtml) {
         vercelConfig.overrides[
-          path.posix.join('./', output.pathname + '.html')
+          path.posix.join('./', `${output.pathname}.html`)
         ] = {
           contentType: 'text/html; charset=utf-8',
           path: path.posix.join('./', output.pathname),
