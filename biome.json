@@ -32,7 +32,7 @@
     "rules": {
       "recommended": true,
       "complexity": {
-        "noExcessiveCognitiveComplexity": "warn",
+        "noExcessiveCognitiveComplexity": "off",
         "noVoid": "off"
       },
       "correctness": {
@@ -42,7 +42,8 @@
       "style": {
         "noNonNullAssertion": "warn",
         "useConst": "error",
-        "useImportType": "error"
+        "useImportType": "error",
+        "useNodejsImportProtocol": "off"
       },
       "suspicious": {
         "noExplicitAny": "warn",
