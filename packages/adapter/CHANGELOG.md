@@ -1,5 +1,15 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.23
+
+### Patch Changes
+
+- [#72](https://github.com/nextjs/adapter-vercel/pull/72) [`0632be8`](https://github.com/nextjs/adapter-vercel/commit/0632be8bac10a1b52fd3b74af78e39cb347c3c4b) Thanks [@mischnic](https://github.com/mischnic)! - Fix usesSrcDirectory caching
+
+- [#69](https://github.com/nextjs/adapter-vercel/pull/69) [`0873c41`](https://github.com/nextjs/adapter-vercel/commit/0873c418264cf1d424facf5416f1a068ce34f599) Thanks [@andrewimm](https://github.com/andrewimm)! - Fix output type tracking for API routes
+
+- [#70](https://github.com/nextjs/adapter-vercel/pull/70) [`6a2df2a`](https://github.com/nextjs/adapter-vercel/commit/6a2df2a2b301b9e37d45bd9702fe42f013eeb26a) Thanks [@mischnic](https://github.com/mischnic)! - Allow overriding supportsImmutableAssets from infra
+
 ## 0.0.1-beta.22
 
 ### Patch Changes
