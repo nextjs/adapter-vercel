@@ -13,12 +13,13 @@
     "noUnusedParameters": false,
     "preserveWatchOutput": true,
     "skipLibCheck": true,
-    "lib": ["es2022"],
+    "lib": ["es2022", "dom"],
     "strict": true,
     "outDir": "dist",
     "target": "es2022",
     "module": "es2022",
-    "moduleResolution": "node"
+    "moduleResolution": "node",
+    "types": ["node"]
   },
   "include": ["src", "build.mts"],
   "exclude": ["node_modules", "**/*.test.ts"]
