@@ -11,7 +11,7 @@ import fse from 'fs-extra';
 import type { AdapterOutput, NextConfig } from 'next';
 import type { RoutesManifest } from 'next/dist/build';
 import { AdapterOutputType } from 'next/dist/shared/lib/constants';
-import type { NextjsParams } from './get-edge-function';
+import type { NextjsParams } from './get-edge-function-source';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { getHandlerSource } from './node-handler';
 import type { VercelConfig } from './types';

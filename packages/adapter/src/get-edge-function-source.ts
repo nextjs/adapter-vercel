@@ -23,7 +23,7 @@ interface NextConfig {
   };
 }
 
-interface NextjsParams {
+export interface NextjsParams {
   /**
    * The name of the function exposed in _ENTRIES that will be wrapped.
    */
