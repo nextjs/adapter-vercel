@@ -2,8 +2,49 @@ import { readFile } from 'fs-extra';
 import { join } from 'path';
 import { ConcatSource, type Source } from 'webpack-sources';
 import { template } from './edge-function-template';
-import type { NextjsParams } from './get-edge-function';
 import { fileToSource, raw, sourcemapped } from './sourcemapped';
+
+/**
+ * A partial Next.js configuration object that contains the required info
+ * to parse the URL and figure out the pathname.
+ */
+interface NextConfig {
+  basePath?: string;
+  i18n?: {
+    defaultLocale: string;
+    domains?: {
+      defaultLocale: string;
+      domain: string;
+      http?: boolean;
+      locales?: string[];
+    }[];
+    localeDetection?: boolean;
+    locales: string[];
+  };
+}
+
+interface NextjsParams {
+  /**
+   * The name of the function exposed in _ENTRIES that will be wrapped.
+   */
+  name: string;
+  /**
+   * An array with all static pages that the Next.js application contains.
+   * This is required to estimate if a pathname will match a page.
+   */
+  staticRoutes: { page: string; namedRegex?: string }[];
+  /**
+   * An array with dynamic page names and their matching regular expression.
+   * This is required to estimate if a request will match a dynamic page.
+   */
+  dynamicRoutes?: { page: string; namedRegex?: string }[];
+  /**
+   * The Next.js minimal configuration that the Middleware Edge Function
+   * requires to parse the URL. This must include the locale config and
+   * the basePath.
+   */
+  nextConfig: NextConfig | null;
+}
 
 /**
  * Allows to get the source code for a Next.js Edge Function where the output
