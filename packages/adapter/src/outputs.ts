@@ -1008,12 +1008,13 @@ export async function handleMiddleware(
   return routes;
 }
 
-// We only need to compute this once per build
+// We only need this once per build
 let _usesSrcCache: boolean | undefined;
 
 async function usesSrcDirectory(workPath: string): Promise<boolean> {
-  if (_usesSrcCache === undefined) {
+  if (!_usesSrcCache) {
     const sourcePages = path.join(workPath, 'src', 'pages');
+
     try {
       if ((await fs.stat(sourcePages)).isDirectory()) {
         _usesSrcCache = true;
@@ -1023,8 +1024,9 @@ async function usesSrcDirectory(workPath: string): Promise<boolean> {
     }
   }
 
-  if (_usesSrcCache === undefined) {
+  if (!_usesSrcCache) {
     const sourceAppdir = path.join(workPath, 'src', 'app');
+
     try {
       if ((await fs.stat(sourceAppdir)).isDirectory()) {
         _usesSrcCache = true;
@@ -1034,10 +1036,7 @@ async function usesSrcDirectory(workPath: string): Promise<boolean> {
     }
   }
 
-  if (_usesSrcCache === undefined) {
-    _usesSrcCache = false;
-  }
-  return _usesSrcCache;
+  return Boolean(_usesSrcCache);
 }
 
 function isDirectory(path: string) {
