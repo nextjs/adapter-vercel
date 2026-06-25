@@ -478,6 +478,8 @@ export async function handleNodeOutputs(
     );
   }
 
+  const usesSrcDir = await usesSrcDirectory(projectDir);
+
   await Promise.all(
     nodeOutputs.map(async (output) => {
       await fsSema.acquire();
@@ -560,6 +562,7 @@ export async function handleNodeOutputs(
         workPath: projectDir,
         page: output.sourcePage,
         pageExtensions: config.pageExtensions || [],
+        usesSrcDir,
       });
       const vercelConfigOpts = await getLambdaOptionsFromFunction({
         sourceFile,
@@ -1008,35 +1011,19 @@ export async function handleMiddleware(
   return routes;
 }
 
-// We only need this once per build
-let _usesSrcCache: boolean | undefined;
-
 async function usesSrcDirectory(workPath: string): Promise<boolean> {
-  if (!_usesSrcCache) {
-    const sourcePages = path.join(workPath, 'src', 'pages');
-
+  for (const dir of [
+    path.join(workPath, 'src', 'pages'),
+    path.join(workPath, 'src', 'app'),
+  ]) {
     try {
-      if ((await fs.stat(sourcePages)).isDirectory()) {
-        _usesSrcCache = true;
+      if ((await fs.stat(dir)).isDirectory()) {
+        return true;
       }
-    } catch (_err) {
-      _usesSrcCache = false;
-    }
+    } catch (_err) {}
   }
 
-  if (!_usesSrcCache) {
-    const sourceAppdir = path.join(workPath, 'src', 'app');
-
-    try {
-      if ((await fs.stat(sourceAppdir)).isDirectory()) {
-        _usesSrcCache = true;
-      }
-    } catch (_err) {
-      _usesSrcCache = false;
-    }
-  }
-
-  return Boolean(_usesSrcCache);
+  return false;
 }
 
 function isDirectory(path: string) {
@@ -1047,12 +1034,13 @@ async function getSourceFilePathFromPage({
   workPath,
   page,
   pageExtensions,
+  usesSrcDir,
 }: {
   workPath: string;
   page: string;
   pageExtensions?: ReadonlyArray<string>;
+  usesSrcDir: boolean;
 }) {
-  const usesSrcDir = await usesSrcDirectory(workPath);
   const extensionsToTry = pageExtensions || ['js', 'jsx', 'ts', 'tsx'];
 
   for (const pageType of [
