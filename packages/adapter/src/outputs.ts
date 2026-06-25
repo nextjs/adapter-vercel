@@ -1040,7 +1040,7 @@ async function usesSrcDirectory(workPath: string): Promise<boolean> {
 }
 
 function isDirectory(path: string) {
-  return fse.existsSync(path) && fse.lstatSync(path).isDirectory();
+  return fse.lstatSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
 }
 
 async function getSourceFilePathFromPage({
