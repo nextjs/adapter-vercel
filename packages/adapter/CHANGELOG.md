@@ -1,5 +1,15 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.24
+
+### Patch Changes
+
+- [#73](https://github.com/nextjs/adapter-vercel/pull/73) [`4a360d7`](https://github.com/nextjs/adapter-vercel/commit/4a360d7eab46e5c1ff6a115b29d89f9419e7a479) Thanks [@mischnic](https://github.com/mischnic)! - Fix lint warnings and improve typecoverage
+
+- [#76](https://github.com/nextjs/adapter-vercel/pull/76) [`31618ec`](https://github.com/nextjs/adapter-vercel/commit/31618ec7c4c5ba1ab0220d363454242c005d3717) Thanks [@mischnic](https://github.com/mischnic)! - Remove peerDependency on next
+
+- [#77](https://github.com/nextjs/adapter-vercel/pull/77) [`a9ed91f`](https://github.com/nextjs/adapter-vercel/commit/a9ed91f694059f46b3bf33bdaa434cf3c0569dfb) Thanks [@mischnic](https://github.com/mischnic)! - Fix usesSrcDirectory regression
+
 ## 0.0.1-beta.23
 
 ### Patch Changes
