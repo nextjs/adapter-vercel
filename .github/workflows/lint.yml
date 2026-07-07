@@ -22,6 +22,8 @@ jobs:
         run: git diff --exit-code
       - name: Run typecheck
         run: pnpm run typecheck
+      - name: Run tests
+        run: pnpm run test
 
   enforce-changeset:
     name: Enforce Changeset

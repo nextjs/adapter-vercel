@@ -615,6 +615,41 @@ export async function handleNodeOutputs(
   );
 }
 
+/**
+ * Prerender classification metadata added to `AdapterOutput['PRERENDER']`
+ * by https://github.com/vercel/next.js/pull/95534. Remove this type (and
+ * the cast below) once the `next` devDependency includes those fields.
+ */
+type PrerenderClassificationFields = {
+  /**
+   * hasPostponed signals whether the build-time prerender of a PPR app
+   * page postponed (React suspended on dynamic data). `false` means it
+   * prerendered without postponing; `undefined` means the signal does
+   * not apply (pages router, route handlers, blocking templates).
+   */
+  hasPostponed?: boolean;
+  /**
+   * hasFallback signals whether a dynamic route template has a static
+   * fallback shell generated during build. `false` means the template
+   * is blocking or omitted; `undefined` means the concept does not
+   * apply (concrete prerenders).
+   */
+  hasFallback?: boolean;
+  /**
+   * htmlSize is the byte size of the prerendered HTML shell for app
+   * pages. `0` means an empty shell (everything postponed). It is only
+   * set on the HTML prerender output; RSC/data/segment outputs leave it
+   * `undefined`, as do pages router and route handler outputs.
+   */
+  htmlSize?: number;
+  /**
+   * isDynamicRoute signals whether this prerender originates from a
+   * dynamic route template (`dynamicRoutes` in the prerender manifest)
+   * rather than a concrete prerendered path (`routes`).
+   */
+  isDynamicRoute?: boolean;
+};
+
 export async function handlePrerenderOutputs(
   prerenderOutputs: Array<AdapterOutput['PRERENDER']>,
   {
@@ -671,6 +706,9 @@ export async function handlePrerenderOutputs(
                 )}.prerender-fallback${path.extname(output.pathname)}`
               )
             : undefined;
+
+        const classification = output as AdapterOutput['PRERENDER'] &
+          PrerenderClassificationFields;
 
         const { parentOutputId } = output;
         prerenderParentIds.add(parentOutputId);
@@ -782,6 +820,15 @@ export async function handlePrerenderOutputs(
               allowQuery: output.config.allowQuery,
               allowHeader: output.config.allowHeader,
               partialFallback: output.config.partialFallback || undefined,
+
+              // Prerender classification metadata (vercel/next.js#95534),
+              // passed through raw: the values are tri-state, so `false`/`0`
+              // must stay distinct from `undefined` (which JSON.stringify
+              // drops).
+              hasPostponed: classification.hasPostponed,
+              hasFallback: classification.hasFallback,
+              htmlSize: classification.htmlSize,
+              isDynamicRoute: classification.isDynamicRoute,
 
               bypassToken: output.config.bypassToken,
               experimentalBypassFor: output.config.bypassFor,
