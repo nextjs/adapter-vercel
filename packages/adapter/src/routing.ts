@@ -1,11 +1,24 @@
 import type { RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter, NextConfig } from 'next';
+import { escapeStringRegexp } from './utils';
 
 type AdapterRouting = Parameters<
   NonNullable<NextAdapter['onBuildComplete']>
 >[0]['routing'];
 
 type AdapterRoute = AdapterRouting['beforeFiles'][0];
+
+export const API_PATH_PREFIX_PATTERN = 'api(?:/.*|$)';
+
+/**
+ * Prevent Vercel's internal i18n routing from adding a locale prefix to
+ * framework-internal assets, Pages API routes, and already-localized paths.
+ */
+export function getI18nPathPrefixExclusion(locales: readonly string[]): string {
+  return `(?!(?:_next/.*|api|${locales
+    .map((locale) => escapeStringRegexp(locale))
+    .join('|')})(?:/.*|$))`;
+}
 
 export function modifyWithRewriteHeaders(
   rewrites: RouteWithSrc[],
