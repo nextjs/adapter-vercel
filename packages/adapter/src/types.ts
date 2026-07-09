@@ -1,4 +1,5 @@
 import type { Route } from '@vercel/routing-utils';
+import type { AdapterOutput } from 'next';
 
 type ImageFormat = 'image/avif' | 'image/webp';
 
@@ -48,3 +49,8 @@ export type VercelConfig = {
   overrides: OverridesConfig;
   cache?: string[];
 };
+
+export type OutputPageOrStaticPrerender =
+  | AdapterOutput['PAGES']
+  | AdapterOutput['APP_PAGE']
+  | AdapterOutput['STATIC_FILE'];

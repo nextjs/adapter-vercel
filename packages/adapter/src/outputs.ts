@@ -14,7 +14,7 @@ import { AdapterOutputType } from 'next/dist/shared/lib/constants';
 import type { NextjsParams } from './get-edge-function-source';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { getHandlerSource } from './node-handler';
-import type { VercelConfig } from './types';
+import type { OutputPageOrStaticPrerender, VercelConfig } from './types';
 import { sha256 } from './utils';
 
 /**
@@ -396,6 +396,7 @@ export async function handleNodeOutputs(
     isMiddleware,
     prerenderFallbackFalseMap,
     vercelOutputDir,
+    pages404Output,
   }: {
     config: NextConfig;
     distDir: string;
@@ -405,6 +406,7 @@ export async function handleNodeOutputs(
     isMiddleware?: boolean;
     prerenderFallbackFalseMap: Record<string, string[]>;
     vercelOutputDir: string;
+    pages404Output: OutputPageOrStaticPrerender | undefined;
   }
 ) {
   const nodeVersion = await getNodeVersion(
@@ -418,20 +420,13 @@ export async function handleNodeOutputs(
   const functionsDir = path.join(vercelOutputDir, 'functions');
   const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
 
-  let pages404Output: undefined | FuncOutputs[0];
   let pagesErrorOutput: undefined | FuncOutputs[0];
 
   for (const item of nodeOutputs) {
-    if (item.pathname === path.posix.join('/', config.basePath || '', '/404')) {
-      pages404Output = item;
-    }
     if (
       item.pathname === path.posix.join('/', config.basePath || '', '/_error')
     ) {
       pagesErrorOutput = item;
-    }
-
-    if (pages404Output && pagesErrorOutput) {
       break;
     }
   }
@@ -512,12 +507,14 @@ export async function handleNodeOutputs(
         const notFoundOutput = pages404Output || pagesErrorOutput;
 
         if (notFoundOutput) {
-          for (const [relPath, fsPath] of Object.entries(
-            notFoundOutput.assets
-          )) {
-            files[relPath] = path.posix.relative(repoRoot, fsPath);
-            if (filesHashes) {
-              filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
+          if (notFoundOutput.type !== AdapterOutputType.STATIC_FILE) {
+            for (const [relPath, fsPath] of Object.entries(
+              notFoundOutput.assets
+            )) {
+              files[relPath] = path.posix.relative(repoRoot, fsPath);
+              if (filesHashes) {
+                filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
+              }
             }
           }
           files[path.posix.relative(repoRoot, notFoundOutput.filePath)] =
@@ -984,6 +981,7 @@ export async function handleMiddleware(
     await handleNodeOutputs([output], {
       ...ctx,
       isMiddleware: true,
+      pages404Output: undefined,
     });
   } else if (output.runtime === 'edge') {
     await handleEdgeOutputs([output], ctx);

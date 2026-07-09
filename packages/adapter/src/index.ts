@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
-import type { AdapterOutput, NextAdapter } from 'next';
+import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import {
   type FuncOutputs,
@@ -22,7 +22,7 @@ import {
   normalizeRewrites,
 } from './routing';
 import { generateToolbarScript } from './toolbar';
-import type { VercelConfig } from './types';
+import type { OutputPageOrStaticPrerender, VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
 const myAdapter: NextAdapter = {
@@ -143,32 +143,6 @@ const myAdapter: NextAdapter = {
     const nodeOutputsParentMap = new Map<string, FuncOutputs[0]>();
     const edgeOutputs: FuncOutputs = [];
     const nodeOutputs: FuncOutputs = [];
-
-    let outputNotFound:
-      | AdapterOutput['PAGES']
-      | AdapterOutput['STATIC_FILE']
-      | undefined;
-    let output404:
-      | AdapterOutput['PAGES']
-      | AdapterOutput['STATIC_FILE']
-      | undefined;
-    let output500:
-      | AdapterOutput['PAGES']
-      | AdapterOutput['STATIC_FILE']
-      | undefined;
-
-    for (const output of [...outputs.pages, ...outputs.staticFiles]) {
-      if (output.pathname.endsWith('/_not-found')) {
-        outputNotFound = output;
-      }
-      if (output.pathname.endsWith('/404')) {
-        output404 = output;
-      }
-      if (output.pathname.endsWith('/500')) {
-        output500 = output;
-      }
-    }
-
     for (const output of [
       ...outputs.appPages,
       ...outputs.appRoutes,
@@ -185,25 +159,45 @@ const myAdapter: NextAdapter = {
       }
     }
 
-    // TODO why do we need this?
-    if (output404) {
-      outputNotFound = undefined;
-    }
+    let pagesNotFoundOutput: OutputPageOrStaticPrerender | undefined;
+    let pages404Output: OutputPageOrStaticPrerender | undefined;
+    let output500: OutputPageOrStaticPrerender | undefined;
 
-    for (const output of outputs.staticFiles) {
+    for (const output of [
+      ...outputs.pages,
+      // TODO can /500 actually occur in app pages?
+      ...outputs.appPages,
+      ...outputs.staticFiles,
+    ]) {
+      // TODO all of these should really be checking `path.posix.join('/', config.basePath || '', '/404')`
       if (output.pathname.endsWith('/_not-found')) {
-        outputNotFound = output;
+        pagesNotFoundOutput = output;
       }
       if (output.pathname.endsWith('/404')) {
-        output404 = output;
+        pages404Output = output;
       }
       if (output.pathname.endsWith('/500')) {
         output500 = output;
       }
     }
-    const notFoundPath = outputNotFound
+    // TODO why do we need this?
+    if (pages404Output) {
+      pagesNotFoundOutput = undefined;
+    }
+    for (const output of outputs.staticFiles) {
+      if (output.pathname.endsWith('/_not-found')) {
+        pagesNotFoundOutput = output;
+      }
+      if (output.pathname.endsWith('/404')) {
+        pages404Output = output;
+      }
+      if (output.pathname.endsWith('/500')) {
+        output500 = output;
+      }
+    }
+    const notFoundPath = pagesNotFoundOutput
       ? '/_not-found'
-      : output404
+      : pages404Output
         ? '/404'
         : '/_error';
 
@@ -269,6 +263,7 @@ const myAdapter: NextAdapter = {
       nextVersion,
       vercelOutputDir,
       prerenderFallbackFalseMap,
+      pages404Output: pages404Output,
     });
 
     // handle prerenders (must come after handle node outputs)
