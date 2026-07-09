@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
-import type { NextAdapter } from 'next';
+import type { AdapterOutput, NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import {
   type FuncOutputs,
@@ -82,6 +82,23 @@ const myAdapter: NextAdapter = {
     projectDir,
     nextVersion,
   }) {
+    await fs.writeFile(
+      'build-complete.json',
+      JSON.stringify(
+        {
+          routing,
+          config,
+          buildId,
+          outputs,
+          distDir,
+          repoRoot,
+          projectDir,
+          nextVersion,
+        },
+        null,
+        2
+      )
+    );
     const vercelOutputDir = path.join(distDir, 'output');
     await fs.mkdir(vercelOutputDir, { recursive: true });
 
@@ -127,28 +144,37 @@ const myAdapter: NextAdapter = {
     const edgeOutputs: FuncOutputs = [];
     const nodeOutputs: FuncOutputs = [];
 
-    let hasNotFoundOutput = false;
-    let has404Output = false;
-    let has500Output = false;
+    let outputNotFound:
+      | AdapterOutput['PAGES']
+      | AdapterOutput['STATIC_FILE']
+      | undefined;
+    let output404:
+      | AdapterOutput['PAGES']
+      | AdapterOutput['STATIC_FILE']
+      | undefined;
+    let output500:
+      | AdapterOutput['PAGES']
+      | AdapterOutput['STATIC_FILE']
+      | undefined;
+
+    for (const output of [...outputs.pages, ...outputs.staticFiles]) {
+      if (output.pathname.endsWith('/_not-found')) {
+        outputNotFound = output;
+      }
+      if (output.pathname.endsWith('/404')) {
+        output404 = output;
+      }
+      if (output.pathname.endsWith('/500')) {
+        output500 = output;
+      }
+    }
 
     for (const output of [
       ...outputs.appPages,
       ...outputs.appRoutes,
       ...outputs.pages,
       ...outputs.pagesApi,
-      ...outputs.staticFiles,
     ]) {
-      if (output.pathname.endsWith('/404')) {
-        hasNotFoundOutput = false;
-        has404Output = true;
-      }
-      if (!has404Output && output.pathname.endsWith('/_not-found')) {
-        hasNotFoundOutput = true;
-      }
-      if (output.pathname.endsWith('/500')) {
-        has500Output = true;
-      }
-
       if ('runtime' in output) {
         if (output.runtime === 'nodejs') {
           nodeOutputsParentMap.set(output.id, output);
@@ -159,20 +185,25 @@ const myAdapter: NextAdapter = {
       }
     }
 
+    // TODO why do we need this?
+    if (output404) {
+      outputNotFound = undefined;
+    }
+
     for (const output of outputs.staticFiles) {
       if (output.pathname.endsWith('/_not-found')) {
-        hasNotFoundOutput = true;
+        outputNotFound = output;
       }
       if (output.pathname.endsWith('/404')) {
-        has404Output = true;
+        output404 = output;
       }
       if (output.pathname.endsWith('/500')) {
-        has500Output = true;
+        output500 = output;
       }
     }
-    const notFoundPath = hasNotFoundOutput
+    const notFoundPath = outputNotFound
       ? '/_not-found'
-      : has404Output
+      : output404
         ? '/404'
         : '/_error';
 
@@ -937,7 +968,7 @@ const myAdapter: NextAdapter = {
           ]),
 
       // custom 500 page if present
-      ...(config.i18n && has500Output
+      ...(config.i18n && output500
         ? [
             {
               src: `${path.posix.join(
@@ -974,7 +1005,7 @@ const myAdapter: NextAdapter = {
               dest: path.posix.join(
                 '/',
                 config.basePath,
-                has500Output ? '/500' : '/_error'
+                output500 ? '/500' : '/_error'
               ),
               status: 500,
             },
