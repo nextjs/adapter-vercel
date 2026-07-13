@@ -433,7 +433,6 @@ export async function handleNodeOutputs(
 
   const fsSema = new Sema(16, { capacity: nodeOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
-  const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
 
   let pages404Output: undefined | FuncOutputs[0];
   let pagesErrorOutput: undefined | FuncOutputs[0];
@@ -506,6 +505,10 @@ export async function handleNodeOutputs(
     nextEnvLoaderPathRelativeToProjectDir,
   });
   const handlerSourceHash = sha256(handlerSource);
+  const handlerRelativePath = path.posix.join(
+    path.posix.relative(repoRoot, projectDir),
+    '___next_launcher.cjs'
+  );
 
   // most assets are shared between functions so cache the relative paths
   const relativeToRepoRootCache = new Map<string, string>();
@@ -571,16 +574,11 @@ export async function handleNodeOutputs(
         filesHashes[routesManifestRelativePath] = routesManifestHash;
       }
 
-      const handlerFilePath = path.join(
-        functionDir,
-        handlerRelativeDir,
-        '___next_launcher.cjs'
-      );
-
-      await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
-      await writeIfNotExists(handlerFilePath, handlerSource);
+      const handlerAbsolutePath = path.join(functionDir, handlerRelativePath);
+      await fs.mkdir(path.dirname(handlerAbsolutePath), { recursive: true });
+      await writeIfNotExists(handlerAbsolutePath, handlerSource);
       if (filesHashes) {
-        filesHashes['___next_launcher.cjs'] = handlerSourceHash;
+        filesHashes[handlerRelativePath] = handlerSourceHash;
       }
 
       const operationType =
@@ -621,10 +619,7 @@ export async function handleNodeOutputs(
           slug: 'nextjs',
           version: nextVersion,
         },
-        handler: path.posix.join(
-          path.posix.relative(repoRoot, projectDir),
-          '___next_launcher.cjs'
-        ),
+        handler: handlerRelativePath,
         runtime: nodeVersion.runtime,
         maxDuration,
         supportsMultiPayloads: true,
