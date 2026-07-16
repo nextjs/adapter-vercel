@@ -264,6 +264,11 @@ export const getHandlerSource = (ctx: {
           type Context = {
             waitUntil?: (promise: Promise<unknown>) => void;
             headers?: Record<string, string>;
+            upgradeWebSocket?: () => {
+              req: IncomingMessage;
+              socket: import('stream').Duplex;
+              head: Buffer;
+            };
           };
 
           const SYMBOL_FOR_REQ_CONTEXT = Symbol.for('@vercel/request-context');
@@ -423,8 +428,9 @@ export const getHandlerSource = (ctx: {
                   )
               );
 
-              await mod.handler(req, res, {
-                waitUntil: getRequestContext().waitUntil,
+              const requestContext = getRequestContext();
+              const handlerContext = {
+                waitUntil: requestContext.waitUntil,
                 requestMeta: {
                   ...internalMetadata,
                   minimalMode: true,
@@ -435,7 +441,25 @@ export const getHandlerSource = (ctx: {
                   locale,
                   initURL,
                 },
-              });
+              };
+
+              if (typeof mod.upgradeHandler === 'function') {
+                const upgrade = requestContext.upgradeWebSocket?.();
+
+                if (upgrade) {
+                  // Dynamic matching can add route parameters to the synthetic
+                  // request URL. Keep a distinct raw upgrade request in sync so
+                  // the route handler receives the same normalized URL.
+                  if (addedMatchesToUrl && upgrade.req !== req) {
+                    upgrade.req.url = req.url;
+                  }
+
+                  await mod.upgradeHandler(handlerContext, { node: upgrade });
+                  return;
+                }
+              }
+
+              await mod.handler(req, res, handlerContext);
             } catch (error) {
               console.error(`Failed to handle ${req.url}`, error);
 
