@@ -188,7 +188,7 @@ export const getHandlerSource = (ctx: {
           }
 
           function matchUrlToPage(urlPathname: string): {
-            matchedPathname: string;
+            matchedPathname?: string;
             locale?: string;
             matches?: RegExpMatchArray | null;
           } {
@@ -253,10 +253,10 @@ export const getHandlerSource = (ctx: {
               }
             }
 
-            // we should have matched above but if not return back
+            // A filesystem hit can be broader than Next.js route matching.
+            // Keep a route miss explicit so an encoded pathname cannot become
+            // a module path derived from request input.
             return {
-              matchedPathname:
-                inversedAppRoutesManifest[urlPathname] || urlPathname,
               locale: normalizeResult.locale,
             };
           }
@@ -396,6 +396,11 @@ export const getHandlerSource = (ctx: {
                 locale,
                 matches,
               } = matchUrlToPage(urlPathname);
+              if (!page) {
+                res.statusCode = 404;
+                res.end('This page could not be found');
+                return;
+              }
               const isAppDir = page.match(/\/(page|route)$/);
               let addedMatchesToUrl = false;
 

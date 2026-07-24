@@ -18,6 +18,7 @@ import {
   extractHeaders,
   extractOnMatchRoutes,
   extractRedirects,
+  getEncodedUnreservedPathNotFoundRoutes,
   getI18nPathPrefixExclusion,
   modifyWithRewriteHeaders,
   normalizeNextDataRoutes,
@@ -856,6 +857,11 @@ const myAdapter: NextAdapter = {
             },
           ]
         : []),
+
+      // Vercel's filesystem lookup decodes unreserved characters. Preserve
+      // Next.js route identity by rejecting encoded aliases after rewrites and
+      // dynamic routes have had a chance to match, but before filesystem hits.
+      ...getEncodedUnreservedPathNotFoundRoutes(config, notFoundPath),
 
       { handle: 'hit' },
 

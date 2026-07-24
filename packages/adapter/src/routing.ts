@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter, NextConfig } from 'next';
 import { escapeStringRegexp } from './utils';
@@ -9,6 +10,59 @@ type AdapterRouting = Parameters<
 type AdapterRoute = AdapterRouting['beforeFiles'][0];
 
 export const API_PATH_PREFIX_PATTERN = 'api(?:/.*|$)';
+
+// Percent-encoded RFC 3986 unreserved characters. Vercel's filesystem lookup
+// decodes these characters, which can turn a route miss such as
+// `/api/%68ealth` into a filesystem hit for `/api/health`.
+export const ENCODED_UNRESERVED_CHARACTER_PATTERN =
+  '%(?:2[DdEe]|3[0-9]|4[1-9A-Fa-f]|5[0-9AaFf]|6[1-9A-Fa-f]|7[0-9AaEe])';
+
+export function getEncodedUnreservedPathNotFoundRoutes(
+  config: NextConfig,
+  notFoundPath: string
+): RouteWithSrc[] {
+  const encodedPathPattern = `.*${ENCODED_UNRESERVED_CHARACTER_PATTERN}.*`;
+
+  if (config.i18n) {
+    return [
+      {
+        src: `^${path.posix.join(
+          '/',
+          config.basePath || '',
+          '/'
+        )}(?<nextLocale>${config.i18n.locales
+          .map((locale) => escapeStringRegexp(locale))
+          .join('|')})/${encodedPathPattern}$`,
+        dest: path.posix.join(
+          '/',
+          config.basePath || '',
+          '/$nextLocale',
+          notFoundPath
+        ),
+        status: 404,
+        caseSensitive: true,
+      },
+      {
+        src: `^/${encodedPathPattern}$`,
+        dest: path.posix.join(
+          '/',
+          config.basePath || '',
+          `/${config.i18n.defaultLocale}`,
+          notFoundPath
+        ),
+        status: 404,
+      },
+    ];
+  }
+
+  return [
+    {
+      src: `^/${encodedPathPattern}$`,
+      dest: path.posix.join('/', config.basePath || '', notFoundPath),
+      status: 404,
+    },
+  ];
+}
 
 /**
  * Prevent Vercel's internal i18n routing from adding a locale prefix to
