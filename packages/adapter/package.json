@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "rm -rf dist; tsc --noEmit && node --experimental-transform-types build.mts",
-    "test": "vitest"
+    "test": "pnpm build && node --test test/*.test.js"
   },
   "devDependencies": {
     "@types/bytes": "3.1.1",
