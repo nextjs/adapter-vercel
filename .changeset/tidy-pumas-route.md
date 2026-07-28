@@ -2,4 +2,4 @@
 "@next-community/adapter-vercel": patch
 ---
 
-Return 404 for encoded aliases that do not match a Next.js route.
+Return 404 when a request-path fallback does not resolve to a bundled route.

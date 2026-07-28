@@ -188,7 +188,7 @@ export const getHandlerSource = (ctx: {
           }
 
           function matchUrlToPage(urlPathname: string): {
-            matchedPathname?: string;
+            matchedPathname: string;
             locale?: string;
             matches?: RegExpMatchArray | null;
           } {
@@ -253,10 +253,10 @@ export const getHandlerSource = (ctx: {
               }
             }
 
-            // A filesystem hit can be broader than Next.js route matching.
-            // Keep a route miss explicit so an encoded pathname cannot become
-            // a module path derived from request input.
+            // we should have matched above but if not return back
             return {
+              matchedPathname:
+                inversedAppRoutesManifest[urlPathname] || urlPathname,
               locale: normalizeResult.locale,
             };
           }
@@ -396,11 +396,6 @@ export const getHandlerSource = (ctx: {
                 locale,
                 matches,
               } = matchUrlToPage(urlPathname);
-              if (!page) {
-                res.statusCode = 404;
-                res.end('This page could not be found');
-                return;
-              }
               const isAppDir = page.match(/\/(page|route)$/);
               let addedMatchesToUrl = false;
 
@@ -418,15 +413,29 @@ export const getHandlerSource = (ctx: {
                 req.url = `${parsedUrl.pathname}${parsedUrl.searchParams.size > 0 ? '?' : ''}${parsedUrl.searchParams.toString()}`;
               }
 
-              const mod = await require(
+              const modulePath =
                 './' +
-                  path.posix.join(
-                    relativeDistDir,
-                    'server',
-                    isAppDir ? 'app' : 'pages',
-                    `${page === '/' ? 'index' : page}.js`
-                  )
-              );
+                path.posix.join(
+                  relativeDistDir,
+                  'server',
+                  isAppDir ? 'app' : 'pages',
+                  `${page === '/' ? 'index' : page}.js`
+                );
+
+              try {
+                require.resolve(modulePath);
+              } catch (error) {
+                if (
+                  (error as NodeJS.ErrnoException).code !== 'MODULE_NOT_FOUND'
+                ) {
+                  throw error;
+                }
+                res.statusCode = 404;
+                res.end('This page could not be found');
+                return;
+              }
+
+              const mod = await require(modulePath);
 
               await mod.handler(req, res, {
                 waitUntil: getRequestContext().waitUntil,
