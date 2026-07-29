@@ -398,6 +398,11 @@ export function buildNonHtmlSecFetchDestNotFoundRoute(
     status: 404,
     headers: {
       'content-type': 'text/plain; charset=utf-8',
+      // The dest is a static asset, which would otherwise get a public,
+      // cacheable Cache-Control header. Override it to match the header
+      // Next.js itself sets for this response (see router-server.ts).
+      'cache-control':
+        'private, no-cache, no-store, max-age=0, must-revalidate',
     },
   };
 }
