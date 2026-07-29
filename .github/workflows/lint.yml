@@ -23,6 +23,9 @@ jobs:
       - name: Run typecheck
         run: pnpm run typecheck
 
+      - name: Run tests
+        run: pnpm run test
+
   enforce-changeset:
     name: Enforce Changeset
     runs-on: ubuntu-latest

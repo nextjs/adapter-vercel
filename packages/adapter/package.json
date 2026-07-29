@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "rm -rf dist; tsc --noEmit && node --experimental-transform-types build.mts",
-    "test": "vitest"
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/bytes": "3.1.1",
@@ -27,9 +27,10 @@
     "convert-source-map": "1.8.0",
     "esbuild": "0.25.10",
     "fs-extra": "11.2.0",
-    "next": "16.3.0-canary.24",
+    "next": "16.3.0-canary.96",
     "picomatch": "4.0.1",
     "source-map": "0.7.4",
+    "vitest": "3.2.7",
     "webpack-sources": "3.2.3"
   },
   "engines": {
