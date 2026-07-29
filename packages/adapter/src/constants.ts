@@ -7,3 +7,27 @@ export const EDGE_FUNCTION_SIZE_LIMIT = 1024 * 1024;
 export { prettyBytes } from './pretty-bytes';
 
 export const INTERNAL_PAGES = ['_app', '_error', '_document'];
+
+// `Sec-Fetch-Dest` values for subresource requests that can never render an
+// HTML response (excludes `document`/`iframe` and `empty`, which covers
+// fetch()/XHR including RSC requests). Keep in sync with
+// packages/next/src/server/lib/is-non-html-sec-fetch-dest.ts in vercel/next.js.
+export const NON_HTML_SEC_FETCH_DESTS = [
+  'audio',
+  'audioworklet',
+  'font',
+  'image',
+  'json',
+  'manifest',
+  'paintworklet',
+  'report',
+  'script',
+  'serviceworker',
+  'sharedworker',
+  'style',
+  'track',
+  'video',
+  'webidentity',
+  'worker',
+  'xslt',
+];
