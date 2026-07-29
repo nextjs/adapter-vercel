@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter, NextConfig } from 'next';
-import { NON_HTML_SEC_FETCH_DESTS } from './constants';
+import { NON_HTML_SEC_FETCH_DESTS, NOT_FOUND_TXT_HEADERS } from './constants';
 import { escapeStringRegexp } from './utils';
 
 type AdapterRouting = Parameters<
@@ -396,9 +396,7 @@ export function buildNonHtmlSecFetchDestNotFoundRoute(
     ],
     dest: path.posix.join('/', basePath, '_next/static/not-found.txt'),
     status: 404,
-    headers: {
-      'content-type': 'text/plain; charset=utf-8',
-    },
+    headers: NOT_FOUND_TXT_HEADERS,
   };
 }
 
