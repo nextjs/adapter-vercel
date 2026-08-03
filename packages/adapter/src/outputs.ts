@@ -760,16 +760,6 @@ export async function handlePrerenderOutputs(
             }; origin=${JSON.stringify(rscContentType)}`;
         }
 
-        // Next.js only classifies a prerender group's canonical primary
-        // output — the HTML for pages, the response for Route Handlers — and
-        // treats a half-populated classification as an invariant violation.
-        // Omit it entirely unless all three fields made it through.
-        const { routeType, response, compute, htmlSize } = output;
-        const prerenderClassification =
-          routeType && response && compute
-            ? { routeType, response, compute, htmlSize }
-            : undefined;
-
         await fs.mkdir(path.dirname(prerenderConfigPath), { recursive: true });
         await writeIfNotExists(
           prerenderConfigPath,
@@ -784,11 +774,7 @@ export async function handlePrerenderOutputs(
 
               staleExpiration: output.fallback?.initialExpiration,
 
-              // The source route matcher this prerender belongs to, e.g.
-              // `/blog/[slug]` for `/blog/first`. Consumers group concrete
-              // prerenders under their dynamic parent by this value, so it
-              // has to be the route rather than the parent output pathname.
-              sourcePath: output.route,
+              sourcePath: parentNodeOutput?.pathname,
 
               // send matches in query instead of x-now-route-matches
               // legacy header
@@ -799,8 +785,6 @@ export async function handlePrerenderOutputs(
 
               bypassToken: output.config.bypassToken,
               experimentalBypassFor: output.config.bypassFor,
-
-              prerenderClassification,
 
               initialHeaders,
               initialStatus: output.fallback?.initialStatus,
