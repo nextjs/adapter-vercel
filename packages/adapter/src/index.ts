@@ -44,6 +44,19 @@ const myAdapter: NextAdapter = {
         process.env.VERCEL_HASH_SALT;
     }
 
+    // This fallback covers builds where the `NEXT_DEPLOYMENT_ID` variable is missing,
+    // e.g. services deployments, where the framework is resolved per-service
+    // at the build time.
+    if (
+      ctx.phase === PHASE_PRODUCTION_BUILD &&
+      process.env.VERCEL_SKEW_PROTECTION_ENABLED === '1' &&
+      process.env.VERCEL_DEPLOYMENT_ID &&
+      !process.env.NEXT_DEPLOYMENT_ID &&
+      config.deploymentId == null
+    ) {
+      config.deploymentId = process.env.VERCEL_DEPLOYMENT_ID;
+    }
+
     if (
       ctx.phase === PHASE_PRODUCTION_BUILD &&
       process.env.VERCEL_PREVIEW_COMMENTS_ENABLED === '1' &&

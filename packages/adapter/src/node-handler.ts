@@ -27,17 +27,6 @@ export const getHandlerSource = (ctx: {
     loadEnvConfig('.', process.env.NODE_ENV === 'development');
   }
 
-  // Default NEXT_DEPLOYMENT_ID for Skew Protection when the platform did not
-  // inject it (e.g. services deployments, where the framework is resolved
-  // per-service).
-  if (
-    process.env.VERCEL_SKEW_PROTECTION_ENABLED === '1' &&
-    process.env.VERCEL_DEPLOYMENT_ID &&
-    !process.env.NEXT_DEPLOYMENT_ID
-  ) {
-    process.env.NEXT_DEPLOYMENT_ID = process.env.VERCEL_DEPLOYMENT_ID;
-  }
-
   const _n_handler = (${
     ctx.isMiddleware
       ? () => {
