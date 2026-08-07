@@ -1,5 +1,13 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.25
+
+### Patch Changes
+
+- [#95](https://github.com/nextjs/adapter-vercel/pull/95) [`4719a17`](https://github.com/nextjs/adapter-vercel/commit/4719a175becb3781e988ace86478f17415b590b5) Thanks [@nsidnev](https://github.com/nsidnev)! - Assign `deploymentId` from `VERCEL_DEPLOYMENT_ID` in `modifyConfig` and to `process.env.NEXT_DEPLOYMENT_ID` when Skew Protection is enabled and the platform did not inject `NEXT_DEPLOYMENT_ID` (e.g. services deployments).
+
+- [#81](https://github.com/nextjs/adapter-vercel/pull/81) [`6ac41c9`](https://github.com/nextjs/adapter-vercel/commit/6ac41c9f0ae12a073ccce92252c1dc3cf8bd5ab5) Thanks [@timneutkens](https://github.com/timneutkens)! - Prevent i18n routing from adding or removing locale prefixes for API routes.
+
 ## 0.0.1-beta.24
 
 ### Patch Changes
