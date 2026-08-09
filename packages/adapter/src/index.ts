@@ -15,6 +15,7 @@ import {
 } from './outputs';
 import {
   API_PATH_PREFIX_PATTERN,
+  buildNonHtmlSecFetchDestNotFoundRoute,
   denormalizeNextDataRoutes,
   extractHeaders,
   extractOnMatchRoutes,
@@ -899,6 +900,11 @@ const myAdapter: NextAdapter = {
       },
 
       { handle: 'error' },
+
+      // Serve a plain text 404 for subresource requests (images, fonts,
+      // manifests, scripts, etc.) instead of invoking the not-found output.
+      // Must come before the catch-all below, which matches any path.
+      buildNonHtmlSecFetchDestNotFoundRoute(config),
 
       // Custom Next.js 404 page
 

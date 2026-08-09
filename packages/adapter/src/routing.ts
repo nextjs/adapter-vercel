@@ -1,5 +1,7 @@
+import path from 'node:path';
 import type { RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter, NextConfig } from 'next';
+import { NON_HTML_SEC_FETCH_DESTS, NOT_FOUND_TXT_HEADERS } from './constants';
 import { escapeStringRegexp } from './utils';
 
 type AdapterRouting = Parameters<
@@ -365,6 +367,37 @@ export function extractOnMatchRoutes(routing: {
     continue: true,
     important: true,
   }));
+}
+
+/**
+ * A route for the `error` phase that serves a plain text 404 for subresource
+ * requests (images, fonts, manifests, scripts, etc.) instead of invoking the
+ * app's not-found output. Must run before the fallback that dispatches to the
+ * not-found output, since that dispatch matches any path.
+ */
+export function buildNonHtmlSecFetchDestNotFoundRoute(
+  config: NextConfig
+): RouteWithSrc {
+  const basePath = config.basePath || '';
+
+  return {
+    src: path.posix.join(
+      '/',
+      basePath,
+      `${basePath && basePath !== '/' ? '?' : ''}.*`
+    ),
+    methods: ['GET', 'HEAD'],
+    has: [
+      {
+        type: 'header',
+        key: 'sec-fetch-dest',
+        value: `^(?:${NON_HTML_SEC_FETCH_DESTS.join('|')})$`,
+      },
+    ],
+    dest: path.posix.join('/', basePath, '_next/static/not-found.txt'),
+    status: 404,
+    headers: NOT_FOUND_TXT_HEADERS,
+  };
 }
 
 export function denormalizeNextDataRoutes(

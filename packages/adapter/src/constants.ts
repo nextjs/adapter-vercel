@@ -17,3 +17,29 @@ export const NOT_FOUND_TXT_HEADERS = {
   'content-type': 'text/plain; charset=utf-8',
   'cache-control': 'private, no-cache, no-store, max-age=0, must-revalidate',
 };
+
+// `Sec-Fetch-Dest` values for subresource requests that can never render an
+// HTML response (excludes `document`/`iframe` and `empty`, which covers
+// fetch()/XHR including RSC requests). Same list as
+// packages/next/src/server/lib/is-non-html-sec-fetch-dest.ts in vercel/next.js;
+// if the two drift apart nothing breaks, this route just stops matching the
+// missed cases and they fall back to the normal not-found output.
+export const NON_HTML_SEC_FETCH_DESTS = [
+  'audio',
+  'audioworklet',
+  'font',
+  'image',
+  'json',
+  'manifest',
+  'paintworklet',
+  'report',
+  'script',
+  'serviceworker',
+  'sharedworker',
+  'style',
+  'track',
+  'video',
+  'webidentity',
+  'worker',
+  'xslt',
+];
