@@ -636,6 +636,16 @@ export async function handlePrerenderOutputs(
   const prerenderParentIds = new Set<string>();
   const fsSema = new Sema(16, { capacity: prerenderOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
+  const staticHints = new Map<number, boolean>();
+
+  // Next.js only includes classification data on a prerender group's
+  // canonical output. Capture the HTML response classification before
+  // processing any sibling RSC outputs in the group.
+  for (const output of prerenderOutputs) {
+    if (output.routeType !== 'route' && output.response !== undefined) {
+      staticHints.set(output.groupId, output.response === 'complete');
+    }
+  }
 
   await Promise.all(
     prerenderOutputs.map(async (output) => {
@@ -721,6 +731,10 @@ export async function handlePrerenderOutputs(
           output.fallback?.initialHeaders
         );
         const isRscOutput = path.extname(output.pathname) === '.rsc';
+        const staticHint =
+          output.response !== undefined || isRscOutput
+            ? staticHints.get(output.groupId)
+            : undefined;
 
         if (
           output.fallback?.postponedState &&
@@ -785,6 +799,7 @@ export async function handlePrerenderOutputs(
 
               bypassToken: output.config.bypassToken,
               experimentalBypassFor: output.config.bypassFor,
+              staticHint,
 
               initialHeaders,
               initialStatus: output.fallback?.initialStatus,
