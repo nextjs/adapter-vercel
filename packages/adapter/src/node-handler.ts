@@ -384,6 +384,58 @@ export const getHandlerSource = (ctx: {
             return decoder.decode(bytes);
           }
 
+          const { SpanStatusCode, trace } =
+            require('next/dist/compiled/@opentelemetry/api') as typeof import('@opentelemetry/api');
+          const tracer = trace.getTracer('next.js', '0.0.1');
+          const routeEntrypoints = new Map<
+            string,
+            { handler: (...args: unknown[]) => unknown }
+          >();
+
+          function loadRouteEntrypoint(page: string, isAppDir: boolean) {
+            const key = `${isAppDir ? 'app' : 'pages'}:${page}`;
+            const cached = routeEntrypoints.get(key);
+            if (cached) return cached;
+
+            const route = page.replace(/\/(page|route)$/, '') || '/';
+            return tracer.startActiveSpan(
+              'load route entrypoint',
+              {
+                attributes: {
+                  'next.route': route,
+                  'next.router': isAppDir ? 'app' : 'pages',
+                  'next.span_category': 'nextjs',
+                  'next.span_name': 'load route entrypoint',
+                  'next.span_type': 'NextLauncher.loadRouteEntrypoint',
+                },
+              },
+              (span) => {
+                try {
+                  const mod = require(
+                    './' +
+                      path.posix.join(
+                        relativeDistDir,
+                        'server',
+                        isAppDir ? 'app' : 'pages',
+                        `${page === '/' ? 'index' : page}.js`
+                      )
+                  );
+                  routeEntrypoints.set(key, mod);
+                  return mod;
+                } catch (error) {
+                  span.recordException(error as Error);
+                  span.setStatus({
+                    code: SpanStatusCode.ERROR,
+                    message: error instanceof Error ? error.message : undefined,
+                  });
+                  throw error;
+                } finally {
+                  span.end();
+                }
+              }
+            );
+          }
+
           return async function handler(
             req: import('http').IncomingMessage,
             res: import('http').ServerResponse,
@@ -423,15 +475,7 @@ export const getHandlerSource = (ctx: {
                 req.url = `${parsedUrl.pathname}${parsedUrl.searchParams.size > 0 ? '?' : ''}${parsedUrl.searchParams.toString()}`;
               }
 
-              const mod = await require(
-                './' +
-                  path.posix.join(
-                    relativeDistDir,
-                    'server',
-                    isAppDir ? 'app' : 'pages',
-                    `${page === '/' ? 'index' : page}.js`
-                  )
-              );
+              const mod = await loadRouteEntrypoint(page, Boolean(isAppDir));
 
               await mod.handler(req, res, {
                 waitUntil: getRequestContext().waitUntil,

@@ -32,6 +32,9 @@ importers:
 
   packages/adapter:
     devDependencies:
+      '@opentelemetry/api':
+        specifier: 1.9.0
+        version: 1.9.0
       '@types/bytes':
         specifier: 3.1.1
         version: 3.1.1
@@ -73,7 +76,7 @@ importers:
         version: 11.2.0
       next:
         specifier: 16.3.0-canary.24
-        version: 16.3.0-canary.24(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+        version: 16.3.0-canary.24(@opentelemetry/api@1.9.0)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
       picomatch:
         specifier: 4.0.1
         version: 4.0.1
@@ -588,6 +591,10 @@ packages:
   '@nodelib/fs.walk@1.2.8':
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
+
+  '@opentelemetry/api@1.9.0':
+    resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
+    engines: {node: '>=8.0.0'}
 
   '@renovatebot/pep440@4.2.1':
     resolution: {integrity: sha512-2FK1hF93Fuf1laSdfiEmJvSJPVIDHEUTz68D3Fi9s0IZrrpaEcj6pTFBTbYvsgC5du4ogrtf5re7yMMvrKNgkw==}
@@ -1734,6 +1741,8 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
+  '@opentelemetry/api@1.9.0': {}
+
   '@renovatebot/pep440@4.2.1': {}
 
   '@swc/helpers@0.5.15':
@@ -2103,7 +2112,7 @@ snapshots:
 
   nanoid@3.3.11: {}
 
-  next@16.3.0-canary.24(react-dom@19.1.1(react@19.1.1))(react@19.1.1):
+  next@16.3.0-canary.24(@opentelemetry/api@1.9.0)(react-dom@19.1.1(react@19.1.1))(react@19.1.1):
     dependencies:
       '@next/env': 16.3.0-canary.24
       '@swc/helpers': 0.5.15
@@ -2122,6 +2131,7 @@ snapshots:
       '@next/swc-linux-x64-musl': 16.3.0-canary.24
       '@next/swc-win32-arm64-msvc': 16.3.0-canary.24
       '@next/swc-win32-x64-msvc': 16.3.0-canary.24
+      '@opentelemetry/api': 1.9.0
       sharp: 0.34.5
     transitivePeerDependencies:
       - '@babel/core'
