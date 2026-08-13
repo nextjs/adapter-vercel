@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.26
+
+### Patch Changes
+
+- [#101](https://github.com/nextjs/adapter-vercel/pull/101) [`15edb66`](https://github.com/nextjs/adapter-vercel/commit/15edb66f9e02363a9520e7386ab01d16297fb4ee) Thanks [@ztanner](https://github.com/ztanner)! - Revert "Fix i18n routing for API paths"- #101
+
 ## 0.0.1-beta.25
 
 ### Patch Changes
