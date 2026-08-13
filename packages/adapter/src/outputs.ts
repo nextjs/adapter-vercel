@@ -35,6 +35,22 @@ function fallbackHasFilePath(
   );
 }
 
+/**
+ * Builds the content type for a partially prerendered output, whose body is the
+ * postponed state followed by the prerendered content.
+ *
+ * `state-length` is where the CDN cuts the body back into those two halves. The
+ * body is written as UTF-8, so the offset counts encoded bytes.
+ */
+function getPostponedStateContentType(
+  postponedState: string,
+  originContentType: string
+): string {
+  return `application/x-nextjs-pre-render; state-length=${Buffer.byteLength(
+    postponedState
+  )}; origin=${JSON.stringify(originContentType)}`;
+}
+
 const copy = async (src: string, dest: string) => {
   await fse.remove(dest);
   await fse.copy(src, dest);
@@ -739,10 +755,10 @@ export async function handlePrerenderOutputs(
             ? rscContentType
             : 'text/html; charset=utf-8';
 
-          initialHeaders['content-type'] =
-            `application/x-nextjs-pre-render; state-length=${
-              output.fallback.postponedState.length
-            }; origin=${JSON.stringify(originContentType)}`;
+          initialHeaders['content-type'] = getPostponedStateContentType(
+            output.fallback.postponedState,
+            originContentType
+          );
         } else if (
           output.fallback?.postponedState &&
           !fallbackHasFilePath(output.fallback) &&
@@ -754,10 +770,10 @@ export async function handlePrerenderOutputs(
             prerenderFallbackPath,
             output.fallback.postponedState
           );
-          initialHeaders['content-type'] =
-            `application/x-nextjs-pre-render; state-length=${
-              output.fallback.postponedState.length
-            }; origin=${JSON.stringify(rscContentType)}`;
+          initialHeaders['content-type'] = getPostponedStateContentType(
+            output.fallback.postponedState,
+            rscContentType
+          );
         }
 
         await fs.mkdir(path.dirname(prerenderConfigPath), { recursive: true });

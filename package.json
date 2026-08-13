@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "scripts": {
     "build": "turbo build",
+    "test": "turbo test",
     "format": "biome format --write && biome check --fix",
     "prepare": "husky",
     "typecheck": "biome check",

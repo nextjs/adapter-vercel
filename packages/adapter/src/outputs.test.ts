@@ -1,0 +1,156 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import type { AdapterOutput } from 'next';
+import { AdapterOutputType } from 'next/dist/shared/lib/constants';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { type FuncOutputs, handlePrerenderOutputs } from './outputs';
+
+const RSC_CONTENT_TYPE = 'text/x-component';
+const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';
+
+// React copies the keys of elements enclosing a postponed boundary into the
+// postponed state verbatim, so a localized label reaches the state itself. The
+// `ä` here stands in for that: it is a single UTF-16 code unit and two UTF-8
+// bytes, which is what makes the two ways of measuring the state disagree.
+const POSTPONED_STATE =
+  '46[["slug",["%%drp%%","d"]]][1,{"nav":"Doppelgänger"}]null';
+
+describe('handlePrerenderOutputs', () => {
+  let vercelOutputDir: string;
+
+  beforeEach(async () => {
+    vercelOutputDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'adapter-prerender-')
+    );
+    // The prerender handler writes its fallback into a functions directory that
+    // the node output handler has already created by the time it runs.
+    await fs.mkdir(path.join(vercelOutputDir, 'functions'), {
+      recursive: true,
+    });
+  });
+
+  afterEach(async () => {
+    await fs.rm(vercelOutputDir, { recursive: true, force: true });
+  });
+
+  function makePrerenderOutput(
+    fallback: AdapterOutput['PRERENDER']['fallback']
+  ): AdapterOutput['PRERENDER'] {
+    return {
+      id: 'prerender-1',
+      pathname: '/blog',
+      type: AdapterOutputType.PRERENDER,
+      parentOutputId: 'parent-1',
+      groupId: 1,
+      fallback,
+      config: { allowQuery: [] },
+    };
+  }
+
+  // The parent lookup throws when it misses, and giving the parent the same
+  // pathname keeps `handlePrerenderOutputs` from symlinking a function dir it
+  // does not need for these assertions.
+  const parentOutput: FuncOutputs[0] = {
+    id: 'parent-1',
+    type: AdapterOutputType.PAGES,
+    pathname: '/blog',
+    filePath: 'pages/blog.js',
+    sourcePage: '/blog',
+    runtime: 'nodejs',
+    assets: {},
+    assetsHashes: {},
+    config: {},
+  };
+
+  const nodeOutputsParentMap = new Map<string, FuncOutputs[0]>([
+    ['parent-1', parentOutput],
+  ]);
+
+  async function handlePrerenderOutput(output: AdapterOutput['PRERENDER']) {
+    await handlePrerenderOutputs([output], {
+      config: {},
+      vercelOutputDir,
+      nodeOutputsParentMap,
+      rscContentType: RSC_CONTENT_TYPE,
+      varyHeader: 'rsc',
+    });
+
+    const functionsDir = path.join(vercelOutputDir, 'functions');
+    const config = JSON.parse(
+      await fs.readFile(
+        path.join(functionsDir, 'blog.prerender-config.json'),
+        'utf8'
+      )
+    );
+
+    const fallbackName = (await fs.readdir(functionsDir)).find((name) =>
+      name.startsWith('blog.prerender-fallback')
+    );
+    expect(
+      fallbackName,
+      'expected a prerender fallback to be written'
+    ).toBeDefined();
+
+    return {
+      contentType: config.initialHeaders['content-type'] as string,
+      body: await fs.readFile(path.join(functionsDir, fallbackName as string)),
+    };
+  }
+
+  // Checks the declared length against the bytes that were actually written,
+  // and returns whatever the adapter put behind the state. Reading the body at
+  // the declared offset keeps this independent of how long the state happens to
+  // be, which is what the CDN does with it too.
+  function contentAfterDeclaredState(
+    contentType: string,
+    body: Buffer,
+    origin: string
+  ) {
+    const declared = contentType.match(
+      /^application\/x-nextjs-pre-render; state-length=(\d+); origin=(".*")$/
+    );
+    expect(declared, `unexpected content type: ${contentType}`).not.toBeNull();
+    expect(JSON.parse((declared as RegExpMatchArray)[2])).toBe(origin);
+
+    const offset = Number((declared as RegExpMatchArray)[1]);
+    const state = body.subarray(0, offset).toString('utf8');
+
+    // Guard against passing for an uninteresting reason: a pure ASCII state
+    // cannot tell the two measurements apart.
+    expect(state).toBe(POSTPONED_STATE);
+    expect(Buffer.byteLength(state)).toBeGreaterThan(state.length);
+
+    return body.subarray(offset).toString('utf8');
+  }
+
+  it('declares the state length of a document fallback in bytes', async () => {
+    const html = '<!DOCTYPE html><html><body>shell</body></html>';
+    const filePath = path.join(vercelOutputDir, 'source.html');
+    await fs.writeFile(filePath, html);
+
+    const { contentType, body } = await handlePrerenderOutput(
+      makePrerenderOutput({ filePath, postponedState: POSTPONED_STATE })
+    );
+
+    expect(
+      contentAfterDeclaredState(contentType, body, HTML_CONTENT_TYPE)
+    ).toBe(html);
+  });
+
+  it('declares the state length of an RSC fallback, which holds no content', async () => {
+    const { contentType, body } = await handlePrerenderOutput(
+      makePrerenderOutput({
+        filePath: undefined,
+        postponedState: POSTPONED_STATE,
+      })
+    );
+
+    // The data route has no prerendered content of its own: its flight rows
+    // come from the resume, so the state is the whole body and the declared
+    // length has to cover all of it.
+    expect(contentAfterDeclaredState(contentType, body, RSC_CONTENT_TYPE)).toBe(
+      ''
+    );
+  });
+});
