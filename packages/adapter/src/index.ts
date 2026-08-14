@@ -17,6 +17,9 @@ import {
   extractHeaders,
   extractOnMatchRoutes,
   extractRedirects,
+  getI18nLocaleRemovalExclusion,
+  getI18nPathPrefixExclusion,
+  getRoutingManifestVersion,
   modifyWithRewriteHeaders,
   normalizeNextDataRoutes,
   normalizeRewrites,
@@ -95,6 +98,7 @@ const myAdapter: NextAdapter = {
     projectDir,
     nextVersion,
   }) {
+    const routingManifestVersion = getRoutingManifestVersion(routing);
     const vercelOutputDir = path.join(distDir, 'output');
     await fs.mkdir(vercelOutputDir, { recursive: true });
 
@@ -108,6 +112,12 @@ const myAdapter: NextAdapter = {
     const shouldHandleMiddlewareDataResolving = routing.shouldNormalizeNextData;
 
     const i18nConfig = config.i18n;
+    const i18nPathPrefixExclusion = i18nConfig
+      ? getI18nPathPrefixExclusion(i18nConfig.locales, routingManifestVersion)
+      : '';
+    const i18nLocaleRemovalExclusion = getI18nLocaleRemovalExclusion(
+      routingManifestVersion
+    );
     const vercelConfig: VercelConfig = {
       version: 3,
       overrides: {},
@@ -365,9 +375,7 @@ const myAdapter: NextAdapter = {
                 '/',
                 config.basePath,
                 '/'
-              )}(?!(?:_next/.*|${config.i18n.locales
-                .map((locale) => escapeStringRegexp(locale))
-                .join('|')})(?:/.*|$))(.*)$`,
+              )}${i18nPathPrefixExclusion}(.*)$`,
               // we aren't able to ensure trailing slash mode here
               // so ensure this comes after the trailing slash redirect
               dest: `${
@@ -465,9 +473,7 @@ const myAdapter: NextAdapter = {
                 '/',
                 config.basePath,
                 '/'
-              )}(?!(?:_next/.*|${config.i18n.locales
-                .map((locale) => escapeStringRegexp(locale))
-                .join('|')})(?:/.*|$))(.*)$`,
+              )}${i18nPathPrefixExclusion}(.*)$`,
               dest: `${path.posix.join(
                 '/',
                 config.basePath,
@@ -776,9 +782,7 @@ const myAdapter: NextAdapter = {
                       '/',
                       config.basePath,
                       '/'
-                    )}(?!(?:_next/.*|${config.i18n.locales
-                      .map((locale) => escapeStringRegexp(locale))
-                      .join('|')})(?:/.*|$))(.*)$`,
+                    )}${i18nPathPrefixExclusion}(.*)$`,
                     dest: `${path.posix.join(
                       '/',
                       config.basePath,
@@ -803,7 +807,7 @@ const myAdapter: NextAdapter = {
                 config.basePath
               )}/?(?:${config.i18n.locales
                 .map((locale) => escapeStringRegexp(locale))
-                .join('|')})/(.*)`,
+                .join('|')})/${i18nLocaleRemovalExclusion}(.*)`,
               dest: `${path.posix.join('/', config.basePath, '/')}$1`,
               check: true,
             },
