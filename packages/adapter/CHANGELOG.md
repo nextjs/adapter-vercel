@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.27
+
+### Patch Changes
+
+- [#100](https://github.com/nextjs/adapter-vercel/pull/100) [`a1a3083`](https://github.com/nextjs/adapter-vercel/commit/a1a30834de3e1d1d7a05dc22227234ba12fb6a8c) Thanks [@unstubbable](https://github.com/unstubbable)! - Declare the postponed state length of a partially prerendered output in bytes
+
 ## 0.0.1-beta.26
 
 ### Patch Changes
