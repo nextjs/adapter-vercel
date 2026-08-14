@@ -1,11 +1,68 @@
 import type { RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter, NextConfig } from 'next';
+import { escapeStringRegexp } from './utils';
 
 type AdapterRouting = Parameters<
   NonNullable<NextAdapter['onBuildComplete']>
 >[0]['routing'];
 
 type AdapterRoute = AdapterRouting['beforeFiles'][0];
+
+export const API_PATH_PREFIX_PATTERN = 'api(?:/.*|$)';
+
+export type RoutingManifestVersion = 1 | 2;
+
+/**
+ * Routing manifests emitted before versioning was introduced use the version 1
+ * contract. Reject unknown versions so new routing semantics cannot silently
+ * produce an invalid deployment.
+ */
+export function getRoutingManifestVersion(
+  routing: AdapterRouting
+): RoutingManifestVersion {
+  const version = (routing as AdapterRouting & { version?: unknown }).version;
+
+  if (version === undefined || version === 1) {
+    return 1;
+  }
+
+  if (version === 2) {
+    return 2;
+  }
+
+  throw new Error(
+    `Unsupported Next.js routing manifest version ${JSON.stringify(version)}. ` +
+      'This version of @next-community/adapter-vercel supports versions 1 and 2.'
+  );
+}
+
+/**
+ * Prevent Vercel's internal i18n routing from adding a locale prefix to
+ * framework-internal assets and already-localized paths. Version 2 also keeps
+ * Pages API routes in their canonical /api namespace.
+ */
+export function getI18nPathPrefixExclusion(
+  locales: readonly string[],
+  routingVersion: RoutingManifestVersion
+): string {
+  const excludedPaths = [
+    '_next/.*',
+    ...(routingVersion === 2 ? ['api'] : []),
+    ...locales.map((locale) => escapeStringRegexp(locale)),
+  ];
+
+  return `(?!(?:${excludedPaths.join('|')})(?:/.*|$))`;
+}
+
+/**
+ * Version 2 Pages API routes must not have locale prefixes removed because the
+ * emitted dynamic route matchers use the canonical /api namespace directly.
+ */
+export function getI18nLocaleRemovalExclusion(
+  routingVersion: RoutingManifestVersion
+): string {
+  return routingVersion === 2 ? `(?!${API_PATH_PREFIX_PATTERN})` : '';
+}
 
 export function modifyWithRewriteHeaders(
   rewrites: RouteWithSrc[],
