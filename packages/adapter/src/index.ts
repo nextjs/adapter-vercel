@@ -28,6 +28,14 @@ import { escapeStringRegexp, getImagesConfig } from './utils';
 const myAdapter: NextAdapter = {
   name: 'Vercel',
   async modifyConfig(config, ctx) {
+    if (
+      ctx.phase === PHASE_PRODUCTION_BUILD &&
+      config.output === 'standalone'
+    ) {
+      // Remove output: standalone. You shouldn't use this when deploying to Vercel.
+      delete config.output;
+    }
+
     if (ctx.phase === PHASE_PRODUCTION_BUILD) {
       config.experimental.supportsImmutableAssets =
         // Default to true, allow users to opt-out
