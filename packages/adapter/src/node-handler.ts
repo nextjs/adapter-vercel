@@ -253,9 +253,7 @@ export const getHandlerSource = (ctx: {
               }
             }
 
-            // A filesystem hit can be broader than Next.js route matching.
-            // Keep a route miss explicit so request input cannot become a
-            // module path unless it is backed by the App paths manifest.
+            // we should have matched above but if not return back
             return {
               matchedPathname: inversedAppRoutesManifest[urlPathname] ?? null,
               locale: normalizeResult.locale,
