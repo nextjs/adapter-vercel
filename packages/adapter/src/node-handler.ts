@@ -406,8 +406,9 @@ export const getHandlerSource = (ctx: {
                 matches,
               } = matchUrlToPage(urlPathname);
               if (page === null) {
-                res.statusCode = 404;
-                res.end('This page could not be found');
+                await routerServerGlobal[RouterServerContextSymbol]?.[
+                  '.'
+                ].render404?.(req, res);
                 return;
               }
               const isAppDir = page.match(/\/(page|route)$/);
