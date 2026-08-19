@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.28
+
+### Patch Changes
+
+- [#88](https://github.com/nextjs/adapter-vercel/pull/88) [`7785ac3`](https://github.com/nextjs/adapter-vercel/commit/7785ac3b8bc78aab91a3b52c054f29eba0ff7362) Thanks [@devjiwonchoi](https://github.com/devjiwonchoi)! - Return 404 before loading a request path that does not match a bundled route.
+
 ## 0.0.1-beta.27
 
 ### Patch Changes
