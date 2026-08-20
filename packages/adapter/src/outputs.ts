@@ -731,10 +731,9 @@ export async function handlePrerenderOutputs(
           output.fallback?.initialHeaders
         );
         const isRscOutput = path.extname(output.pathname) === '.rsc';
-        const staticHint =
-          output.response !== undefined || isRscOutput
-            ? staticHints.get(output.groupId)
-            : undefined;
+        // undefined for groups without classification data, which omits the
+        // property from the serialized config below
+        const staticHint = staticHints.get(output.groupId);
 
         if (
           output.fallback?.postponedState &&
