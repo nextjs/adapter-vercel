@@ -43,6 +43,7 @@ describe('handlePrerenderOutputs', () => {
       type: AdapterOutputType.PRERENDER,
       parentOutputId: 'parent-1',
       groupId: 1,
+      route: '/blog',
       fallback,
       config: { allowQuery: [] },
     };
@@ -152,5 +153,49 @@ describe('handlePrerenderOutputs', () => {
     expect(contentAfterDeclaredState(contentType, body, RSC_CONTENT_TYPE)).toBe(
       ''
     );
+  });
+
+  describe('initialMetadata', () => {
+    async function writtenConfig(output: AdapterOutput['PRERENDER']) {
+      await handlePrerenderOutputs([output], {
+        config: {},
+        vercelOutputDir,
+        nodeOutputsParentMap,
+        rscContentType: RSC_CONTENT_TYPE,
+        varyHeader: 'rsc',
+      });
+
+      return JSON.parse(
+        await fs.readFile(
+          path.join(vercelOutputDir, 'functions', 'blog.prerender-config.json'),
+          'utf8'
+        )
+      );
+    }
+
+    it('carries compute from the primary output verbatim', async () => {
+      const config = await writtenConfig({
+        ...makePrerenderOutput(undefined),
+        // Next.js emits the taxonomy all-or-nothing on the primary output;
+        // the adapter carries only `compute`.
+        routeType: 'page',
+        response: 'initial',
+        compute: 'resuming',
+      });
+
+      expect(config.initialMetadata).toEqual({ compute: 'resuming' });
+      // The rest of the taxonomy is deliberately not forwarded.
+      expect(config).not.toHaveProperty('routeType');
+      expect(config).not.toHaveProperty('response');
+      expect(config).not.toHaveProperty('htmlSize');
+    });
+
+    it('omits initialMetadata when Next.js supplied no compute', async () => {
+      // Sibling RSC/data/segment outputs and builds from older Next.js
+      // versions carry no taxonomy, and must not gain an empty object.
+      const config = await writtenConfig(makePrerenderOutput(undefined));
+
+      expect(config).not.toHaveProperty('initialMetadata');
+    });
   });
 });

@@ -802,6 +802,17 @@ export async function handlePrerenderOutputs(
               bypassToken: output.config.bypassToken,
               experimentalBypassFor: output.config.bypassFor,
 
+              // Build-time serving metadata, carried verbatim from Next.js.
+              // Next.js sets `compute` only on a prerender group's primary
+              // output, so sibling RSC/data/segment configs omit the field,
+              // and older Next.js versions omit it everywhere. The values
+              // describe the deployment as it was built — revalidation can
+              // change a route's behavior over the deployment's lifetime.
+              initialMetadata:
+                output.compute !== undefined
+                  ? { compute: output.compute }
+                  : undefined,
+
               initialHeaders,
               initialStatus: output.fallback?.initialStatus,
 
