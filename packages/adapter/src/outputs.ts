@@ -803,14 +803,23 @@ export async function handlePrerenderOutputs(
               experimentalBypassFor: output.config.bypassFor,
 
               // Build-time serving metadata, carried verbatim from Next.js.
-              // Next.js sets `compute` only on a prerender group's primary
+              // Next.js sets the taxonomy only on a prerender group's primary
               // output, so sibling RSC/data/segment configs omit the field,
               // and older Next.js versions omit it everywhere. The values
               // describe the deployment as it was built — revalidation can
               // change a route's behavior over the deployment's lifetime.
               initialMetadata:
                 output.compute !== undefined
-                  ? { compute: output.compute }
+                  ? {
+                      compute: output.compute,
+                      // Zero is a real shell size — a shell that postponed
+                      // everything — so this tests for presence, not
+                      // truthiness. Absent means there is no HTML shell to
+                      // measure (route handlers, Pages Router).
+                      ...(output.htmlSize !== undefined
+                        ? { htmlSize: output.htmlSize }
+                        : {}),
+                    }
                   : undefined,
 
               initialHeaders,

@@ -173,21 +173,40 @@ describe('handlePrerenderOutputs', () => {
       );
     }
 
-    it('carries compute from the primary output verbatim', async () => {
+    it('carries compute and htmlSize from the primary output verbatim', async () => {
       const config = await writtenConfig({
         ...makePrerenderOutput(undefined),
         // Next.js emits the taxonomy all-or-nothing on the primary output;
-        // the adapter carries only `compute`.
+        // the adapter carries only `compute` and `htmlSize`.
         routeType: 'page',
         response: 'initial',
         compute: 'resuming',
+        // Zero is a real shell size — a shell that postponed everything —
+        // and must survive a presence test rather than a truthiness test.
+        htmlSize: 0,
       });
 
-      expect(config.initialMetadata).toEqual({ compute: 'resuming' });
+      expect(config.initialMetadata).toEqual({
+        compute: 'resuming',
+        htmlSize: 0,
+      });
       // The rest of the taxonomy is deliberately not forwarded.
       expect(config).not.toHaveProperty('routeType');
       expect(config).not.toHaveProperty('response');
       expect(config).not.toHaveProperty('htmlSize');
+    });
+
+    it('omits htmlSize when the output has no HTML shell', async () => {
+      // Route handlers are classified but have no HTML shell to measure.
+      const config = await writtenConfig({
+        ...makePrerenderOutput(undefined),
+        routeType: 'route',
+        response: 'complete',
+        compute: 'static',
+      });
+
+      expect(config.initialMetadata).toEqual({ compute: 'static' });
+      expect(config.initialMetadata).not.toHaveProperty('htmlSize');
     });
 
     it('omits initialMetadata when Next.js supplied no compute', async () => {
