@@ -198,7 +198,7 @@ export const getHandlerSource = (ctx: {
           }
 
           function matchUrlToPage(urlPathname: string): {
-            matchedPathname: string | null;
+            matchedPathname: string;
             locale?: string;
             matches?: RegExpMatchArray | null;
           } {
@@ -265,7 +265,8 @@ export const getHandlerSource = (ctx: {
 
             // we should have matched above but if not return back
             return {
-              matchedPathname: inversedAppRoutesManifest[urlPathname] ?? null,
+              matchedPathname:
+                inversedAppRoutesManifest[urlPathname] || urlPathname,
               locale: normalizeResult.locale,
             };
           }
@@ -405,11 +406,6 @@ export const getHandlerSource = (ctx: {
                 locale,
                 matches,
               } = matchUrlToPage(urlPathname);
-              if (page === null) {
-                res.statusCode = 404;
-                res.end('This page could not be found');
-                return;
-              }
               const isAppDir = page.match(/\/(page|route)$/);
               let addedMatchesToUrl = false;
 
