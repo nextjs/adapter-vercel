@@ -26,7 +26,9 @@ jobs:
   enforce-changeset:
     name: Enforce Changeset
     runs-on: ubuntu-latest
-    if: "${{ github.event.pull_request.title != 'chore: version packages' }}"
+    # The changesets bot suffixes the title in pre-release mode ("chore: version
+    # packages (beta)"), so match on the prefix rather than the exact title.
+    if: "${{ !startsWith(github.event.pull_request.title, 'chore: version packages') }}"
     steps:
       - uses: actions/checkout@v4
         with:
