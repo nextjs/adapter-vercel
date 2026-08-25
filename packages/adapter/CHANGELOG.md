@@ -1,5 +1,19 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.29
+
+### Patch Changes
+
+- [#109](https://github.com/nextjs/adapter-vercel/pull/109) [`1ce60ee`](https://github.com/nextjs/adapter-vercel/commit/1ce60eefe6af1060b0464ffec94c690e777aa866) Thanks [@devjiwonchoi](https://github.com/devjiwonchoi)! - Revert "Do not fall back to URL when manifest unmatched (#88)"
+
+- [#107](https://github.com/nextjs/adapter-vercel/pull/107) [`c7ff79d`](https://github.com/nextjs/adapter-vercel/commit/c7ff79d46ae217be17d56afdbeb66162dac7a59f) Thanks [@lubakravche](https://github.com/lubakravche)! - Emit `initialMetadata` on prerender configs. The group's primary output carries
+  `initialMetadata: { compute, htmlSize? }` copied verbatim from the Next.js
+  prerender taxonomy; sibling RSC/data/segment outputs and builds from older
+  Next.js versions omit the property, and `htmlSize` is absent when there is no
+  HTML shell to measure (route handlers, Pages Router) while `0` is a real size.
+  The values describe the deployment as it was built — revalidation can change a
+  route's behavior over the deployment's lifetime.
+
 ## 0.0.1-beta.28
 
 ### Patch Changes
