@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
+import { NOT_FOUND_TXT_HEADERS } from './constants';
 import {
   type FuncOutputs,
   handleEdgeOutputs,
@@ -743,9 +744,7 @@ const myAdapter: NextAdapter = {
           config.basePath,
           '_next/static/not-found.txt'
         ),
-        headers: {
-          'content-type': 'text/plain; charset=utf-8',
-        },
+        headers: NOT_FOUND_TXT_HEADERS,
       },
 
       // if i18n is enabled attempt removing locale prefix to check public files
