@@ -653,6 +653,29 @@ export async function handlePrerenderOutputs(
   const fsSema = new Sema(16, { capacity: prerenderOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
 
+  // How the platform should serve a cache miss, derived per prerender group
+  // from the canonical UI output's response classification. A `complete`
+  // response means the stored shell is the finished page, so a miss keeps the
+  // blocking revalidation whose request collapsing yields one invocation and
+  // one cache write (`sync`). An `initial` or `empty` response has dynamic
+  // holes, where a blocking miss already costs two invocations (shell +
+  // resume), so serving the miss dynamically while one coalesced async
+  // revalidation backfills the shell is cost-neutral and answers the request
+  // immediately (`dynamic`). Next.js classifies only a group's canonical UI
+  // output, and the platform reads each path's config independently, so the
+  // mode is captured per group here and applied to every sibling below.
+  // Route Handler groups and unclassified groups (older Next.js,
+  // `fallback: false` templates) get no entry and keep the legacy behavior.
+  const onMissModes = new Map<number, 'sync' | 'dynamic'>();
+  for (const output of prerenderOutputs) {
+    if (output.routeType !== 'route' && output.response !== undefined) {
+      onMissModes.set(
+        output.groupId,
+        output.response === 'complete' ? 'sync' : 'dynamic'
+      );
+    }
+  }
+
   await Promise.all(
     prerenderOutputs.map(async (output) => {
       await fsSema.acquire();
@@ -801,6 +824,10 @@ export async function handlePrerenderOutputs(
 
               bypassToken: output.config.bypassToken,
               experimentalBypassFor: output.config.bypassFor,
+
+              // undefined for groups without a classified UI output, which
+              // omits the key from the serialized config
+              onMiss: onMissModes.get(output.groupId),
 
               // Build-time serving metadata, carried verbatim from Next.js.
               // Next.js sets the taxonomy only on a prerender group's primary
