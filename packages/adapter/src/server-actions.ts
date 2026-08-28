@@ -23,14 +23,29 @@ export async function getServerActionMetaRoutes(
     'server-reference-manifest.json'
   );
 
+  let manifestContent: string;
+  try {
+    manifestContent = await fs.readFile(manifestPath, 'utf8');
+  } catch (error) {
+    // A build without server actions has no manifest.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+
   let manifest: ActionManifest;
   try {
-    manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    manifest = JSON.parse(manifestContent);
   } catch {
+    console.warn(
+      `Failed to parse ${manifestPath}, skipping server action meta routes`
+    );
     return [];
   }
 
   const routes: RouteWithSrc[] = [];
+  const seenIds = new Set<string>();
 
   for (const runtimeType of ['node', 'edge'] as const) {
     const runtime = manifest[runtimeType];
@@ -38,6 +53,8 @@ export async function getServerActionMetaRoutes(
 
     for (const [id, entry] of Object.entries(runtime)) {
       if (!entry.filename || !entry.exportedName) continue;
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
 
       const exportedName = entry.exportedName.startsWith('$$RSC_SERVER_ACTION_')
         ? 'anonymous_fn'

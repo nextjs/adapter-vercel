@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getServerActionMetaRoutes } from './server-actions';
 
 describe('getServerActionMetaRoutes', () => {
@@ -139,5 +139,56 @@ describe('getServerActionMetaRoutes', () => {
 
   it('returns no routes when the manifest is missing', async () => {
     expect(await getServerActionMetaRoutes(distDir)).toEqual([]);
+  });
+
+  it('warns and returns no routes when the manifest is malformed', async () => {
+    await fs.writeFile(
+      path.join(distDir, 'server', 'server-reference-manifest.json'),
+      'not json'
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(await getServerActionMetaRoutes(distDir)).toEqual([]);
+    expect(warn).toHaveBeenCalledOnce();
+
+    warn.mockRestore();
+  });
+
+  it('emits a single route for an id present in both node and edge', async () => {
+    await writeManifest({
+      node: {
+        dddddddddddddddddddddddddddddddddddddddddd: {
+          filename: 'app/shared.ts',
+          exportedName: 'sharedAction',
+        },
+      },
+      edge: {
+        dddddddddddddddddddddddddddddddddddddddddd: {
+          filename: 'app/shared.ts',
+          exportedName: 'sharedAction',
+        },
+      },
+    });
+
+    expect(await getServerActionMetaRoutes(distDir)).toEqual([
+      {
+        src: '/(.*)',
+        has: [
+          {
+            type: 'header',
+            key: 'next-action',
+            value: 'dddddddddddddddddddddddddddddddddddddddddd',
+          },
+        ],
+        transforms: [
+          {
+            type: 'request.headers',
+            op: 'append',
+            target: { key: 'x-server-action-name' },
+            args: 'app/shared.ts#sharedAction',
+          },
+        ],
+      },
+    ]);
   });
 });
