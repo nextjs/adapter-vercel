@@ -39,10 +39,9 @@ export async function getServerActionMetaRoutes(
     for (const [id, entry] of Object.entries(runtime)) {
       if (!entry.filename || !entry.exportedName) continue;
 
-      const exportedName =
-        entry.exportedName === '$$RSC_SERVER_ACTION_0'
-          ? 'anonymous_fn'
-          : entry.exportedName;
+      const exportedName = entry.exportedName.startsWith('$$RSC_SERVER_ACTION_')
+        ? 'anonymous_fn'
+        : entry.exportedName;
 
       routes.push({
         src: '/(.*)',

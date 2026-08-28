@@ -87,6 +87,10 @@ describe('getServerActionMetaRoutes', () => {
           filename: 'app/page.tsx',
           exportedName: '$$RSC_SERVER_ACTION_0',
         },
+        cccccccccccccccccccccccccccccccccccccccccc: {
+          filename: 'app/page.tsx',
+          exportedName: '$$RSC_SERVER_ACTION_7',
+        },
         bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: {
           filename: 'app/other.tsx',
         },
@@ -101,6 +105,24 @@ describe('getServerActionMetaRoutes', () => {
             type: 'header',
             key: 'next-action',
             value: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          },
+        ],
+        transforms: [
+          {
+            type: 'request.headers',
+            op: 'append',
+            target: { key: 'x-server-action-name' },
+            args: 'app/page.tsx#anonymous_fn',
+          },
+        ],
+      },
+      {
+        src: '/(.*)',
+        has: [
+          {
+            type: 'header',
+            key: 'next-action',
+            value: 'cccccccccccccccccccccccccccccccccccccccccc',
           },
         ],
         transforms: [
