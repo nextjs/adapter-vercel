@@ -1,5 +1,15 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.30
+
+### Patch Changes
+
+- [#117](https://github.com/nextjs/adapter-vercel/pull/117) [`dd3428f`](https://github.com/nextjs/adapter-vercel/commit/dd3428f08213d66c26672431c1930472c4e01120) Thanks [@kakadiadarpan](https://github.com/kakadiadarpan)! - Prevent duplicate fetch spans by preserving the automatic fetch instrumentation opt-out when OpenTelemetry is detected during the build.
+
+- [#113](https://github.com/nextjs/adapter-vercel/pull/113) [`87bc795`](https://github.com/nextjs/adapter-vercel/commit/87bc795c2263be7d91aa9923a323729b0a1c92f4) Thanks [@kldavis4](https://github.com/kldavis4)! - Emit server action meta routes so Firewall `server_action` rules and the `serverActionName` observability field work on adapter-built deployments. Each entry in `server-reference-manifest.json` produces a route matching the `next-action` request header that appends `x-server-action-name: <filename>#<exportedName>`, following the classic `@vercel/next` builder's `getServerActionMetaRoutes` behavior — except that any `$$RSC_SERVER_ACTION_*` exported name maps to `anonymous_fn` (the classic builder only renamed `$$RSC_SERVER_ACTION_0`), and ids duplicated across the node and edge manifests emit a single route.
+
+- [#116](https://github.com/nextjs/adapter-vercel/pull/116) [`c9d0e1c`](https://github.com/nextjs/adapter-vercel/commit/c9d0e1cd5d4261b1cd850e7ce6577aeaef29bd8f) Thanks [@mischnic](https://github.com/mischnic)! - Limit Turbopack read concurrency to 4
+
 ## 0.0.1-beta.29
 
 ### Patch Changes
