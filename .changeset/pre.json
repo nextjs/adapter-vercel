@@ -5,6 +5,7 @@
     "@next-community/adapter-vercel": "0.0.0"
   },
   "changesets": [
+    "0000-fix-duplicate-fetch-spans",
     "bold-moose-see",
     "breezy-ravens-refuse",
     "clever-geckos-float",
@@ -19,6 +20,7 @@
     "giant-dodos-pump",
     "giant-monkeys-crash",
     "gold-stamps-run",
+    "heavy-onions-guess",
     "khaki-zebras-poke",
     "light-stamps-shake",
     "loud-weeks-jump",
@@ -37,6 +39,7 @@
     "sparkly-beds-create",
     "spotty-spiders-report",
     "stale-maps-serve",
+    "thick-ties-attend",
     "thin-readers-train",
     "thirty-geckos-remain",
     "thirty-plums-heal",
