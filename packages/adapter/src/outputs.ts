@@ -246,6 +246,7 @@ type NodeFunctionConfig = Pick<
   | 'supportsMultiPayloads'
   | 'supportsResponseStreaming'
   | 'experimentalAllowBundling'
+  | 'shouldDisableAutomaticFetchInstrumentation'
 > & {
   // these are build output API specific not on Lambda class
   filePathMap: Record<string, string>;
@@ -615,6 +616,9 @@ export async function handleNodeOutputs(
         supportsMultiPayloads: true,
         supportsResponseStreaming: true,
         experimentalAllowBundling: true,
+        shouldDisableAutomaticFetchInstrumentation:
+          process.env.VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION ===
+          '1',
         // middleware handler always expects Request/Response interface
         useWebApi: isMiddleware,
         launcherType: 'Nodejs',
