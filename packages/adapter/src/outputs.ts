@@ -787,6 +787,7 @@ export async function handlePrerenderOutputs(
             // TODO: strongly type this
             {
               group: output.groupId,
+              exposeErrBody: true,
               expiration:
                 typeof output.fallback?.initialRevalidate !== 'undefined'
                   ? output.fallback?.initialRevalidate
