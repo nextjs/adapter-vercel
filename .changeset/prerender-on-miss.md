@@ -2,11 +2,11 @@
 "@next-community/adapter-vercel": patch
 ---
 
-Emit `onMiss` on prerender configs, derived per prerender group from the
-Next.js response classification: `sync` when the canonical response is
-`complete`, `dynamic` when it is `initial` or `empty`, omitted when the group
-is unclassified (older Next.js, `fallback: false` templates) or a Route
-Handler.
+Emit `onMiss` on prerender configs, derived per output from its Next.js
+response classification: `sync` when the response is `complete`, `dynamic`
+when it is `initial` or `empty`, omitted when the output is unclassified
+(older Next.js, `fallback: false` templates, unclassified group siblings) or
+a Route Handler.
 
 **Behavior change once the platform proxy flag is enabled:** upgrading the
 adapter changes cache-miss behavior for every PPR route with dynamic holes.

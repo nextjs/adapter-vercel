@@ -304,15 +304,14 @@ describe('handlePrerenderOutputs', () => {
   });
 
   describe('onMiss', () => {
-    // Next.js classifies only a group's canonical UI output, while the
-    // platform reads each path's config independently, so the assertions run
-    // the canonical HTML output together with its unclassified RSC sibling
-    // and check both written configs.
-    function makeRscSibling(): AdapterOutput['PRERENDER'] {
+    function makeRscSibling(
+      overrides: Partial<AdapterOutput['PRERENDER']> = {}
+    ): AdapterOutput['PRERENDER'] {
       return {
         ...makePrerenderOutput(undefined),
         id: 'prerender-2',
         pathname: '/blog.rsc',
+        ...overrides,
       };
     }
 
@@ -341,7 +340,7 @@ describe('handlePrerenderOutputs', () => {
       );
     }
 
-    it("emits 'sync' on the HTML and RSC configs of a complete group", async () => {
+    it("emits 'sync' on a complete output and omits it on an unclassified sibling", async () => {
       const [htmlConfig, rscConfig] = await writtenConfigs([
         {
           ...makePrerenderOutput(undefined),
@@ -353,50 +352,61 @@ describe('handlePrerenderOutputs', () => {
       ]);
 
       expect(htmlConfig.onMiss).toBe('sync');
-      expect(rscConfig.onMiss).toBe('sync');
+      expect(rscConfig).not.toHaveProperty('onMiss');
     });
 
-    it("emits 'dynamic' on the HTML and RSC configs of an initial group", async () => {
-      const [htmlConfig, rscConfig] = await writtenConfigs([
+    it("emits 'dynamic' on an initial output", async () => {
+      const [htmlConfig] = await writtenConfigs([
         {
           ...makePrerenderOutput(undefined),
           routeType: 'page',
           response: 'initial',
           compute: 'resuming',
         },
-        makeRscSibling(),
       ]);
 
       expect(htmlConfig.onMiss).toBe('dynamic');
-      expect(rscConfig.onMiss).toBe('dynamic');
     });
 
-    it("emits 'dynamic' on the HTML and RSC configs of an empty group", async () => {
-      const [htmlConfig, rscConfig] = await writtenConfigs([
+    it("emits 'dynamic' on an empty output", async () => {
+      const [htmlConfig] = await writtenConfigs([
         {
           ...makePrerenderOutput(undefined),
           routeType: 'page',
           response: 'empty',
           compute: 'blocking',
         },
-        makeRscSibling(),
       ]);
 
       expect(htmlConfig.onMiss).toBe('dynamic');
+    });
+
+    it('derives onMiss per output within a group', async () => {
+      const [htmlConfig, rscConfig] = await writtenConfigs([
+        {
+          ...makePrerenderOutput(undefined),
+          routeType: 'page',
+          response: 'complete',
+          compute: 'static',
+        },
+        makeRscSibling({
+          routeType: 'page',
+          response: 'initial',
+          compute: 'resuming',
+        }),
+      ]);
+
+      expect(htmlConfig.onMiss).toBe('sync');
       expect(rscConfig.onMiss).toBe('dynamic');
     });
 
     it('omits onMiss when Next.js supplied no classification', async () => {
-      // Older Next.js versions and fallback: false templates carry no
-      // taxonomy; the key must be absent, not empty or undefined.
       const [config] = await writtenConfigs([makePrerenderOutput(undefined)]);
 
       expect(config).not.toHaveProperty('onMiss');
     });
 
-    it('omits onMiss for Route-Handler-only groups', async () => {
-      // Route Handlers are classified but have no HTML shell to serve or
-      // backfill, so the heuristic does not apply to them.
+    it('omits onMiss for Route Handler outputs', async () => {
       const [config] = await writtenConfigs([
         {
           ...makePrerenderOutput(undefined),
