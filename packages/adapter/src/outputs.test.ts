@@ -3,8 +3,93 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AdapterOutput } from 'next';
 import { AdapterOutputType } from 'next/dist/shared/lib/constants';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type FuncOutputs, handlePrerenderOutputs } from './outputs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  type FuncOutputs,
+  handleNodeOutputs,
+  handlePrerenderOutputs,
+} from './outputs';
+
+describe('handleNodeOutputs automatic fetch instrumentation', () => {
+  let projectDir: string;
+  let distDir: string;
+
+  beforeEach(async () => {
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adapter-node-'));
+    distDir = path.join(projectDir, '.next');
+    await fs.mkdir(distDir);
+    await fs.writeFile(
+      path.join(projectDir, 'package.json'),
+      JSON.stringify({ engines: { node: '22.x' } })
+    );
+    await fs.writeFile(path.join(distDir, 'routes-manifest.json'), '{}');
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(projectDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    AdapterOutputType.PAGES,
+    AdapterOutputType.APP_ROUTE,
+    AdapterOutputType.MIDDLEWARE,
+  ] as const)('serializes the current build flag for %s', async (type) => {
+    const isMiddleware = type === AdapterOutputType.MIDDLEWARE;
+    const output = {
+      id: 'node-output',
+      type,
+      pathname: '/example',
+      sourcePage: isMiddleware ? 'middleware' : '/example',
+      filePath: path.join(distDir, 'example.js'),
+      runtime: 'nodejs',
+      assets: {},
+      assetsHashes: {},
+      config: {},
+    } satisfies FuncOutputs[number];
+
+    for (const [value, expected] of [
+      ['1', true],
+      [undefined, false],
+      ['', false],
+      ['0', false],
+      ['true', false],
+      ['1', true],
+    ] as const) {
+      vi.stubEnv(
+        'VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION',
+        value
+      );
+      const vercelOutputDir = await fs.mkdtemp(
+        path.join(projectDir, 'output-')
+      );
+
+      await handleNodeOutputs([output], {
+        config: {},
+        distDir,
+        repoRoot: projectDir,
+        projectDir,
+        nextVersion: '16.3.0-canary.96',
+        isMiddleware,
+        prerenderFallbackFalseMap: {},
+        vercelOutputDir,
+      });
+
+      const config = JSON.parse(
+        await fs.readFile(
+          path.join(vercelOutputDir, 'functions/example.func/.vc-config.json'),
+          'utf8'
+        )
+      );
+      expect(
+        config.shouldDisableAutomaticFetchInstrumentation,
+        `flag: ${value}`
+      ).toBe(expected);
+      expect(config.launcherType).toBe('Nodejs');
+      expect(config.useWebApi).toBe(isMiddleware);
+    }
+  });
+});
 
 const RSC_CONTENT_TYPE = 'text/x-component';
 const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';

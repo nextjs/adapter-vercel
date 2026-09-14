@@ -21,6 +21,7 @@ import {
   normalizeNextDataRoutes,
   normalizeRewrites,
 } from './routing';
+import { getServerActionMetaRoutes } from './server-actions';
 import { generateToolbarScript } from './toolbar';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
@@ -28,6 +29,12 @@ import { escapeStringRegexp, getImagesConfig } from './utils';
 const myAdapter: NextAdapter = {
   name: 'Vercel',
   async modifyConfig(config, ctx) {
+    if (ctx.phase === PHASE_PRODUCTION_BUILD && process.env.CI) {
+      // A workaround to speedup Turbopack builds (particularly warm builds). Vercel build cache
+      // reads currently slows down dramatically with too many concurrent reads, so we limit to 4.
+      process.env.TURBO_ENGINE_READ_CONCURRENCY = '4';
+    }
+
     if (ctx.phase === PHASE_PRODUCTION_BUILD) {
       config.experimental.supportsImmutableAssets =
         // Default to true, allow users to opt-out
@@ -286,6 +293,7 @@ const myAdapter: NextAdapter = {
       extractRedirects(routing);
     const headers = extractHeaders(routing);
     const onMatchRoutes = extractOnMatchRoutes(routing);
+    const serverActionMetaRoutes = await getServerActionMetaRoutes(distDir);
 
     const dynamicRoutes: RouteWithSrc[] = [];
     let addedNextData404Route = false;
@@ -482,7 +490,7 @@ const myAdapter: NextAdapter = {
 
       ...redirects,
 
-      // server actions name meta routes - placeholder for server actions
+      ...serverActionMetaRoutes,
 
       // middleware route - placeholder for middleware configuration
       ...middlewareRoutes,
