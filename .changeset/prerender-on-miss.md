@@ -8,13 +8,9 @@ when it is `initial` or `empty`, omitted when the output is unclassified
 (older Next.js, `fallback: false` templates, unclassified group siblings) or
 a Route Handler.
 
-**Behavior change once the platform proxy flag is enabled:** upgrading the
-adapter changes cache-miss behavior for every PPR route with dynamic holes.
-Misses on those routes are served dynamically per request while a single
-coalesced async revalidation backfills the shell, instead of blocking on a
-synchronous revalidation. This is intended and cost-neutral — a blocking miss
-on a dynamic-hole route already costs two invocations — but the change in
-serving behavior is visible. Routes whose stored shell is a complete response
-emit `onMiss: "sync"` and keep today's collapsed single-invocation miss
-handling. The field is inert until the platform proxy flag is enabled;
-until then all routes keep the current blocking-miss behavior.
+**Behavior change once the platform honors `onMiss`:** cache misses on routes
+that emit `dynamic` are served with a per-request dynamic render while the
+cached shell is refreshed in the background, instead of blocking the request
+on a synchronous revalidation. Routes that emit `sync` (or omit the field)
+keep the current blocking-miss behavior; until the platform supports the
+field it is inert.
