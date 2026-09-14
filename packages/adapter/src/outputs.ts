@@ -4,6 +4,7 @@ import {
   getLambdaOptionsFromFunction,
   getNodeVersion,
   type NodejsLambda,
+  type Prerender,
 } from '@vercel/build-utils';
 import type { RouteWithSrc } from '@vercel/routing-utils';
 import { Sema } from 'async-sema';
@@ -74,6 +75,18 @@ const writeIfNotExists = async (filePath: string, content: string) => {
 };
 
 type Regions = string | string[];
+
+type PrerenderConfig = Omit<
+  ConstructorParameters<typeof Prerender>[0],
+  'fallback' | 'initialHeaders'
+> & {
+  fallback: string | null;
+  initialHeaders?: Record<string, string | string[]>;
+  initialMetadata?: {
+    compute: NonNullable<AdapterOutput['PRERENDER']['compute']>;
+    htmlSize?: NonNullable<AdapterOutput['PRERENDER']['htmlSize']>;
+  };
+};
 
 const vercelFunctionRegionsVar = process.env.VERCEL_FUNCTION_REGIONS;
 let vercelFunctionRegions: string[] | undefined;
@@ -783,71 +796,68 @@ export async function handlePrerenderOutputs(
         await fs.mkdir(path.dirname(prerenderConfigPath), { recursive: true });
         await writeIfNotExists(
           prerenderConfigPath,
-          JSON.stringify(
-            // TODO: strongly type this
-            {
-              group: output.groupId,
-              exposeErrBody: true,
-              expiration:
-                typeof output.fallback?.initialRevalidate !== 'undefined'
-                  ? output.fallback?.initialRevalidate
-                  : 1,
+          JSON.stringify({
+            group: output.groupId,
+            exposeErrBody: true,
+            expiration:
+              typeof output.fallback?.initialRevalidate !== 'undefined'
+                ? output.fallback?.initialRevalidate
+                : 1,
 
-              staleExpiration: output.fallback?.initialExpiration,
+            staleExpiration: output.fallback?.initialExpiration,
 
-              sourcePath: parentNodeOutput?.pathname,
+            sourcePath: parentNodeOutput?.pathname,
 
-              // send matches in query instead of x-now-route-matches
-              // legacy header
-              passQuery: true,
-              allowQuery: output.config.allowQuery,
-              allowHeader: output.config.allowHeader,
-              partialFallback: output.config.partialFallback || undefined,
+            // send matches in query instead of x-now-route-matches
+            // legacy header
+            passQuery: true,
+            allowQuery: output.config.allowQuery,
+            allowHeader: output.config.allowHeader,
+            partialFallback: output.config.partialFallback || undefined,
 
-              bypassToken: output.config.bypassToken,
-              experimentalBypassFor: output.config.bypassFor,
+            bypassToken: output.config.bypassToken,
+            experimentalBypassFor: output.config.bypassFor,
 
-              // Build-time serving metadata, carried verbatim from Next.js.
-              // Next.js sets the taxonomy only on a prerender group's primary
-              // output, so sibling RSC/data/segment configs omit the field,
-              // and older Next.js versions omit it everywhere. The values
-              // describe the deployment as it was built — revalidation can
-              // change a route's behavior over the deployment's lifetime.
-              initialMetadata:
-                output.compute !== undefined
-                  ? {
-                      compute: output.compute,
-                      // Zero is a real shell size — a shell that postponed
-                      // everything — so this tests for presence, not
-                      // truthiness. Absent means there is no HTML shell to
-                      // measure (route handlers, Pages Router).
-                      ...(output.htmlSize !== undefined
-                        ? { htmlSize: output.htmlSize }
-                        : {}),
-                    }
-                  : undefined,
-
-              initialHeaders,
-              initialStatus: output.fallback?.initialStatus,
-
-              fallback: prerenderFallbackPath
-                ? path.posix.relative(
-                    path.dirname(prerenderConfigPath),
-                    prerenderFallbackPath
-                  )
-                : null,
-
-              chain: output.pprChain
+            // Build-time serving metadata, carried verbatim from Next.js.
+            // Next.js sets the taxonomy only on a prerender group's primary
+            // output, so sibling RSC/data/segment configs omit the field,
+            // and older Next.js versions omit it everywhere. The values
+            // describe the deployment as it was built — revalidation can
+            // change a route's behavior over the deployment's lifetime.
+            initialMetadata:
+              output.compute !== undefined
                 ? {
-                    ...output.pprChain,
-                    outputPath: path.posix.join(
-                      './',
-                      `${normalizeIndexPathname(output.pathname, config)}`
-                    ),
+                    compute: output.compute,
+                    // Zero is a real shell size — a shell that postponed
+                    // everything — so this tests for presence, not
+                    // truthiness. Absent means there is no HTML shell to
+                    // measure (route handlers, Pages Router).
+                    ...(output.htmlSize !== undefined
+                      ? { htmlSize: output.htmlSize }
+                      : {}),
                   }
                 : undefined,
-            }
-          )
+
+            initialHeaders,
+            initialStatus: output.fallback?.initialStatus,
+
+            fallback: prerenderFallbackPath
+              ? path.posix.relative(
+                  path.dirname(prerenderConfigPath),
+                  prerenderFallbackPath
+                )
+              : null,
+
+            chain: output.pprChain
+              ? {
+                  ...output.pprChain,
+                  outputPath: path.posix.join(
+                    './',
+                    `${normalizeIndexPathname(output.pathname, config)}`
+                  ),
+                }
+              : undefined,
+          } satisfies PrerenderConfig)
         );
 
         if (
