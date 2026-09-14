@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.31
+
+### Patch Changes
+
+- [#118](https://github.com/nextjs/adapter-vercel/pull/118) [`14569f8`](https://github.com/nextjs/adapter-vercel/commit/14569f80e74b70c1af98728ef520b5ad36203e31) Thanks [@unstubbable](https://github.com/unstubbable)! - Preserve error responses from prerendered routes
+
 ## 0.0.1-beta.30
 
 ### Patch Changes
