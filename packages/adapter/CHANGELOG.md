@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.32
+
+### Patch Changes
+
+- [#120](https://github.com/nextjs/adapter-vercel/pull/120) [`88201bb`](https://github.com/nextjs/adapter-vercel/commit/88201bb4296c6e0b6ef0ca1513746199a9d7afec) Thanks [@jeffsee55](https://github.com/jeffsee55)! - Percent-encode server-action meta route transform args that sit outside the API charset, and drop extra action meta routes so the CDN table stays under 2048. ASCII names are unchanged; non-action routes are never dropped.
+
 ## 0.0.1-beta.31
 
 ### Patch Changes
