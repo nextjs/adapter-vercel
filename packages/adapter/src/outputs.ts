@@ -433,7 +433,6 @@ export async function handleNodeOutputs(
 
   const fsSema = new Sema(16, { capacity: nodeOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
-  const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
 
   let pages404Output: undefined | FuncOutputs[0];
   let pagesErrorOutput: undefined | FuncOutputs[0];
@@ -550,13 +549,12 @@ export async function handleNodeOutputs(
         filesHashes[routesManifestRelativePath] = routesManifestHash;
       }
 
-      const handlerFilePath = path.join(
-        functionDir,
-        handlerRelativeDir,
+      const handlerRelativePath = path.posix.join(
+        path.posix.relative(repoRoot, projectDir),
         '___next_launcher.cjs'
       );
-
-      await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
+      const handlerAbsolutePath = path.join(functionDir, handlerRelativePath);
+      await fs.mkdir(path.dirname(handlerAbsolutePath), { recursive: true });
       const handlerSource = getHandlerSource({
         projectRelativeDistDir: path.posix.relative(projectDir, distDir),
         prerenderFallbackFalseMap,
@@ -564,9 +562,9 @@ export async function handleNodeOutputs(
         nextConfig: config,
         nextEnvLoaderPathRelativeToProjectDir,
       });
-      await writeIfNotExists(handlerFilePath, handlerSource);
+      await writeIfNotExists(handlerAbsolutePath, handlerSource);
       if (filesHashes) {
-        filesHashes['___next_launcher.cjs'] = sha256(handlerSource);
+        filesHashes[handlerRelativePath] = sha256(handlerSource);
       }
 
       const operationType =
@@ -607,10 +605,7 @@ export async function handleNodeOutputs(
           slug: 'nextjs',
           version: nextVersion,
         },
-        handler: path.posix.join(
-          path.posix.relative(repoRoot, projectDir),
-          '___next_launcher.cjs'
-        ),
+        handler: handlerRelativePath,
         runtime: nodeVersion.runtime,
         maxDuration,
         supportsMultiPayloads: true,
