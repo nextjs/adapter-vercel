@@ -123,6 +123,9 @@ export async function getServerActionMetaRoutes(
 
     for (const [id, entry] of Object.entries(runtime)) {
       if (!entry.filename || !entry.exportedName) continue;
+      // `use cache` functions are server references too, but are only invoked
+      // by the server during rendering, never via a `next-action` header.
+      if (entry.exportedName.startsWith('$$RSC_SERVER_CACHE_')) continue;
       if (seenIds.has(id)) continue;
       seenIds.add(id);
 

@@ -140,6 +140,30 @@ describe('getServerActionMetaRoutes', () => {
     ]);
   });
 
+  it('skips `use cache` function references', async () => {
+    await writeManifest({
+      node: {
+        '805808586004b6f5a8f2e9d1c3b7a2f4e6d8c0b1a3': {
+          filename: 'app/data.ts',
+          exportedName: '$$RSC_SERVER_CACHE_0',
+        },
+        '80557034aeaa1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e': {
+          filename: 'app/data.ts',
+          exportedName: '$$RSC_SERVER_CACHE_getUser',
+        },
+        '0052d32c76921a2b3c4d5e6f7a8b9c0d1e2f3a4b5c': {
+          filename: 'app/actions.ts',
+          exportedName: 'loginAction',
+        },
+      },
+    });
+
+    const routes = await getServerActionMetaRoutes(distDir);
+    expect(routes.map((route) => route.transforms?.[0]?.args)).toEqual([
+      'app/actions.ts#loginAction',
+    ]);
+  });
+
   it('returns no routes when the manifest is missing', async () => {
     expect(await getServerActionMetaRoutes(distDir)).toEqual([]);
   });
