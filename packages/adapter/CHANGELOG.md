@@ -1,5 +1,13 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.33
+
+### Patch Changes
+
+- [#123](https://github.com/nextjs/adapter-vercel/pull/123) [`0d958f4`](https://github.com/nextjs/adapter-vercel/commit/0d958f4d4a307ca6fadb886dbb9e2ef4c69306c8) Thanks [@jeffsee55](https://github.com/jeffsee55)! - Revert "Sanitize server-action meta route args and stay under the CDN route cap"
+
+- [#125](https://github.com/nextjs/adapter-vercel/pull/125) [`991ec46`](https://github.com/nextjs/adapter-vercel/commit/991ec46e98bf8ba86a54fd048a81177fe53a9ed8) Thanks [@jeffsee55](https://github.com/jeffsee55)! - Revert "Emit server action meta routes for firewall and observability"
+
 ## 0.0.1-beta.32
 
 ### Patch Changes
