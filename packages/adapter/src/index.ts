@@ -21,10 +21,7 @@ import {
   normalizeNextDataRoutes,
   normalizeRewrites,
 } from './routing';
-import {
-  getServerActionMetaRoutes,
-  trimServerActionMetaRoutesToFit,
-} from './server-actions';
+import { getServerActionMetaRoutes } from './server-actions';
 import { generateToolbarScript } from './toolbar';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
@@ -1004,7 +1001,6 @@ const myAdapter: NextAdapter = {
             },
           ]),
     ] satisfies (RouteWithSrc | Route)[];
-    vercelConfig.routes = trimServerActionMetaRoutesToFit(vercelConfig.routes);
 
     const outputConfigPath = path.join(vercelOutputDir, 'config.json');
     await fs.writeFile(outputConfigPath, JSON.stringify(vercelConfig, null, 2));

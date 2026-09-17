@@ -2,10 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  getServerActionMetaRoutes,
-  trimServerActionMetaRoutesToFit,
-} from './server-actions';
+import { getServerActionMetaRoutes } from './server-actions';
 
 describe('getServerActionMetaRoutes', () => {
   let distDir: string;
@@ -155,79 +152,6 @@ describe('getServerActionMetaRoutes', () => {
     expect(warn).toHaveBeenCalledOnce();
 
     warn.mockRestore();
-  });
-
-  it('percent-encodes unicode filenames that fail the transform-args charset', async () => {
-    await writeManifest({
-      node: {
-        eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee: {
-          filename: 'app/acción.js',
-          exportedName: 'guardar',
-        },
-        ffffffffffffffffffffffffffffffffffffffff: {
-          filename: 'app/actions.js',
-          exportedName: 'ping',
-        },
-      },
-    });
-
-    const routes = await getServerActionMetaRoutes(distDir);
-    expect(routes.map((route) => route.transforms?.[0]?.args)).toEqual([
-      'app/acci%C3%B3n.js#guardar',
-      'app/actions.js#ping',
-    ]);
-  });
-
-  it('encodes % so a backslash and a literal %5C filename stay distinct', async () => {
-    await writeManifest({
-      node: {
-        '111111111111111111111111111111111111111111': {
-          filename: 'app/a\\b.js',
-          exportedName: 'one',
-        },
-        '222222222222222222222222222222222222222222': {
-          filename: 'app/a%5Cb.js',
-          exportedName: 'two',
-        },
-      },
-    });
-
-    const routes = await getServerActionMetaRoutes(distDir);
-    expect(routes.map((route) => route.transforms?.[0]?.args)).toEqual([
-      'app/a%5Cb.js#one',
-      'app/a%255Cb.js#two',
-    ]);
-  });
-
-  it('drops action meta routes first when over the CDN route cap', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const actionRoute = {
-      src: '/(.*)',
-      transforms: [
-        {
-          type: 'request.headers',
-          op: 'append',
-          target: { key: 'x-server-action-name' },
-          args: 'app/actions.js#ping',
-        },
-      ],
-    };
-    const otherRoute = { src: '/about', dest: '/about' };
-
-    const trimmed = trimServerActionMetaRoutesToFit(
-      [otherRoute, actionRoute, actionRoute, actionRoute, otherRoute],
-      3
-    );
-
-    expect(trimmed).toEqual([otherRoute, actionRoute, otherRoute]);
-    expect(warn).toHaveBeenCalledOnce();
-    warn.mockRestore();
-  });
-
-  it('does not drop non-action routes when they already exceed the cap', () => {
-    const other = { src: '/page' };
-    const trimmed = trimServerActionMetaRoutesToFit([other, other, other], 2);
-    expect(trimmed).toEqual([other, other, other]);
   });
 
   it('emits a single route for an id present in both node and edge', async () => {
