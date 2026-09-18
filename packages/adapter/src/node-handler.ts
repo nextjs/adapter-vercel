@@ -197,10 +197,16 @@ export const getHandlerSource = (ctx: {
             return pathname;
           }
 
+          type MatchedRoute = {
+            page: string;
+            routeKeys?: Record<string, string>;
+          };
+
           function matchUrlToPage(urlPathname: string): {
             matchedPathname: string;
             locale?: string;
             matches?: RegExpMatchArray | null;
+            matchedRoute?: MatchedRoute;
           } {
             // normalize first
             urlPathname = normalizeDataPath(urlPathname);
@@ -259,6 +265,7 @@ export const getHandlerSource = (ctx: {
                     inversedAppRoutesManifest[route.page] || route.page,
                   locale: normalizeResult.locale,
                   matches,
+                  matchedRoute: route,
                 };
               }
             }
@@ -384,6 +391,28 @@ export const getHandlerSource = (ctx: {
             return decoder.decode(bytes);
           }
 
+          function isOptionalCatchallTemplateCapture(
+            matchedRoute: MatchedRoute | undefined,
+            matchKey: string,
+            matchValue: string
+          ): boolean {
+            if (!matchedRoute) {
+              return false;
+            }
+
+            const prefixedParamName =
+              matchedRoute.routeKeys?.[matchKey] ?? matchKey;
+            const paramName = prefixedParamName.startsWith('nxtP')
+              ? prefixedParamName.slice(4)
+              : prefixedParamName;
+            const placeholder = `[[...${paramName}]]`;
+
+            return (
+              matchValue === placeholder &&
+              matchedRoute.page.split('/').includes(placeholder)
+            );
+          }
+
           return async function handler(
             req: import('http').IncomingMessage,
             res: import('http').ServerResponse,
@@ -405,16 +434,26 @@ export const getHandlerSource = (ctx: {
                 matchedPathname: page,
                 locale,
                 matches,
+                matchedRoute,
               } = matchUrlToPage(urlPathname);
               const isAppDir = page.match(/\/(page|route)$/);
               let addedMatchesToUrl = false;
 
-              // apply missing matches to query if urlPathname is not
-              // literal dynamic route. this is mostly to parse params
-              // for PPR resume from a rewrite
+              // Apply matches recovered from a rewritten pathname to the query.
+              // An unresolved optional catch-all in a partial fallback pathname
+              // is the route template, not request data.
               for (const matchKey in matches?.groups || {}) {
                 const matchValue = matches?.groups?.[matchKey];
                 if (!parsedUrl.searchParams.has(matchKey) && matchValue) {
+                  if (
+                    isOptionalCatchallTemplateCapture(
+                      matchedRoute,
+                      matchKey,
+                      matchValue
+                    )
+                  ) {
+                    continue;
+                  }
                   parsedUrl.searchParams.set(matchKey, matchValue);
                   addedMatchesToUrl = true;
                 }
