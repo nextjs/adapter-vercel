@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.34
+
+### Patch Changes
+
+- [#126](https://github.com/nextjs/adapter-vercel/pull/126) [`a478a21`](https://github.com/nextjs/adapter-vercel/commit/a478a21a50b66017825ce4b09d0f39ec71f3cb21) Thanks [@unstubbable](https://github.com/unstubbable)! - Preserve omitted optional catch-all params during prerender bypasses
+
 ## 0.0.1-beta.33
 
 ### Patch Changes
