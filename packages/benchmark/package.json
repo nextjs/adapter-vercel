@@ -7,7 +7,7 @@
     "benchmark": "node scripts/generate.mjs && next build"
   },
   "dependencies": {
-    "next": "16.3.0-canary.96",
+    "next": "16.4.0-canary.38",
     "react": "19.1.1",
     "react-dom": "19.1.1"
   },
