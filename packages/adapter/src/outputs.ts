@@ -807,6 +807,13 @@ export async function handlePrerenderOutputs(
               bypassToken: output.config.bypassToken,
               experimentalBypassFor: output.config.bypassFor,
 
+              onMiss:
+                output.routeType !== 'route' && output.response !== undefined
+                  ? output.response === 'complete'
+                    ? 'sync'
+                    : 'dynamic'
+                  : undefined,
+
               // Build-time serving metadata, carried verbatim from Next.js.
               // Next.js sets the taxonomy only on a prerender group's primary
               // output, so sibling RSC/data/segment configs omit the field,

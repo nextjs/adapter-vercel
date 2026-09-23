@@ -302,4 +302,121 @@ describe('handlePrerenderOutputs', () => {
       expect(config).not.toHaveProperty('initialMetadata');
     });
   });
+
+  describe('onMiss', () => {
+    function makeRscSibling(
+      overrides: Partial<AdapterOutput['PRERENDER']> = {}
+    ): AdapterOutput['PRERENDER'] {
+      return {
+        ...makePrerenderOutput(undefined),
+        id: 'prerender-2',
+        pathname: '/blog.rsc',
+        ...overrides,
+      };
+    }
+
+    async function writtenConfigs(outputs: AdapterOutput['PRERENDER'][]) {
+      await handlePrerenderOutputs(outputs, {
+        config: {},
+        vercelOutputDir,
+        nodeOutputsParentMap,
+        rscContentType: RSC_CONTENT_TYPE,
+        varyHeader: 'rsc',
+      });
+
+      return Promise.all(
+        outputs.map(async (output) =>
+          JSON.parse(
+            await fs.readFile(
+              path.join(
+                vercelOutputDir,
+                'functions',
+                `${output.pathname.slice(1)}.prerender-config.json`
+              ),
+              'utf8'
+            )
+          )
+        )
+      );
+    }
+
+    it("emits 'sync' on a complete output and omits it on an unclassified sibling", async () => {
+      const [htmlConfig, rscConfig] = await writtenConfigs([
+        {
+          ...makePrerenderOutput(undefined),
+          routeType: 'page',
+          response: 'complete',
+          compute: 'static',
+        },
+        makeRscSibling(),
+      ]);
+
+      expect(htmlConfig.onMiss).toBe('sync');
+      expect(rscConfig).not.toHaveProperty('onMiss');
+    });
+
+    it("emits 'dynamic' on an initial output", async () => {
+      const [htmlConfig] = await writtenConfigs([
+        {
+          ...makePrerenderOutput(undefined),
+          routeType: 'page',
+          response: 'initial',
+          compute: 'resuming',
+        },
+      ]);
+
+      expect(htmlConfig.onMiss).toBe('dynamic');
+    });
+
+    it("emits 'dynamic' on an empty output", async () => {
+      const [htmlConfig] = await writtenConfigs([
+        {
+          ...makePrerenderOutput(undefined),
+          routeType: 'page',
+          response: 'empty',
+          compute: 'blocking',
+        },
+      ]);
+
+      expect(htmlConfig.onMiss).toBe('dynamic');
+    });
+
+    it('derives onMiss per output within a group', async () => {
+      const [htmlConfig, rscConfig] = await writtenConfigs([
+        {
+          ...makePrerenderOutput(undefined),
+          routeType: 'page',
+          response: 'complete',
+          compute: 'static',
+        },
+        makeRscSibling({
+          routeType: 'page',
+          response: 'initial',
+          compute: 'resuming',
+        }),
+      ]);
+
+      expect(htmlConfig.onMiss).toBe('sync');
+      expect(rscConfig.onMiss).toBe('dynamic');
+    });
+
+    it('omits onMiss when Next.js supplied no classification', async () => {
+      const [config] = await writtenConfigs([makePrerenderOutput(undefined)]);
+
+      expect(config).not.toHaveProperty('onMiss');
+    });
+
+    it('omits onMiss for Route Handler outputs', async () => {
+      const [config] = await writtenConfigs([
+        {
+          ...makePrerenderOutput(undefined),
+          routeType: 'route',
+          response: 'complete',
+          compute: 'static',
+        },
+      ]);
+
+      expect(config).not.toHaveProperty('onMiss');
+    });
+  });
 });
