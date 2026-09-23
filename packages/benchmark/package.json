@@ -1,0 +1,17 @@
+{
+  "name": "@next-community/adapter-benchmark",
+  "private": true,
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "build": "next build",
+    "benchmark": "node scripts/generate.mjs && next build"
+  },
+  "dependencies": {
+    "next": "16.3.0-canary.96",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@next-community/adapter-vercel": "workspace:*"
+  }
+}

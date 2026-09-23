@@ -87,6 +87,22 @@ importers:
         specifier: 3.2.3
         version: 3.2.3
 
+  packages/benchmark:
+    dependencies:
+      next:
+        specifier: 16.3.0-canary.96
+        version: 16.3.0-canary.96(@types/node@20.6.5)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+      react-dom:
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
+    devDependencies:
+      '@next-community/adapter-vercel':
+        specifier: workspace:*
+        version: link:../adapter
+
 packages:
 
   '@babel/runtime@7.28.4':
