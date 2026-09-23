@@ -537,8 +537,14 @@ export async function handleNodeOutputs(
               filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
             }
           }
-          files[path.posix.relative(repoRoot, notFoundOutput.filePath)] =
-            path.posix.relative(repoRoot, notFoundOutput.filePath);
+          const relPath = path.posix.relative(
+            repoRoot,
+            notFoundOutput.filePath
+          );
+          files[relPath] = relPath;
+          if (filesHashes) {
+            filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
+          }
         }
       }
 
