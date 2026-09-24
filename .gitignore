@@ -28,4 +28,5 @@ test/**/*/package-lock.json
 test/**/*/pnpm-lock.yaml
 
 packages/adapter/*.tgz
-/packages/benchmark/app/api/generated/
+/packages/benchmark/app/**/generated/
+/packages/benchmark/traced/
