@@ -1,3 +1,4 @@
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -52,8 +53,7 @@ function getPostponedStateContentType(
 }
 
 const copy = async (src: string, dest: string) => {
-  await fse.remove(dest);
-  await fse.copy(src, dest);
+  await fs.copyFile(src, dest, fsConstants.COPYFILE_FICLONE);
 };
 
 const writeLock = new Map<string, Promise<void>>();
@@ -856,7 +856,6 @@ export async function handlePrerenderOutputs(
           // if postponed state is not present we write the fallback file above
           !output.fallback.postponedState
         ) {
-          // we use link to avoid copying files un-necessarily
           await copy(output.fallback.filePath, prerenderFallbackPath);
         }
 
