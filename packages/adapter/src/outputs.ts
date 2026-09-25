@@ -73,6 +73,36 @@ const writeIfNotExists = async (filePath: string, content: string) => {
   return writePromise;
 };
 
+function createOutputTimings(label: string, count: number) {
+  const start = performance.now();
+  const stages = new Map<
+    string,
+    { total: number; max: number; slowest: string }
+  >();
+
+  return {
+    record(stage: string, elapsed: number, pathname: string) {
+      const timing = stages.get(stage) ?? { total: 0, max: 0, slowest: '' };
+      timing.total += elapsed;
+      if (elapsed > timing.max) {
+        timing.max = elapsed;
+        timing.slowest = pathname;
+      }
+      stages.set(stage, timing);
+    },
+    log() {
+      console.log(
+        `[adapter-vercel] ${label}: ${count} outputs, ${(performance.now() - start).toFixed(1)}ms wall time`
+      );
+      for (const [stage, { total, max, slowest }] of stages) {
+        console.log(
+          `[adapter-vercel] ${label} ${stage}: ${total.toFixed(1)}ms summed, ${max.toFixed(1)}ms max (${slowest})`
+        );
+      }
+    },
+  };
+}
+
 type Regions = string | string[];
 
 const vercelFunctionRegionsVar = process.env.VERCEL_FUNCTION_REGIONS;
@@ -424,6 +454,8 @@ export async function handleNodeOutputs(
     vercelOutputDir: string;
   }
 ) {
+  const timings = createOutputTimings('node functions', nodeOutputs.length);
+  const setupStart = performance.now();
   const nodeVersion = await getNodeVersion(
     projectDir,
     undefined,
@@ -496,10 +528,18 @@ export async function handleNodeOutputs(
   }
 
   const usesSrcDir = await usesSrcDirectory(projectDir);
+  timings.record('setup', performance.now() - setupStart, 'all');
 
   await Promise.all(
     nodeOutputs.map(async (output) => {
+      let stageStart = performance.now();
       await fsSema.acquire();
+      timings.record(
+        'semaphore wait',
+        performance.now() - stageStart,
+        output.pathname
+      );
+      stageStart = performance.now();
 
       const functionDir = path.join(
         functionsDir,
@@ -549,6 +589,12 @@ export async function handleNodeOutputs(
       if (filesHashes) {
         filesHashes[routesManifestRelativePath] = routesManifestHash;
       }
+      timings.record(
+        'directory and file map',
+        performance.now() - stageStart,
+        output.pathname
+      );
+      stageStart = performance.now();
 
       const handlerFilePath = path.join(
         functionDir,
@@ -568,6 +614,12 @@ export async function handleNodeOutputs(
       if (filesHashes) {
         filesHashes['___next_launcher.cjs'] = sha256(handlerSource);
       }
+      timings.record(
+        'launcher',
+        performance.now() - stageStart,
+        output.pathname
+      );
+      stageStart = performance.now();
 
       const operationType =
         output.type === AdapterOutputType.APP_PAGE ||
@@ -581,15 +633,33 @@ export async function handleNodeOutputs(
         pageExtensions: config.pageExtensions || [],
         usesSrcDir,
       });
+      timings.record(
+        'find source file',
+        performance.now() - stageStart,
+        output.pathname
+      );
+      stageStart = performance.now();
       const vercelConfigOpts = await getLambdaOptionsFromFunction({
         sourceFile,
         config: vercelConfig,
       });
+      timings.record(
+        'lambda options',
+        performance.now() - stageStart,
+        output.pathname
+      );
+      stageStart = performance.now();
       const generatedConfigOpts = await getGeneratedWorkflowLambdaOptions({
         projectDir,
         routeName: output.pathname,
         sourceFile,
       });
+      timings.record(
+        'workflow options',
+        performance.now() - stageStart,
+        output.pathname
+      );
+      stageStart = performance.now();
 
       if (generatedConfigOpts) {
         Object.assign(vercelConfigOpts, generatedConfigOpts);
@@ -629,10 +699,16 @@ export async function handleNodeOutputs(
         path.join(functionDir, `.vc-config.json`),
         JSON.stringify(nodeConfig, null, 2)
       );
+      timings.record(
+        'function config',
+        performance.now() - stageStart,
+        output.pathname
+      );
 
       fsSema.release();
     })
   );
+  timings.log();
 }
 
 export async function handlePrerenderOutputs(
@@ -653,13 +729,21 @@ export async function handlePrerenderOutputs(
     varyHeader: string;
   }
 ) {
+  const timings = createOutputTimings('prerenders', prerenderOutputs.length);
   const prerenderParentIds = new Set<string>();
   const fsSema = new Sema(16, { capacity: prerenderOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
 
   await Promise.all(
     prerenderOutputs.map(async (output) => {
+      let stageStart = performance.now();
       await fsSema.acquire();
+      timings.record(
+        'semaphore wait',
+        performance.now() - stageStart,
+        output.pathname
+      );
+      stageStart = performance.now();
 
       try {
         const prerenderConfigPath = path.join(
@@ -734,6 +818,12 @@ export async function handlePrerenderOutputs(
               }
             });
         }
+        timings.record(
+          'symlink and setup',
+          performance.now() - stageStart,
+          output.pathname
+        );
+        stageStart = performance.now();
 
         const initialHeaders = Object.assign(
           {},
@@ -779,6 +869,12 @@ export async function handlePrerenderOutputs(
             rscContentType
           );
         }
+        timings.record(
+          'fallback content',
+          performance.now() - stageStart,
+          output.pathname
+        );
+        stageStart = performance.now();
 
         await fs.mkdir(path.dirname(prerenderConfigPath), { recursive: true });
         await writeIfNotExists(
@@ -849,6 +945,12 @@ export async function handlePrerenderOutputs(
             }
           )
         );
+        timings.record(
+          'prerender config',
+          performance.now() - stageStart,
+          output.pathname
+        );
+        stageStart = performance.now();
 
         if (
           fallbackHasFilePath(output.fallback) &&
@@ -858,6 +960,11 @@ export async function handlePrerenderOutputs(
         ) {
           await copy(output.fallback.filePath, prerenderFallbackPath);
         }
+        timings.record(
+          'fallback copy',
+          performance.now() - stageStart,
+          output.pathname
+        );
 
         if (output.fallback && Object.keys(initialHeaders || {}).length === 0) {
           throw new Error('empty initialHeaders');
@@ -870,6 +977,7 @@ export async function handlePrerenderOutputs(
       fsSema.release();
     })
   );
+  timings.log();
 }
 
 type EdgeFunctionConfig = {
