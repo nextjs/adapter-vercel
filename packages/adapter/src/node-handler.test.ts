@@ -57,10 +57,12 @@ describe('node handler route captures', () => {
     routePage,
     namedRegex,
     routeKeys,
+    requiredServerFilesConfig,
   }: {
     routePage: string;
     namedRegex: string;
     routeKeys: Record<string, string>;
+    requiredServerFilesConfig?: Record<string, unknown>;
   }) {
     const projectDir = await fs.mkdtemp(
       path.join(os.tmpdir(), 'adapter-node-handler-')
@@ -89,6 +91,12 @@ describe('node handler route captures', () => {
         ],
       })
     );
+    if (requiredServerFilesConfig) {
+      await fs.writeFile(
+        path.join(distDir, 'required-server-files.json'),
+        JSON.stringify({ version: 1, config: requiredServerFilesConfig })
+      );
+    }
     await fs.writeFile(
       path.join(distDir, 'app-path-routes-manifest.json'),
       JSON.stringify({
@@ -315,5 +323,30 @@ describe('node handler route captures', () => {
     });
 
     expect(invocation.url).toBe(url);
+  });
+  function readRegisteredContext() {
+    const routerServerGlobal = globalThis as typeof globalThis & {
+      [key: symbol]: Record<string, { nextConfig?: unknown }>;
+    };
+    return routerServerGlobal[Symbol.for('@next/router-server-methods')]['.'];
+  }
+
+  it('registers nextConfig from required-server-files.json', async () => {
+    await setupRoute({
+      routePage: '/[locale]/[[...filterSlugs]]',
+      namedRegex: '^/(?<nxtPlocale>[^/]+?)(?:/(?<nxtPfilterSlugs>.+?))?(?:/)?$',
+      routeKeys: { nxtPlocale: 'nxtPlocale' },
+      requiredServerFilesConfig: { images: { deviceSizes: [1080, 640, 828] } },
+    });
+
+    expect(readRegisteredContext().nextConfig).toStrictEqual({
+      images: { deviceSizes: [1080, 640, 828] },
+    });
+  });
+
+  it('leaves nextConfig unset when the manifest is absent', async () => {
+    await setupOptionalCatchallRoute();
+
+    expect(readRegisteredContext().nextConfig).toBeUndefined();
   });
 });
