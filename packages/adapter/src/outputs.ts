@@ -1,3 +1,4 @@
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -54,6 +55,27 @@ function getPostponedStateContentType(
 const copy = async (src: string, dest: string) => {
   await fse.remove(dest);
   await fse.copy(src, dest);
+};
+
+// fast path for copying a single file, avoids the extra stat and
+// parent path checks that fs-extra's copy does
+const copyFile = async (src: string, dest: string) => {
+  await fs.rm(dest, { recursive: true, force: true });
+  await fs.copyFile(src, dest, fsConstants.COPYFILE_FICLONE);
+};
+
+// many outputs share the same parent directories so only
+// create each directory once
+const createEnsureDir = () => {
+  const dirs = new Map<string, Promise<unknown>>();
+  return (dir: string) => {
+    let promise = dirs.get(dir);
+    if (!promise) {
+      promise = fs.mkdir(dir, { recursive: true });
+      dirs.set(dir, promise);
+    }
+    return promise;
+  };
 };
 
 const writeLock = new Map<string, Promise<void>>();
@@ -166,6 +188,7 @@ export async function handleStaticOutputs(
   }
 ) {
   const fsSema = new Sema(16, { capacity: outputs.length });
+  const ensureDir = createEnsureDir();
 
   await Promise.all(
     outputs.map(async (output) => {
@@ -193,8 +216,8 @@ export async function handleStaticOutputs(
       );
       const destDirectory = path.dirname(destination);
 
-      await fs.mkdir(destDirectory, { recursive: true });
-      await copy(output.filePath, destination);
+      await ensureDir(destDirectory);
+      await copyFile(output.filePath, destination);
 
       fsSema.release();
     })
@@ -432,6 +455,7 @@ export async function handleNodeOutputs(
   );
 
   const fsSema = new Sema(16, { capacity: nodeOutputs.length });
+  const ensureDir = createEnsureDir();
   const functionsDir = path.join(vercelOutputDir, 'functions');
   const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
 
@@ -505,7 +529,6 @@ export async function handleNodeOutputs(
         functionsDir,
         `${normalizeIndexPathname(output.pathname, config)}.func`
       );
-      await fs.mkdir(functionDir, { recursive: true });
 
       const files: Record<string, string> = {};
       const filesHashes: Record<string, string> | undefined =
@@ -556,7 +579,8 @@ export async function handleNodeOutputs(
         '___next_launcher.cjs'
       );
 
-      await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
+      // creates functionDir as well
+      await ensureDir(path.dirname(handlerFilePath));
       const handlerSource = getHandlerSource({
         projectRelativeDistDir: path.posix.relative(projectDir, distDir),
         prerenderFallbackFalseMap,
@@ -655,6 +679,7 @@ export async function handlePrerenderOutputs(
 ) {
   const prerenderParentIds = new Set<string>();
   const fsSema = new Sema(16, { capacity: prerenderOutputs.length });
+  const ensureDir = createEnsureDir();
   const functionsDir = path.join(vercelOutputDir, 'functions');
 
   await Promise.all(
@@ -715,10 +740,11 @@ export async function handlePrerenderOutputs(
           `${normalizeIndexPathname(output.pathname, config)}.func`
         );
 
+        // the prerender config, fallback, and function symlink all live
+        // in the same directory
+        await ensureDir(path.dirname(prerenderConfigPath));
+
         if (output.pathname !== parentNodeOutput.pathname) {
-          await fs.mkdir(path.dirname(prerenderFunctionDir), {
-            recursive: true,
-          });
           await fs
             .symlink(
               path.relative(
@@ -780,7 +806,6 @@ export async function handlePrerenderOutputs(
           );
         }
 
-        await fs.mkdir(path.dirname(prerenderConfigPath), { recursive: true });
         await writeIfNotExists(
           prerenderConfigPath,
           JSON.stringify(
@@ -857,7 +882,7 @@ export async function handlePrerenderOutputs(
           !output.fallback.postponedState
         ) {
           // we use link to avoid copying files un-necessarily
-          await copy(output.fallback.filePath, prerenderFallbackPath);
+          await copyFile(output.fallback.filePath, prerenderFallbackPath);
         }
 
         if (output.fallback && Object.keys(initialHeaders || {}).length === 0) {
@@ -902,6 +927,7 @@ export async function handleEdgeOutputs(
   }
 ) {
   const fsSema = new Sema(16, { capacity: edgeOutputs.length });
+  const ensureDir = createEnsureDir();
   const functionsDir = path.join(vercelOutputDir, 'functions');
   const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
 
@@ -913,7 +939,6 @@ export async function handleEdgeOutputs(
         functionsDir,
         `${normalizeIndexPathname(output.pathname, config)}.func`
       );
-      await fs.mkdir(functionDir, { recursive: true });
 
       const files: Record<string, string> = {};
       const jsRegex = /\.(m|c)?js$/;
@@ -976,7 +1001,8 @@ export async function handleEdgeOutputs(
         handlerRelativeDir,
         'index.js'
       );
-      await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
+      // creates functionDir as well
+      await ensureDir(path.dirname(handlerFilePath));
       await writeIfNotExists(handlerFilePath, edgeSource.toString());
 
       const edgeConfig: EdgeFunctionConfig = {
