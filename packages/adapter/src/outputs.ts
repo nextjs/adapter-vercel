@@ -497,6 +497,27 @@ export async function handleNodeOutputs(
 
   const usesSrcDir = await usesSrcDirectory(projectDir);
 
+  // the launcher is the same for every function so only generate it once
+  const handlerSource = getHandlerSource({
+    projectRelativeDistDir: path.posix.relative(projectDir, distDir),
+    prerenderFallbackFalseMap,
+    isMiddleware,
+    nextConfig: config,
+    nextEnvLoaderPathRelativeToProjectDir,
+  });
+  const handlerSourceHash = sha256(handlerSource);
+
+  // most assets are shared between functions so cache the relative paths
+  const relativeToRepoRootCache = new Map<string, string>();
+  const relativeToRepoRoot = (fsPath: string) => {
+    let relPath = relativeToRepoRootCache.get(fsPath);
+    if (relPath === undefined) {
+      relPath = path.posix.relative(repoRoot, fsPath);
+      relativeToRepoRootCache.set(fsPath, relPath);
+    }
+    return relPath;
+  };
+
   await Promise.all(
     nodeOutputs.map(async (output) => {
       await fsSema.acquire();
@@ -512,7 +533,7 @@ export async function handleNodeOutputs(
         output.assetsHashes;
 
       for (const [relPath, fsPath] of Object.entries(output.assets)) {
-        files[relPath] = path.posix.relative(repoRoot, fsPath);
+        files[relPath] = relativeToRepoRoot(fsPath);
       }
       files[path.posix.relative(repoRoot, output.filePath)] =
         path.posix.relative(repoRoot, output.filePath);
@@ -532,7 +553,7 @@ export async function handleNodeOutputs(
           for (const [relPath, fsPath] of Object.entries(
             notFoundOutput.assets
           )) {
-            files[relPath] = path.posix.relative(repoRoot, fsPath);
+            files[relPath] = relativeToRepoRoot(fsPath);
             if (filesHashes) {
               filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
             }
@@ -557,16 +578,9 @@ export async function handleNodeOutputs(
       );
 
       await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
-      const handlerSource = getHandlerSource({
-        projectRelativeDistDir: path.posix.relative(projectDir, distDir),
-        prerenderFallbackFalseMap,
-        isMiddleware,
-        nextConfig: config,
-        nextEnvLoaderPathRelativeToProjectDir,
-      });
       await writeIfNotExists(handlerFilePath, handlerSource);
       if (filesHashes) {
-        filesHashes['___next_launcher.cjs'] = sha256(handlerSource);
+        filesHashes['___next_launcher.cjs'] = handlerSourceHash;
       }
 
       const operationType =
