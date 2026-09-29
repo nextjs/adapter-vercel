@@ -11,6 +11,7 @@ import fse from 'fs-extra';
 import type { AdapterOutput, NextConfig } from 'next';
 import type { RoutesManifest } from 'next/dist/build';
 import { AdapterOutputType } from 'next/dist/shared/lib/constants';
+import type { Source } from 'webpack-sources';
 import type { NextjsParams } from './get-edge-function-source';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { getHandlerSource } from './node-handler';
@@ -902,6 +903,7 @@ export async function handleEdgeOutputs(
   }
 ) {
   const fsSema = new Sema(16, { capacity: edgeOutputs.length });
+  const sourceCache = new Map<string, Promise<Source>>();
   const functionsDir = path.join(vercelOutputDir, 'functions');
   const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
 
@@ -966,7 +968,8 @@ export async function handleEdgeOutputs(
         filePaths,
         params,
         projectDir,
-        output.wasmAssets
+        output.wasmAssets,
+        sourceCache
       );
 
       const edgeSource = edgeSourceObj.source();
