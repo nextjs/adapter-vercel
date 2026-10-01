@@ -29,4 +29,5 @@ test/**/*/pnpm-lock.yaml
 
 packages/adapter/*.tgz
 /packages/benchmark/app/**/generated/
+/packages/benchmark/pages/**/generated/
 /packages/benchmark/traced/

@@ -5,11 +5,13 @@ import { fileURLToPath } from 'node:url';
 // Next.js emits a function and an RSC variant for each page/route handler.
 const pages = Number(process.env.BENCHMARK_PAGES ?? 1149);
 const routes = Number(process.env.BENCHMARK_ROUTES ?? 37);
+const edgeRoutes = Number(process.env.BENCHMARK_EDGE_ROUTES ?? 2377);
 // Extra files traced into every function; the reference workload traces ~400.
 const tracedFiles = Number(process.env.BENCHMARK_TRACED_FILES ?? 280);
 for (const [name, count] of Object.entries({
   BENCHMARK_PAGES: pages,
   BENCHMARK_ROUTES: routes,
+  BENCHMARK_EDGE_ROUTES: edgeRoutes,
   BENCHMARK_TRACED_FILES: tracedFiles,
 })) {
   if (!Number.isSafeInteger(count) || count < 0) {
@@ -20,8 +22,12 @@ for (const [name, count] of Object.entries({
 const generatedDir = fileURLToPath(
   new URL('../app/[variant]/items/generated/', import.meta.url)
 );
+const edgeDir = fileURLToPath(
+  new URL('../pages/api/generated/', import.meta.url)
+);
 const tracedDir = fileURLToPath(new URL('../traced/', import.meta.url));
 await fs.rm(generatedDir, { recursive: true, force: true });
+await fs.rm(edgeDir, { recursive: true, force: true });
 await fs.rm(tracedDir, { recursive: true, force: true });
 
 // Page depth below `items/` follows the reference app: ~10% one level, ~46%
@@ -61,6 +67,16 @@ for (let index = 0; index < routes; index++) {
   );
 }
 
+// App Router rejects `runtime` with cacheComponents, so edge functions are
+// Pages Router API routes.
+await fs.mkdir(edgeDir, { recursive: true });
+for (let index = 0; index < edgeRoutes; index++) {
+  await fs.writeFile(
+    path.join(edgeDir, `edge-${String(index).padStart(5, '0')}.js`),
+    `export const config = { runtime: 'edge' };\nexport default function handler(request) { return Response.json({ edge: ${index}, url: request.url }); }\n`
+  );
+}
+
 for (let index = 0; index < tracedFiles; index++) {
   const dir = path.join(
     tracedDir,
@@ -74,5 +90,5 @@ for (let index = 0; index < tracedFiles; index++) {
 }
 
 console.log(
-  `Generated ${pages} pages, ${routes} route handlers and ${tracedFiles} traced files`
+  `Generated ${pages} pages, ${routes} route handlers, ${edgeRoutes} edge route handlers and ${tracedFiles} traced files`
 );
