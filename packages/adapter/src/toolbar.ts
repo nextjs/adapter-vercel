@@ -9,8 +9,13 @@ export function generateToolbarScript(
     // Reading `document.cookie` throws in a sandboxed iframe (one without
     // `allow-same-origin`). Treat a failed read as "not opted in" so the error
     // doesn't escape into the embedding page.
-    cookieCheck =
-      '(function(){try{return /(?:^|;\\s)__vercel_toolbar=1(?:;|$)/.test(document.cookie)}catch(e){return false}})()';
+    cookieCheck = `(function(){
+    try{
+        return /(?:^|;\\s)__vercel_toolbar=1(?:;|$)/.test(document.cookie)
+    }catch(e){
+        return false
+    }
+})()`;
     applyOptInAttr =
       's.setAttribute("data-explicit-opt-in","true");s.setAttribute("data-cookie-opt-in","true");';
   } else if (optIn) {
