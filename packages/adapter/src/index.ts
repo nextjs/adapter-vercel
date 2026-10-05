@@ -101,6 +101,16 @@ const myAdapter: NextAdapter = {
     projectDir,
     nextVersion,
   }) {
+    const buildStart = performance.now();
+    let stageStart = buildStart;
+    const logTiming = (stage: string) => {
+      const now = performance.now();
+      console.log(
+        `[adapter-vercel] onBuildComplete ${stage}: ${(now - stageStart).toFixed(1)}ms`
+      );
+      stageStart = now;
+    };
+
     const vercelOutputDir = path.join(distDir, 'output');
     await fs.mkdir(vercelOutputDir, { recursive: true });
 
@@ -130,17 +140,20 @@ const myAdapter: NextAdapter = {
         : undefined,
       images: getImagesConfig(config),
     };
+    logTiming('setup');
 
     await handlePublicFiles(
       path.join(projectDir, 'public'),
       vercelOutputDir,
       config
     );
+    logTiming('public files');
     await handleStaticOutputs(outputs.staticFiles, {
       config,
       vercelConfig,
       vercelOutputDir,
     });
+    logTiming('static files');
 
     const nodeOutputsParentMap = new Map<string, FuncOutputs[0]>();
     const edgeOutputs: FuncOutputs = [];
@@ -194,6 +207,7 @@ const myAdapter: NextAdapter = {
       : has404Output
         ? '/404'
         : '/_error';
+    logTiming('classify outputs');
 
     // handle edge functions
     await handleEdgeOutputs(edgeOutputs, {
@@ -203,6 +217,7 @@ const myAdapter: NextAdapter = {
       nextVersion,
       config,
     });
+    logTiming('edge functions');
 
     const prerenderFallbackFalseMap: Record<string, string[]> = {};
 
@@ -232,6 +247,7 @@ const myAdapter: NextAdapter = {
         currentMap.push(prerender.pathname.substring(config.basePath.length));
       }
     }
+    logTiming('prerender fallback map');
 
     // handle middleware function
     let middlewareRoutes: RouteWithSrc[] = [];
@@ -247,6 +263,7 @@ const myAdapter: NextAdapter = {
         prerenderFallbackFalseMap,
       });
     }
+    logTiming('middleware');
 
     // handle node functions
     await handleNodeOutputs(nodeOutputs, {
@@ -258,6 +275,7 @@ const myAdapter: NextAdapter = {
       vercelOutputDir,
       prerenderFallbackFalseMap,
     });
+    logTiming('node functions');
 
     // handle prerenders (must come after handle node outputs)
     await handlePrerenderOutputs(outputs.prerenders, {
@@ -268,6 +286,7 @@ const myAdapter: NextAdapter = {
       nodeOutputsParentMap,
       rscContentType: routing.rsc.contentTypeHeader,
     });
+    logTiming('prerenders');
     const shouldHandleSegmentPrefetches = outputs.appPages.length > 0;
 
     // create routes
@@ -292,6 +311,7 @@ const myAdapter: NextAdapter = {
       extractRedirects(routing);
     const headers = extractHeaders(routing);
     const onMatchRoutes = extractOnMatchRoutes(routing);
+    logTiming('prepare routes');
 
     const dynamicRoutes: RouteWithSrc[] = [];
     let addedNextData404Route = false;
@@ -999,9 +1019,14 @@ const myAdapter: NextAdapter = {
             },
           ]),
     ] satisfies (RouteWithSrc | Route)[];
+    logTiming('build routes');
 
     const outputConfigPath = path.join(vercelOutputDir, 'config.json');
     await fs.writeFile(outputConfigPath, JSON.stringify(vercelConfig, null, 2));
+    logTiming('write config');
+    console.log(
+      `[adapter-vercel] onBuildComplete total: ${(performance.now() - buildStart).toFixed(1)}ms`
+    );
   },
 };
 
