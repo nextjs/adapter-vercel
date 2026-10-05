@@ -4,7 +4,10 @@
  */
 import type { IncomingMessage, ServerResponse } from 'http';
 import type { NextConfig } from 'next';
-import type { RoutesManifest } from 'next/dist/build';
+import type {
+  RequiredServerFilesManifest,
+  RoutesManifest,
+} from 'next/dist/build';
 
 export const getHandlerSource = (ctx: {
   // relative to launcher file
@@ -306,6 +309,7 @@ export const getHandlerSource = (ctx: {
                 req: IncomingMessage,
                 res: ServerResponse
               ) => Promise<void>;
+              nextConfig?: RequiredServerFilesManifest['config'];
             }
           >;
 
@@ -316,7 +320,20 @@ export const getHandlerSource = (ctx: {
             routerServerGlobal[RouterServerContextSymbol] = {};
           }
 
+          // Takes precedence over the config the route module would otherwise
+          // read from the manifest it loads and deep-freezes, which breaks
+          // in-place mutation.
+          let serverFilesManifest: RequiredServerFilesManifest | undefined;
+
+          try {
+            serverFilesManifest = require(
+              './' +
+                path.posix.join(relativeDistDir, 'required-server-files.json')
+            ) as RequiredServerFilesManifest;
+          } catch (_) {}
+
           routerServerGlobal[RouterServerContextSymbol]['.'] = {
+            nextConfig: serverFilesManifest?.config,
             async render404(req, res) {
               let mod:
                 | undefined
