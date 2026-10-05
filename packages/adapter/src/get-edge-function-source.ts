@@ -1,8 +1,8 @@
 import { readFile } from 'fs-extra';
 import { join } from 'path';
-import { ConcatSource, type Source } from 'webpack-sources';
+import { ConcatSource, OriginalSource, type Source } from 'webpack-sources';
 import { template } from './edge-function-template';
-import { fileToSource, raw, sourcemapped } from './sourcemapped';
+import { raw, removeInlinedSourceMap, sourcemapped } from './sourcemapped';
 
 /**
  * A partial Next.js configuration object that contains the required info
@@ -55,20 +55,39 @@ export interface NextjsParams {
  * @param filePaths Array of relative file paths for the function chunks.
  * @param params Next.js parameters to adapt it to core edge functions.
  * @param outputDir The output directory the files in `filePaths` stored in.
+ * @param wasm The wasm assets to import.
+ * @param sourceCache Cache of loaded chunks, many edge functions share the
+ * same chunks so this avoids reading them more than once.
  * @returns The source code of the edge function.
  */
 export async function getNextjsEdgeFunctionSource(
   filePaths: string[],
   params: NextjsParams,
   outputDir: string,
-  wasm?: Record<string, string>
+  wasm?: Record<string, string>,
+  sourceCache: Map<string, Promise<Source>> = new Map()
 ): Promise<Source> {
+  const chunkSources = await Promise.all(
+    filePaths.map((filePath) => {
+      const fullFilePath = join(outputDir, filePath);
+      let source = sourceCache.get(fullFilePath);
+      if (!source) {
+        // only the source is emitted (not a source map) so skip loading
+        // and parsing the chunk's source map
+        source = readFile(fullFilePath, 'utf8').then(
+          (content) =>
+            new OriginalSource(removeInlinedSourceMap(content), filePath)
+        );
+        sourceCache.set(fullFilePath, source);
+      }
+      return source;
+    })
+  );
+
   const chunks = new ConcatSource(raw(`globalThis._ENTRIES = {};`));
-  for (const filePath of filePaths) {
-    const fullFilePath = join(outputDir, filePath);
-    const content = await readFile(fullFilePath, 'utf8');
+  for (const chunkSource of chunkSources) {
     chunks.add(raw(`\n/**/;`));
-    chunks.add(await fileToSource(content, filePath, fullFilePath));
+    chunks.add(chunkSource);
   }
 
   // Wrap to fake module.exports
