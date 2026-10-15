@@ -23,6 +23,10 @@ describe('handleNodeOutputs automatic fetch instrumentation', () => {
       JSON.stringify({ engines: { node: '22.x' } })
     );
     await fs.writeFile(path.join(distDir, 'routes-manifest.json'), '{}');
+    await fs.writeFile(
+      path.join(distDir, 'prerender-manifest.json'),
+      JSON.stringify({ preview: { previewModeId: 'test-preview' } })
+    );
   });
 
   afterEach(async () => {
