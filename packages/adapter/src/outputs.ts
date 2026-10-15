@@ -495,6 +495,33 @@ export async function handleNodeOutputs(
     );
   }
 
+  let previewPropsManifest:
+    | { path: string; isPrerenderManifest: boolean }
+    | undefined;
+  let previewPropsManifestHash: string | undefined;
+  if (isMiddleware && nodeOutputs.length > 0) {
+    let manifestPath = path.join(distDir, 'server', 'preview-props.json');
+    let manifestContent: Buffer;
+    let isPrerenderManifest = false;
+    try {
+      manifestContent = await fs.readFile(manifestPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+      // Older Next.js builds keep preview settings in the prerender manifest.
+      manifestPath = path.join(distDir, 'prerender-manifest.json');
+      manifestContent = await fs.readFile(manifestPath);
+      isPrerenderManifest = true;
+    }
+    JSON.parse(manifestContent.toString());
+    previewPropsManifest = {
+      path: path.posix.relative(projectDir, manifestPath),
+      isPrerenderManifest,
+    };
+    previewPropsManifestHash = sha256(manifestContent);
+  }
+
   const usesSrcDir = await usesSrcDirectory(projectDir);
 
   // the launcher is the same for every function so only generate it once
@@ -502,6 +529,7 @@ export async function handleNodeOutputs(
     projectRelativeDistDir: path.posix.relative(projectDir, distDir),
     prerenderFallbackFalseMap,
     isMiddleware,
+    previewPropsManifest,
     nextConfig: config,
     nextEnvLoaderPathRelativeToProjectDir,
   });
@@ -529,8 +557,9 @@ export async function handleNodeOutputs(
       await fs.mkdir(functionDir, { recursive: true });
 
       const files: Record<string, string> = {};
-      const filesHashes: Record<string, string> | undefined =
-        output.assetsHashes;
+      const filesHashes = output.assetsHashes
+        ? { ...output.assetsHashes }
+        : undefined;
 
       for (const [relPath, fsPath] of Object.entries(output.assets)) {
         files[relPath] = relativeToRepoRoot(fsPath);
@@ -569,6 +598,15 @@ export async function handleNodeOutputs(
       );
       if (filesHashes) {
         filesHashes[routesManifestRelativePath] = routesManifestHash;
+      }
+
+      if (previewPropsManifest) {
+        const manifestPath = path.join(projectDir, previewPropsManifest.path);
+        const manifestRelativePath = relativeToRepoRoot(manifestPath);
+        files[manifestRelativePath] = manifestRelativePath;
+        if (filesHashes && previewPropsManifestHash) {
+          filesHashes[manifestRelativePath] = previewPropsManifestHash;
+        }
       }
 
       const handlerFilePath = path.join(
