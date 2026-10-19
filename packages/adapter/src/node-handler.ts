@@ -37,7 +37,7 @@ export const getHandlerSource = (ctx: {
     process.env.NEXT_DEPLOYMENT_ID = process.env.VERCEL_DEPLOYMENT_ID;
   }
 
-  const _n_handler = (${
+  const _n_entry = (${
     ctx.isMiddleware
       ? () => {
           const path = require('path') as typeof import('path');
@@ -58,10 +58,12 @@ export const getHandlerSource = (ctx: {
             return fromSymbol[SYMBOL_FOR_REQ_CONTEXT]?.get?.() ?? {};
           }
 
-          return async function handler(request: Request): Promise<Response> {
-            let middlewareHandler = await require(
-              `./${path.posix.join(relativeDistDir, 'server', 'middleware.js')}`
-            );
+          const middlewareModulePath = `./${path.posix.join(relativeDistDir, 'server', 'middleware.js')}`;
+
+          const handler = async function handler(
+            request: Request
+          ): Promise<Response> {
+            let middlewareHandler = await require(middlewareModulePath);
             middlewareHandler = middlewareHandler.handler || middlewareHandler;
 
             const context = getRequestContext();
@@ -76,6 +78,19 @@ export const getHandlerSource = (ctx: {
             });
             return response;
           };
+
+          // Loads the proxy ahead of the first request, so an instance that is
+          // initialized before traffic arrives doesn't load it on demand.
+          async function preload() {
+            try {
+              await require(middlewareModulePath);
+            } catch (_) {
+              // Ignored: this is a best-effort preload step, the request path
+              // still loads the module and reports any error.
+            }
+          }
+
+          return { handler, preload };
         }
       : (() => {
           const path = require('path') as typeof import('path');
@@ -413,7 +428,20 @@ export const getHandlerSource = (ctx: {
             );
           }
 
-          return async function handler(
+          function getPageModulePath(page: string): string {
+            const isAppDir = page.match(/\/(page|route)$/);
+            return (
+              './' +
+              path.posix.join(
+                relativeDistDir,
+                'server',
+                isAppDir ? 'app' : 'pages',
+                `${page === '/' ? 'index' : page}.js`
+              )
+            );
+          }
+
+          const handler = async function handler(
             req: import('http').IncomingMessage,
             res: import('http').ServerResponse,
             internalMetadata: Record<string, unknown>
@@ -436,7 +464,6 @@ export const getHandlerSource = (ctx: {
                 matches,
                 matchedRoute,
               } = matchUrlToPage(urlPathname);
-              const isAppDir = page.match(/\/(page|route)$/);
               let addedMatchesToUrl = false;
 
               // Apply matches recovered from a rewritten pathname to the query.
@@ -462,15 +489,7 @@ export const getHandlerSource = (ctx: {
                 req.url = `${parsedUrl.pathname}${parsedUrl.searchParams.size > 0 ? '?' : ''}${parsedUrl.searchParams.toString()}`;
               }
 
-              const mod = await require(
-                './' +
-                  path.posix.join(
-                    relativeDistDir,
-                    'server',
-                    isAppDir ? 'app' : 'pages',
-                    `${page === '/' ? 'index' : page}.js`
-                  )
-              );
+              const mod = await require(getPageModulePath(page));
 
               await mod.handler(req, res, {
                 waitUntil: getRequestContext().waitUntil,
@@ -493,10 +512,45 @@ export const getHandlerSource = (ctx: {
               throw error;
             }
           };
+
+          // Loads the route modules this function can serve ahead of the
+          // first request, so an instance that is initialized before traffic
+          // arrives doesn't load them on demand. Mirrors next-server's
+          // `unstable_preloadEntries` used by the previous launcher.
+          async function preload() {
+            const fs = require('fs') as typeof import('fs');
+            const pages = new Set<string>();
+            for (const route of [...staticRoutes, ...dynamicRoutes]) {
+              pages.add(inversedAppRoutesManifest[route.page] || route.page);
+            }
+
+            for (const page of pages) {
+              const modulePath = getPageModulePath(page);
+              // Every function shares the same routes manifest, so skip
+              // routes whose module wasn't traced into this function.
+              if (!fs.existsSync(modulePath)) continue;
+              try {
+                await require(modulePath);
+              } catch (_) {
+                // Ignored: this is a best-effort preload step, the request
+                // path still loads the module and reports any error.
+              }
+            }
+          }
+
+          return { handler, preload };
         }).toString()
   })()
 
+  const _n_handler = _n_entry.handler
+
   module.exports = _n_handler
+
+  // Same contract as the previous launcher, which exported \`preload\` when
+  // this is set.
+  if (process.env.NEXT_PRIVATE_PRELOAD_ENTRIES) {
+    module.exports.preload = _n_entry.preload
+  }
 
   ${
     ctx.isMiddleware
