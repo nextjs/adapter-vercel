@@ -58,10 +58,18 @@ export const getHandlerSource = (ctx: {
             return fromSymbol[SYMBOL_FOR_REQ_CONTEXT]?.get?.() ?? {};
           }
 
+          const middlewareModulePath = `./${path.posix.join(relativeDistDir, 'server', 'middleware.js')}`;
+
+          // Every request to this function runs the proxy, so load it while
+          // the function initializes instead of during the first request.
+          // Errors are left to the request, which loads it again and reports
+          // them.
+          try {
+            Promise.resolve(require(middlewareModulePath)).catch(() => {});
+          } catch (_) {}
+
           return async function handler(request: Request): Promise<Response> {
-            let middlewareHandler = await require(
-              `./${path.posix.join(relativeDistDir, 'server', 'middleware.js')}`
-            );
+            let middlewareHandler = await require(middlewareModulePath);
             middlewareHandler = middlewareHandler.handler || middlewareHandler;
 
             const context = getRequestContext();
