@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
+import { collectGoRouteOutputs, handleGoOutputs } from './go-outputs';
 import {
   type FuncOutputs,
   handleEdgeOutputs,
@@ -101,6 +102,7 @@ const myAdapter: NextAdapter = {
     projectDir,
     nextVersion,
   }) {
+    const goOutputs = collectGoRouteOutputs(outputs);
     const vercelOutputDir = path.join(distDir, 'output');
     await fs.mkdir(vercelOutputDir, { recursive: true });
 
@@ -257,6 +259,13 @@ const myAdapter: NextAdapter = {
       nextVersion,
       vercelOutputDir,
       prerenderFallbackFalseMap,
+    });
+
+    await handleGoOutputs(goOutputs, {
+      config,
+      projectDir,
+      nextVersion,
+      vercelOutputDir,
     });
 
     // handle prerenders (must come after handle node outputs)

@@ -1066,11 +1066,21 @@ export async function handleMiddleware(
   return routes;
 }
 
-async function usesSrcDirectory(workPath: string): Promise<boolean> {
-  for (const dir of [
-    path.join(workPath, 'src', 'pages'),
-    path.join(workPath, 'src', 'app'),
-  ]) {
+export async function usesSrcDirectory(
+  workPath: string,
+  router?: 'app' | 'pages'
+): Promise<boolean> {
+  if (router) {
+    try {
+      if ((await fs.stat(path.join(workPath, router))).isDirectory()) {
+        return false;
+      }
+    } catch (_err) {}
+  }
+  const directories = router
+    ? [path.join(workPath, 'src', router)]
+    : [path.join(workPath, 'src', 'pages'), path.join(workPath, 'src', 'app')];
+  for (const dir of directories) {
     try {
       if ((await fs.stat(dir)).isDirectory()) {
         return true;
@@ -1085,29 +1095,35 @@ function isDirectory(path: string) {
   return fse.lstatSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
 }
 
-async function getSourceFilePathFromPage({
+export async function getSourceFilePathFromPage({
   workPath,
   page,
   pageExtensions,
   usesSrcDir,
+  pageTypes,
+  allowExtensionless = true,
+  allowDirectoryIndex = true,
 }: {
   workPath: string;
   page: string;
   pageExtensions?: ReadonlyArray<string>;
   usesSrcDir: boolean;
+  pageTypes?: ReadonlyArray<'pages' | 'app'>;
+  allowExtensionless?: boolean;
+  allowDirectoryIndex?: boolean;
 }) {
   const extensionsToTry = pageExtensions || ['js', 'jsx', 'ts', 'tsx'];
 
   for (const pageType of [
     // middleware is not nested in pages/app
-    ...(page === 'middleware' ? [''] : ['pages', 'app']),
+    ...(page === 'middleware' ? [''] : pageTypes || ['pages', 'app']),
   ]) {
     let fsPath = path.join(workPath, pageType, page);
     if (usesSrcDir) {
       fsPath = path.join(workPath, 'src', pageType, page);
     }
 
-    if (fse.existsSync(fsPath)) {
+    if (allowExtensionless && fse.existsSync(fsPath)) {
       return path.relative(workPath, fsPath);
     }
     const extensionless = fsPath;
@@ -1127,7 +1143,7 @@ async function getSourceFilePathFromPage({
       }
     }
 
-    if (isDirectory(extensionless)) {
+    if (allowDirectoryIndex && isDirectory(extensionless)) {
       if (pageType === 'pages') {
         for (const ext of extensionsToTry) {
           fsPath = path.join(extensionless, `index.${ext}`);
