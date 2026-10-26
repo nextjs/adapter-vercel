@@ -3,7 +3,11 @@ import path from 'node:path';
 import { getLambdaOptionsFromFunction } from '@vercel/build-utils';
 import type { AdapterOutput, NextConfig } from 'next';
 import { AdapterOutputType } from 'next/dist/shared/lib/constants';
-import { getSourceFilePathFromPage, usesSrcDirectory } from './outputs';
+import {
+  getSourceFilePathFromPage,
+  normalizeIndexPathname,
+  usesSrcDirectory,
+} from './outputs';
 
 /** Proposed producer contract for the hosted Go route-handler proof of concept. */
 export type GoRouteOutput = Omit<AdapterOutput['APP_ROUTE'], 'runtime'> & {
@@ -372,17 +376,17 @@ export async function handleGoOutputs(
   );
   const functionsDir = path.join(vercelOutputDir, 'functions');
   const usesSrcDir = await usesSrcDirectory(projectDir, 'app');
-  const functionPaths = new Set<string>();
+  const functionPaths = new Map<string, string>();
   for (const output of outputs) {
     assertGoRouteOutput(output);
-    const pathname =
-      output.pathname === '/' || output.pathname === config.basePath
-        ? path.posix.join(output.pathname, 'index')
-        : output.pathname;
-    const functionPath = `${pathname.slice(1)}.func`.toLowerCase();
-    if (functionPaths.has(functionPath))
+    const pathname = normalizeIndexPathname(output.pathname, config);
+    const functionPath = `${pathname.slice(1)}.func`;
+    const caseInsensitivePath = functionPath.toLowerCase();
+    const previous = functionPaths.get(caseInsensitivePath);
+    // Identical paths retain Node's last-output-wins behavior for root/index aliases.
+    if (previous && previous !== functionPath)
       throw new Error(`Conflicting Go function output: ${pathname}`);
-    functionPaths.add(functionPath);
+    functionPaths.set(caseInsensitivePath, functionPath);
   }
   for (const output of outputs) {
     const sourceFile = (
@@ -417,10 +421,7 @@ export async function handleGoOutputs(
         `Go target architecture conflicts with function configuration for ${sourceFile}`
       );
     }
-    const pathname =
-      output.pathname === '/' || output.pathname === config.basePath
-        ? path.posix.join(output.pathname, 'index')
-        : output.pathname;
+    const pathname = normalizeIndexPathname(output.pathname, config);
     const functionDir = path.join(functionsDir, `${pathname.slice(1)}.func`);
     await ensureFunctionParent(functionsDir, functionDir);
     await existingGoFunction(functionDir);

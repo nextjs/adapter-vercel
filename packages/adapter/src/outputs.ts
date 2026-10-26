@@ -115,7 +115,7 @@ function normalizeRegions(
   return newRegions;
 }
 
-function normalizeIndexPathname(pathname: string, config: NextConfig) {
+export function normalizeIndexPathname(pathname: string, config: NextConfig) {
   if (pathname === config.basePath && config.basePath !== '/') {
     return path.posix.join(config.basePath, '/index');
   }

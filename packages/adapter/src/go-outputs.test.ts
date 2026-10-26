@@ -444,13 +444,59 @@ describe('hosted Go route outputs', () => {
     );
   });
 
-  it('rejects function pathname collisions and preserves an existing function', async () => {
-    await expect(
-      handle([
-        output({ pathname: '/' }),
-        output({ id: 'other', pathname: '/index' }),
-      ])
-    ).rejects.toThrow('Conflicting Go function output');
+  it.each([
+    { basePath: '', reverse: false },
+    { basePath: '', reverse: true },
+    { basePath: '/base', reverse: false },
+    { basePath: '/base', reverse: true },
+  ])(
+    'keeps the last Go output for root/index aliases with $basePath and reverse=$reverse',
+    async ({ basePath, reverse }) => {
+      await writeSource('/route');
+      await writeSource('/index/route');
+      const secondBinary = path.join(root, 'second-compiled-route');
+      const secondAsset = path.join(root, 'second-message.txt');
+      await fs.writeFile(secondBinary, 'second compiled application');
+      await fs.writeFile(secondAsset, 'second handler asset');
+      const rootPath = basePath || '/';
+      const indexPath = `${basePath}/index`;
+      const pathnames = reverse ? [indexPath, rootPath] : [rootPath, indexPath];
+      await handle(
+        pathnames.map((pathname, index) =>
+          output({
+            id: `route-${index}`,
+            pathname,
+            sourcePage: pathname === rootPath ? '/route' : '/index/route',
+            filePath: index === 0 ? binaryPath : secondBinary,
+            assets:
+              index === 0
+                ? { 'data/message.txt': assetPath }
+                : { 'second-message.txt': secondAsset },
+            config: { maxDuration: index === 0 ? 10 : 20 },
+          })
+        ),
+        { basePath }
+      );
+      const functionName = `${basePath.slice(1)}${basePath ? '/' : ''}index`;
+      const functionDir = path.join(
+        vercelOutputDir,
+        'functions',
+        `${functionName}.func`
+      );
+      expect(
+        await fs.readFile(path.join(functionDir, 'user-server'), 'utf8')
+      ).toBe('second compiled application');
+      expect(
+        await fs.readFile(path.join(functionDir, 'second-message.txt'), 'utf8')
+      ).toBe('second handler asset');
+      await expect(
+        fs.stat(path.join(functionDir, 'data/message.txt'))
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readConfig(functionName)).toMatchObject({ maxDuration: 20 });
+    }
+  );
+
+  it('rejects case-folded pathname collisions and preserves an existing non-Go function', async () => {
     await expect(
       handle([
         output({ pathname: '/API/hello' }),
