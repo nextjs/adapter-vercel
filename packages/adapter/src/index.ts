@@ -901,10 +901,11 @@ const myAdapter: NextAdapter = {
 
       // add internal matched path header for function bundle mapping
       {
-        src:
+        src: goRouting.nodeHitRouteSrc(
           config.basePath && config.basePath !== '/'
             ? path.posix.join('/', config.basePath, '/?(?:index)?(?:/)?$')
-            : `/(?:index)?(?:/)?$`,
+            : `/(?:index)?(?:/)?$`
+        ),
         headers: {
           'x-matched-path': '/',
         },
@@ -912,10 +913,8 @@ const myAdapter: NextAdapter = {
         important: true,
       },
       {
-        src: path.posix.join(
-          '/',
-          config.basePath || '',
-          `/((?!index$).*?)(?:/)?$`
+        src: goRouting.nodeHitRouteSrc(
+          path.posix.join('/', config.basePath || '', `/((?!index$).*?)(?:/)?$`)
         ),
         headers: {
           'x-matched-path': '/$1',

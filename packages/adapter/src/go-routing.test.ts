@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { RouteWithSrc } from '@vercel/routing-utils';
+import { normalizeRoutes, type RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
 import { getNamedRouteRegex } from 'next/dist/shared/lib/router/utils/route-regex';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -72,9 +72,8 @@ function headerValue(route: RouteWithSrc, pathname: string) {
   );
 }
 
-// The platform applies important routing headers after normal ones and stops a
-// hit-phase scan at a route without continue. Exercise the emitted rules, not a
-// second implementation of Go matching or parameter decoding.
+// The platform applies important routing headers after normal ones. Exercise
+// the complete emitted hit phase, including both generic Node header rules.
 function hitHeader(
   routes: RouteWithSrc[],
   pathname: string,
@@ -89,6 +88,28 @@ function hitHeader(
     if (!route.continue) break;
   }
   return important ?? value;
+}
+
+function nodeHitRoutes(
+  routing: ReturnType<typeof getGoRouting>,
+  basePath = ''
+): RouteWithSrc[] {
+  return [
+    {
+      src: routing.nodeHitRouteSrc(
+        basePath ? `${basePath}/?(?:index)?(?:/)?$` : '/(?:index)?(?:/)?$'
+      ),
+      headers: { 'x-matched-path': '/' },
+      continue: true,
+      important: true,
+    },
+    {
+      src: routing.nodeHitRouteSrc(`${basePath}/((?!index$).*?)(?:/)?$`),
+      headers: { 'x-matched-path': '/$1' },
+      continue: true,
+      important: true,
+    },
+  ];
 }
 
 describe('Go routing context', () => {
@@ -282,10 +303,81 @@ describe('Go routing context', () => {
           outputs[outputs.length - 1].pathname
         );
       }
-      expect(routing.hitRoutes[0].continue).toBeUndefined();
+      expect(routing.hitRoutes[0].continue).toBe(true);
       expect(routing.hitRoutes[0].important).toBeUndefined();
     }
   );
+
+  it.each(['', '/base'])(
+    'continues through valid hit routes without Node overwriting Go context (%s)',
+    (basePath) => {
+      const outputs = [
+        goOutput('/', basePath),
+        goOutput('/index', basePath),
+        goOutput('/api/hello', basePath),
+        goOutput('/api/items/[slug]', basePath),
+        goOutput('/café with space/100%', basePath),
+        goOutput('/literal%20', basePath),
+      ];
+      const routing = getGoRouting(outputs, { basePath });
+      const nodeRules = nodeHitRoutes(routing, basePath);
+      const allRules = [...routing.hitRoutes, ...nodeRules];
+      expect(
+        normalizeRoutes([{ handle: 'hit' }, ...allRules]).error
+      ).toBeNull();
+      expect(allRules.every((route) => route.continue)).toBe(true);
+      for (const pathname of [
+        basePath || '/',
+        `${basePath}/index`,
+        `${basePath}/index/`,
+      ]) {
+        expect(hitHeader(allRules, pathname)).toBe(`${basePath}/index`);
+        expect(nodeRules.some((route) => headerValue(route, pathname))).toBe(
+          false
+        );
+      }
+      expect(hitHeader(allRules, `${basePath}/api/hello`)).toBe(
+        `${basePath}/api/hello`
+      );
+      expect(
+        hitHeader(
+          allRules,
+          `${basePath}/api/items/[slug]`,
+          `${basePath}/api/items/new%2Fvalue`
+        )
+      ).toBe(`${basePath}/api/items/new%2Fvalue`);
+      for (const pathname of [
+        `${basePath}/café%20with%20space/100%`,
+        `${basePath}/caf%c3%a9 with%20space/100%25`,
+      ]) {
+        expect(hitHeader(allRules, pathname)).toBe(
+          `${basePath}/caf%C3%A9%20with%20space/100%25`
+        );
+      }
+      expect(hitHeader(allRules, `${basePath}/literal%2520`)).toBe(
+        `${basePath}/literal%2520`
+      );
+      // A raw %HH path can identify a different Node function. It must retain
+      // the original Node header and capture numbering, like any Node neighbor.
+      for (const pathname of [
+        '/literal%20',
+        '/api/node/[slug]',
+        '/index-more',
+      ]) {
+        expect(hitHeader(allRules, `${basePath}${pathname}`)).toBe(pathname);
+      }
+    }
+  );
+
+  it('leaves Node hit sources unchanged without Go outputs', () => {
+    const routing = getGoRouting([], {});
+    for (const src of ['/(?:index)?(?:/)?$', '/((?!index$).*?)(?:/)?$']) {
+      expect(routing.nodeHitRouteSrc(src)).toBe(src);
+    }
+    expect(hitHeader(nodeHitRoutes(routing), '/')).toBe('/');
+    expect(hitHeader(nodeHitRoutes(routing), '/index')).toBe('/');
+    expect(hitHeader(nodeHitRoutes(routing), '/api/node')).toBe('/api/node');
+  });
 });
 
 describe('adapter-generated Go routes', () => {
@@ -321,7 +413,13 @@ describe('adapter-generated Go routes', () => {
         '/api/optional/[[...parts]]',
         '/api/[id]/data.segments/piece.segment.rsc',
       ];
-      const goOutputs = routes.map((route) => goOutput(route, '/base'));
+      const goOutputs = [
+        ...routes,
+        '/',
+        '/index',
+        '/café with space/100%',
+        '/literal%20',
+      ].map((route) => goOutput(route, '/base'));
       const nodeRoute = producerRoute('/api/node/[slug]', '/base', form);
       const nodeNeighbor = producerRoute(
         '/api/[id]/data',
@@ -441,6 +539,7 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
       const generated = JSON.parse(
         await fs.readFile(path.join(distDir, 'output/config.json'), 'utf8')
       ) as { routes: RouteWithSrc[] };
+      expect(normalizeRoutes(generated.routes).error).toBeNull();
       const goRules = generated.routes.filter(
         (route) => route.headers?.['x-matched-path'] === '$nextGoRoutePath'
       );
@@ -491,13 +590,24 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
       const hitIndex = generated.routes.findIndex(
         (route) => 'handle' in route && route.handle === 'hit'
       );
-      const hitRules = generated.routes
-        .slice(hitIndex + 1)
-        .filter((route) => !('handle' in route));
+      const hitEnd = generated.routes.findIndex(
+        (route, index) => index > hitIndex && 'handle' in route
+      );
+      const hitRules = generated.routes.slice(hitIndex + 1, hitEnd);
+      expect(hitRules.every((route) => route.continue)).toBe(true);
       expect(hitHeader(hitRules, '/base/api/items/[slug]', important)).toBe(
         concrete
       );
       expect(hitHeader(hitRules, '/base/api/hello')).toBe('/base/api/hello');
+      expect(hitHeader(hitRules, '/base')).toBe('/base/index');
+      expect(hitHeader(hitRules, '/base/index')).toBe('/base/index');
+      expect(hitHeader(hitRules, '/base/café%20with%20space/100%')).toBe(
+        '/base/caf%C3%A9%20with%20space/100%25'
+      );
+      expect(hitHeader(hitRules, '/base/literal%2520')).toBe(
+        '/base/literal%2520'
+      );
+      expect(hitHeader(hitRules, '/base/literal%20')).toBe('/literal%20');
       expect(hitHeader(hitRules, '/base/api/node/[slug]')).toBe(
         '/api/node/[slug]'
       );

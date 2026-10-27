@@ -116,14 +116,22 @@ export function getGoRouting(
         // retain their meaning when the platform expands header captures.
         'x-matched-path': escapePathname(output.pathname),
       },
-      // End the hit phase before Node's generic important headers. A concrete
-      // important header from a Go dynamic rule takes precedence over this
-      // normal-priority fallback for static routes and literal template URLs.
+      // The hit phase must continue. Node's generic important headers exclude
+      // these paths, so a concrete important Go header retains precedence over
+      // this normal fallback for static routes and literal template URLs.
+      continue: true,
     })
   );
+  const goHitPattern = hitRoutes.map((route) => route.src.slice(1)).join('|');
 
   return {
     hitRoutes,
+    nodeHitRouteSrc(src: string) {
+      if (!goHitPattern) return src;
+      // Keep all groups noncapturing so the existing Node $1 header is stable.
+      // Each excluded pattern is already anchored at the end of the pathname.
+      return `^(?!(?:${goHitPattern}))${src.replace(/^\^/, '')}`;
+    },
     beforeDynamicRoute(route: DynamicRoute): RouteWithSrc[] {
       if (ownRoutes.size === 0) return [];
       const destination = route.destination?.split('?')[0];
