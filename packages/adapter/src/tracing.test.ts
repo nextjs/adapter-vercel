@@ -14,7 +14,7 @@ const INJECT_ENTRY = './.vercel/otel/instrumentation.js';
 const WRAPPER_SOURCE = `import { registerOTel } from '@vercel/otel'
 
 export function register() {
-  registerOTel()
+  registerOTel({ serviceName: process.env.VERCEL_PROJECT_NAME })
 }
 `;
 

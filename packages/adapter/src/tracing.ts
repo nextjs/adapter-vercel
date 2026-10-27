@@ -21,10 +21,12 @@ const OTEL_API_MIN = [1, 6, 0] as const;
 // OpenTelemetry JS SDK 2.x, which @vercel/otel 2.x bundles, caps the API below 1.10.
 const OTEL_API_MAX = [1, 10, 0] as const;
 
+// VERCEL_PROJECT_NAME is a system env var. When it's missing, @vercel/otel
+// falls back to "app". A customer-set OTEL_SERVICE_NAME still wins.
 const WRAPPER_SOURCE = `import { registerOTel } from '@vercel/otel'
 
 export function register() {
-  registerOTel()
+  registerOTel({ serviceName: process.env.VERCEL_PROJECT_NAME })
 }
 `;
 
