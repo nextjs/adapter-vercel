@@ -49,7 +49,9 @@ The adapter supplies `NEXT_GO_ADAPTER_ROUTING` through the function's
 environment with the generic runtime configuration
 `{"version":1,"pathHeader":"x-matched-path"}`. A compatible producer derives
 route parameters from this trusted, concrete escaped pathname while preserving
-the original request URL and query for the handler. The platform strips client
+the request URI forwarded by the platform for the handler. Vercel middleware
+can normalize query encoding before HTTP delivery, such as changing `+` to
+`%20`, while preserving the decoded query values. The platform strips client
 values of `x-matched-path`; Go routing rules set it after rewrites, including
 middleware rewrites. Dynamic Go routes do not use Node's internal parameter
 query transport, so encoded catch-all segment boundaries are preserved. The
