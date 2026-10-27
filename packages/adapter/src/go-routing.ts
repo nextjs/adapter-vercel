@@ -10,7 +10,7 @@ type DynamicRoute = Parameters<
   NonNullable<NextAdapter['onBuildComplete']>
 >[0]['routing']['dynamicRoutes'][number];
 
-export const GO_ROUTING_ENV = '__NEXT_GO_ADAPTER_ROUTING';
+export const GO_ROUTING_ENV = 'NEXT_GO_ADAPTER_ROUTING';
 export const GO_ROUTING_CONFIG = JSON.stringify({
   version: 1,
   pathHeader: 'x-matched-path',

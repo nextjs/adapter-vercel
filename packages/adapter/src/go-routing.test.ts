@@ -623,6 +623,9 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
       expect(functionConfig.environment).toEqual({
         [GO_ROUTING_ENV]: GO_ROUTING_CONFIG,
       });
+      for (const name of Object.keys(functionConfig.environment)) {
+        expect(name).toMatch(/^[a-zA-Z][a-zA-Z0-9_]*$/);
+      }
     }
   );
 });

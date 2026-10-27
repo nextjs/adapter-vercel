@@ -45,7 +45,7 @@ into a separate `.func` directory for each Go output. Asset destinations are
 relative to the function root, which is also the server's working directory.
 The `executable`, `user-server`, and `.vc-config.json` names are reserved.
 
-The adapter supplies `__NEXT_GO_ADAPTER_ROUTING` through the function's
+The adapter supplies `NEXT_GO_ADAPTER_ROUTING` through the function's
 environment with the generic runtime configuration
 `{"version":1,"pathHeader":"x-matched-path"}`. A compatible producer derives
 route parameters from this trusted, concrete escaped pathname while preserving
