@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 
+export const VERCEL_DEFAULT_TRACING_ENABLED = 'VERCEL_DEFAULT_TRACING_ENABLED';
 export const VERCEL_OTEL_PACKAGES_DIR = 'VERCEL_OTEL_PACKAGES_DIR';
 
 const INJECT_ENTRY = './.vercel/otel/instrumentation.js';
@@ -15,7 +16,8 @@ const NEXT_INJECT_MODULE = path.join(
 );
 const OTEL_API = '@opentelemetry/api';
 const OTEL_API_MIN = [1, 9, 0] as const;
-const OTEL_API_MAX = [2, 0, 0] as const;
+// OpenTelemetry JS SDK 2.x, which @vercel/otel 2.x bundles, caps the API below 1.10.
+const OTEL_API_MAX = [1, 10, 0] as const;
 
 const WRAPPER_SOURCE = `import { registerOTel } from '@vercel/otel'
 
@@ -34,6 +36,7 @@ export async function injectDefaultTracing(
   ctx: { phase: string; projectDir?: string }
 ): Promise<void> {
   if (ctx.phase !== PHASE_PRODUCTION_BUILD || !ctx.projectDir) return;
+  if (process.env[VERCEL_DEFAULT_TRACING_ENABLED] !== '1') return;
 
   const packagesDir = process.env[VERCEL_OTEL_PACKAGES_DIR]?.trim();
   if (!packagesDir) return;
@@ -49,7 +52,7 @@ export async function injectDefaultTracing(
       return;
     }
     if (!(await otelApiIsCompatible(projectDir))) {
-      skip('@opentelemetry/api is missing or outside >=1.9.0 <2.0.0');
+      skip('@opentelemetry/api is missing or outside >=1.9.0 <1.10.0');
       return;
     }
     if (!(await imagePackagesExist(packagesDir))) {

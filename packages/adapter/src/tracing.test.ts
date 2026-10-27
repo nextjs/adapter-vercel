@@ -4,7 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { injectDefaultTracing, VERCEL_OTEL_PACKAGES_DIR } from './tracing';
+import {
+  injectDefaultTracing,
+  VERCEL_DEFAULT_TRACING_ENABLED,
+  VERCEL_OTEL_PACKAGES_DIR,
+} from './tracing';
 
 const INJECT_ENTRY = './.vercel/otel/instrumentation.js';
 const WRAPPER_SOURCE = `import { registerOTel } from '@vercel/otel'
@@ -106,13 +110,11 @@ describe('injectDefaultTracing', () => {
     projectDir: string,
     packagesDir: string | undefined,
     tracingConfig: TracingConfig = config(),
-    phase: string = PHASE_PRODUCTION_BUILD
+    phase: string = PHASE_PRODUCTION_BUILD,
+    enabled: string | null = '1'
   ): Promise<TracingConfig> {
-    if (packagesDir === undefined) {
-      delete process.env[VERCEL_OTEL_PACKAGES_DIR];
-    } else {
-      vi.stubEnv(VERCEL_OTEL_PACKAGES_DIR, packagesDir);
-    }
+    vi.stubEnv(VERCEL_DEFAULT_TRACING_ENABLED, enabled ?? undefined);
+    vi.stubEnv(VERCEL_OTEL_PACKAGES_DIR, packagesDir);
     await injectDefaultTracing(tracingConfig, { phase, projectDir });
     return tracingConfig;
   }
@@ -207,6 +209,25 @@ describe('injectDefaultTracing', () => {
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
+  it.each([
+    ['unset', null],
+    ['0', '0'],
+    ['true', 'true'],
+  ])('does not inject when default tracing is %s', async (_label, enabled) => {
+    const { projectDir, packagesDir } = await readyProject();
+
+    const tracingConfig = await inject(
+      projectDir,
+      packagesDir,
+      config(),
+      PHASE_PRODUCTION_BUILD,
+      enabled
+    );
+
+    expect(tracingConfig.injectInstrumentation).toBeUndefined();
+    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
+  });
+
   it('does not inject when the packages dir env is unset', async () => {
     const { projectDir } = await readyProject();
 
@@ -242,18 +263,34 @@ describe('injectDefaultTracing', () => {
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
-  it('does not inject when @opentelemetry/api is 2.0.0 or newer', async () => {
+  it.each(['1.10.0', '2.0.0'])(
+    'does not inject when @opentelemetry/api is %s',
+    async (version) => {
+      const { projectDir, packagesDir } = await readyProject();
+      await writePackage(
+        path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
+        '@opentelemetry/api',
+        version
+      );
+
+      const tracingConfig = await inject(projectDir, packagesDir);
+
+      expect(tracingConfig.injectInstrumentation).toBeUndefined();
+      await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
+    }
+  );
+
+  it('injects when @opentelemetry/api is 1.9.1', async () => {
     const { projectDir, packagesDir } = await readyProject();
     await writePackage(
       path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
       '@opentelemetry/api',
-      '2.0.0'
+      '1.9.1'
     );
 
     const tracingConfig = await inject(projectDir, packagesDir);
 
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
+    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
   });
 
   it('does not inject when the build image is missing a package', async () => {
