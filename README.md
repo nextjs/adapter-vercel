@@ -45,6 +45,20 @@ into a separate `.func` directory for each Go output. Asset destinations are
 relative to the function root, which is also the server's working directory.
 The `executable`, `user-server`, and `.vc-config.json` names are reserved.
 
+The adapter supplies `__NEXT_GO_ADAPTER_ROUTING` through the function's
+environment with the generic runtime configuration
+`{"version":1,"pathHeader":"x-matched-path"}`. A compatible producer derives
+route parameters from this trusted, concrete escaped pathname while preserving
+the original request URL and query for the handler. The platform strips client
+values of `x-matched-path`; Go routing rules set it after rewrites, including
+middleware rewrites. Dynamic Go routes do not use Node's internal parameter
+query transport, so encoded catch-all segment boundaries are preserved. The
+producer must reject missing or duplicate context headers when this mode is
+enabled and remove the context header before invoking user code.
+Go routing rules also precede synthetic Node RSC branches when those branches
+would select an existing Go segment artifact. Existing same-name Go/non-Go
+function artifact collisions are still rejected during packaging.
+
 Go outputs do not participate in Node.js function grouping. Go route bundling,
 Go pages, middleware, prerender parents, arm64, and CGO/native dependencies are
 outside this proof of concept. Existing Node.js output handling and grouping

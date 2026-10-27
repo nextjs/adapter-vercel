@@ -3,6 +3,7 @@ import path from 'node:path';
 import { getLambdaOptionsFromFunction } from '@vercel/build-utils';
 import type { AdapterOutput, NextConfig } from 'next';
 import { AdapterOutputType } from 'next/dist/shared/lib/constants';
+import { GO_ROUTING_CONFIG, GO_ROUTING_ENV } from './go-routing';
 import {
   getSourceFilePathFromPage,
   normalizeIndexPathname,
@@ -448,6 +449,9 @@ export async function handleGoOutputs(
       // Deliberately omit Node launcher, multipayload and bundling properties.
       const functionConfig = {
         ...overrides,
+        environment: {
+          [GO_ROUTING_ENV]: GO_ROUTING_CONFIG,
+        },
         runtime: prepared.config.runtime,
         handler: prepared.config.handler,
         runtimeLanguage: prepared.config.runtimeLanguage,

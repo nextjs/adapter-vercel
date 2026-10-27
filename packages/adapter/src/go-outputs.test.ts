@@ -8,6 +8,7 @@ import {
   type GoRouteOutput,
   handleGoOutputs,
 } from './go-outputs';
+import { GO_ROUTING_CONFIG, GO_ROUTING_ENV } from './go-routing';
 import * as outputUtils from './outputs';
 import { getSourceFilePathFromPage, usesSrcDirectory } from './outputs';
 
@@ -160,6 +161,7 @@ describe('hosted Go route outputs', () => {
         `${route}.func`
       );
       expect(await readConfig(route)).toEqual({
+        environment: { [GO_ROUTING_ENV]: GO_ROUTING_CONFIG },
         runtime: 'executable',
         handler: 'executable',
         runtimeLanguage: 'go',
