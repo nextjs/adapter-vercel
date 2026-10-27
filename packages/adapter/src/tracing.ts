@@ -15,7 +15,9 @@ const NEXT_INJECT_MODULE = path.join(
   'builtin-instrumentation.js'
 );
 const OTEL_API = '@opentelemetry/api';
-const OTEL_API_MIN = [1, 9, 0] as const;
+// @vercel/otel 2.x declares >=1.9.0, but only uses API features that 1.6.0 has.
+// Next.js vendors 1.6.0 and uses it when the app has no copy of its own.
+const OTEL_API_MIN = [1, 6, 0] as const;
 // OpenTelemetry JS SDK 2.x, which @vercel/otel 2.x bundles, caps the API below 1.10.
 const OTEL_API_MAX = [1, 10, 0] as const;
 
@@ -52,7 +54,7 @@ export async function injectDefaultTracing(
       return;
     }
     if (!(await otelApiIsCompatible(projectDir))) {
-      skip('@opentelemetry/api is missing or outside >=1.9.0 <1.10.0');
+      skip('@opentelemetry/api is outside >=1.6.0 <1.10.0');
       return;
     }
     if (!(await imagePackagesExist(packagesDir))) {
@@ -115,8 +117,18 @@ function hasInjectResolver(loaded: unknown): boolean {
 }
 
 async function otelApiIsCompatible(projectDir: string): Promise<boolean> {
+  if (!isResolvable(projectDir, OTEL_API)) return true;
   const version = await resolvedPackageVersion(projectDir, OTEL_API);
   return version !== undefined && otelApiVersionOk(version);
+}
+
+function isResolvable(projectDir: string, name: string): boolean {
+  try {
+    createRequire(path.join(projectDir, 'package.json')).resolve(name);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function otelApiVersionOk(version: string): boolean {

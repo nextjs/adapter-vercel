@@ -237,7 +237,7 @@ describe('injectDefaultTracing', () => {
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
-  it('does not inject when @opentelemetry/api is missing', async () => {
+  it('injects when the app has no @opentelemetry/api', async () => {
     const { projectDir, packagesDir } = await readyProject();
     await fs.rm(path.join(projectDir, 'node_modules', '@opentelemetry'), {
       recursive: true,
@@ -245,16 +245,15 @@ describe('injectDefaultTracing', () => {
 
     const tracingConfig = await inject(projectDir, packagesDir);
 
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
+    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
   });
 
-  it('does not inject when @opentelemetry/api is below 1.9.0', async () => {
+  it('does not inject when @opentelemetry/api is below 1.6.0', async () => {
     const { projectDir, packagesDir } = await readyProject();
     await writePackage(
       path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
       '@opentelemetry/api',
-      '1.8.0'
+      '1.5.0'
     );
 
     const tracingConfig = await inject(projectDir, packagesDir);
@@ -280,18 +279,21 @@ describe('injectDefaultTracing', () => {
     }
   );
 
-  it('injects when @opentelemetry/api is 1.9.1', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    await writePackage(
-      path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
-      '@opentelemetry/api',
-      '1.9.1'
-    );
+  it.each(['1.6.0', '1.9.1'])(
+    'injects when @opentelemetry/api is %s',
+    async (version) => {
+      const { projectDir, packagesDir } = await readyProject();
+      await writePackage(
+        path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
+        '@opentelemetry/api',
+        version
+      );
 
-    const tracingConfig = await inject(projectDir, packagesDir);
+      const tracingConfig = await inject(projectDir, packagesDir);
 
-    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
-  });
+      expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+    }
+  );
 
   it('does not inject when the build image is missing a package', async () => {
     const { projectDir, packagesDir } = await readyProject();
