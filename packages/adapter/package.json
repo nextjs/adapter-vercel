@@ -10,7 +10,7 @@
     "url": "https://github.com/nextjs/adapter-vercel"
   },
   "scripts": {
-    "build": "rm -rf dist; tsc --noEmit && node --experimental-transform-types build.mts",
+    "build": "rm -rf dist; tsc --noEmit && node build.mjs",
     "test": "vitest run"
   },
   "devDependencies": {
