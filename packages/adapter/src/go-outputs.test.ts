@@ -149,12 +149,38 @@ describe('hosted Go route outputs', () => {
   }
 
   it('packages separate Go functions with executable modes, assets and no Node grouping metadata', async () => {
+    const secondBinaryPath = path.join(root, 'compiled-other-route');
+    const secondAssetPath = path.join(root, 'other-message.txt');
+    await Promise.all([
+      writeSource('/api/other/route'),
+      fs.writeFile(secondBinaryPath, 'other precompiled application'),
+      fs.writeFile(secondAssetPath, 'other asset'),
+    ]);
+    const first = output({ assets: { 'data/hello.txt': assetPath } });
     const second = output({
       id: 'app/api/other/route',
       pathname: '/api/other',
+      sourcePage: '/api/other/route',
+      filePath: secondBinaryPath,
+      assets: { 'data/other.txt': secondAssetPath },
     });
-    await handle([output(), second]);
-    for (const route of ['api/hello', 'api/other']) {
+    await handle([first, second]);
+    for (const { route, binary, asset, contents, otherAsset } of [
+      {
+        route: 'api/hello',
+        binary: 'precompiled application',
+        asset: 'data/hello.txt',
+        contents: 'hello asset',
+        otherAsset: 'data/other.txt',
+      },
+      {
+        route: 'api/other',
+        binary: 'other precompiled application',
+        asset: 'data/other.txt',
+        contents: 'other asset',
+        otherAsset: 'data/hello.txt',
+      },
+    ]) {
       const functionDir = path.join(
         vercelOutputDir,
         'functions',
@@ -172,13 +198,16 @@ describe('hosted Go route outputs', () => {
       });
       expect(
         await fs.readFile(path.join(functionDir, 'user-server'), 'utf8')
-      ).toBe('precompiled application');
+      ).toBe(binary);
       expect(
         await fs.readFile(path.join(functionDir, 'executable'), 'utf8')
       ).toBe('proxy binary');
-      expect(
-        await fs.readFile(path.join(functionDir, 'data/message.txt'), 'utf8')
-      ).toBe('hello asset');
+      expect(await fs.readFile(path.join(functionDir, asset), 'utf8')).toBe(
+        contents
+      );
+      await expect(
+        fs.stat(path.join(functionDir, otherAsset))
+      ).rejects.toMatchObject({ code: 'ENOENT' });
       expect(
         (await fs.stat(path.join(functionDir, 'user-server'))).mode & 0o777
       ).toBe(0o755);
@@ -258,8 +287,6 @@ describe('hosted Go route outputs', () => {
         'app/api/hello/route.go': { maxDuration: 25 },
       },
     });
-    expect(output()).not.toHaveProperty('sourceFile');
-    expect(output()).not.toHaveProperty('target');
     await handle([output()]);
     expect(await readConfig()).toMatchObject({ maxDuration: 25 });
   });
@@ -597,12 +624,38 @@ describe('hosted Go route outputs', () => {
     );
   });
 
-  it('removes a partial function when a required asset cannot be copied', async () => {
+  it('cleans up staged files when a later required asset is missing', async () => {
+    const copyFile = fs.copyFile;
+    let copiedAssetContents: string | undefined;
+    vi.spyOn(fs, 'copyFile').mockImplementation(
+      async (source, destination, mode) => {
+        await copyFile(source, destination, mode);
+        if (source === assetPath) {
+          copiedAssetContents = await fs.readFile(destination, 'utf8');
+        }
+      }
+    );
     await expect(
-      handle([output({ assets: { missing: path.join(root, 'missing') } })])
+      handle([
+        output({
+          assets: {
+            'data/message.txt': assetPath,
+            missing: path.join(root, 'missing'),
+          },
+        }),
+      ])
     ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(copiedAssetContents).toBe('hello asset');
     await expect(
       fs.stat(path.join(vercelOutputDir, 'functions/api/hello.func'))
     ).rejects.toMatchObject({ code: 'ENOENT' });
+    const entries = await fs.readdir(path.join(vercelOutputDir, 'functions'), {
+      recursive: true,
+    });
+    expect(
+      entries.filter((entry) =>
+        path.basename(entry).startsWith('.go-function-')
+      )
+    ).toEqual([]);
   });
 });

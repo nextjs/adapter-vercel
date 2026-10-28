@@ -72,8 +72,9 @@ function headerValue(route: RouteWithSrc, pathname: string) {
   );
 }
 
-// The platform applies important routing headers after normal ones. Exercise
-// the complete emitted hit phase, including both generic Node header rules.
+// Evaluate the emitted hit-phase configuration, including both generic Node
+// header rules. This helper models rule precedence; it does not exercise HTTP
+// delivery or the platform's handling of client-supplied headers.
 function hitHeader(
   routes: RouteWithSrc[],
   pathname: string,
@@ -380,7 +381,7 @@ describe('Go routing context', () => {
   });
 });
 
-describe('adapter-generated Go routes', () => {
+describe('adapter-generated Go route configuration', () => {
   const roots: string[] = [];
   const savedPackager = process.env.NEXT_ADAPTER_VERCEL_GO_PACKAGER_PATH;
   const savedConfig = process.env.NEXT_ADAPTER_VERCEL_CONFIG;
@@ -401,8 +402,10 @@ describe('adapter-generated Go routes', () => {
   });
 
   it.each(['plain', 'collapsed'] as const)(
-    'packages mixed routes with trusted concrete context and original query (%s)',
+    'generates mixed-route configuration with rewrite and hit-rule precedence (%s)',
     async (form) => {
+      // Exercise onBuildComplete and inspect its files and routing rules. Live
+      // query forwarding and header trust belong to HTTP deployment tests.
       const root = await fs.mkdtemp(path.join(os.tmpdir(), 'go-routing-'));
       roots.push(root);
       const distDir = path.join(root, '.next');
