@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { debug } from '@vercel/build-utils';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 
 export const VERCEL_DEFAULT_TRACING_ENABLED = 'VERCEL_DEFAULT_TRACING_ENABLED';
@@ -67,8 +68,9 @@ export async function injectDefaultTracing(
   }
 }
 
+// Only printed with VERCEL_BUILDER_DEBUG=1, so customer build logs stay quiet.
 function skip(reason: string): void {
-  console.info(`Skipping Vercel tracing inject: ${reason}`);
+  debug(`Skipping Vercel tracing inject: ${reason}`);
 }
 
 async function projectHasInstrumentation(

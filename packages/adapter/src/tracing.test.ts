@@ -305,6 +305,33 @@ describe('injectDefaultTracing', () => {
     ]);
   });
 
+  it('does not log a skip unless builder debug is on', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      const { projectDir, packagesDir } = await readyProject();
+      await fs.writeFile(
+        path.join(projectDir, 'instrumentation.ts'),
+        'export function register() {}\n'
+      );
+
+      vi.stubEnv('VERCEL_BUILDER_DEBUG', undefined);
+      await inject(projectDir, packagesDir);
+      expect([...log.mock.calls, ...info.mock.calls].flat()).not.toContain(
+        'Skipping Vercel tracing inject: project has an instrumentation file'
+      );
+
+      vi.stubEnv('VERCEL_BUILDER_DEBUG', '1');
+      await inject(projectDir, packagesDir);
+      expect(log).toHaveBeenCalledWith(
+        'Skipping Vercel tracing inject: project has an instrumentation file'
+      );
+    } finally {
+      log.mockRestore();
+      info.mockRestore();
+    }
+  });
+
   it('does not inject outside the production build', async () => {
     const { projectDir, packagesDir } = await readyProject();
 
