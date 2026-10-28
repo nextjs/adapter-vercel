@@ -62,19 +62,6 @@ describe('injectDefaultTracing', () => {
   }> {
     const projectDir = await tempDir('adapter-tracing-app-');
     const packagesDir = await tempDir('adapter-tracing-image-');
-    const nextReal = path.join(projectDir, 'next-real');
-    await fs.mkdir(path.join(nextReal, 'dist', 'build'), { recursive: true });
-    await fs.writeFile(
-      path.join(nextReal, 'package.json'),
-      JSON.stringify({ name: 'next', version: '0.0.0' })
-    );
-    await fs.writeFile(
-      path.join(nextReal, 'dist', 'build', 'builtin-instrumentation.js'),
-      'module.exports = { resolveInstrumentationInject() {} }\n'
-    );
-    await fs.mkdir(path.join(projectDir, 'node_modules'), { recursive: true });
-    await fs.symlink(nextReal, path.join(projectDir, 'node_modules', 'next'));
-
     await writePackage(
       path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
       '@opentelemetry/api',
@@ -316,16 +303,6 @@ describe('injectDefaultTracing', () => {
       './custom.js',
       INJECT_ENTRY,
     ]);
-  });
-
-  it('does not inject when Next.js has no injectInstrumentation module', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    await fs.rm(path.join(projectDir, 'node_modules', 'next'));
-
-    const tracingConfig = await inject(projectDir, packagesDir);
-
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
   it('does not inject outside the production build', async () => {

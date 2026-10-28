@@ -9,11 +9,6 @@ export const VERCEL_OTEL_PACKAGES_DIR = 'VERCEL_OTEL_PACKAGES_DIR';
 const INJECT_ENTRY = './.vercel/otel/instrumentation.js';
 const COPIED_PACKAGES = ['@vercel/otel', '@opentelemetry/api-logs'] as const;
 const FALLBACK_EXTENSIONS = ['ts', 'js', 'mjs'] as const;
-const NEXT_INJECT_MODULE = path.join(
-  'dist',
-  'build',
-  'builtin-instrumentation.js'
-);
 const OTEL_API = '@opentelemetry/api';
 // @vercel/otel 2.x declares >=1.9.0, but only uses API features that 1.6.0 has.
 // Next.js vendors 1.6.0 and uses it when the app has no copy of its own.
@@ -49,10 +44,6 @@ export async function injectDefaultTracing(
   try {
     if (await projectHasInstrumentation(projectDir, config.pageExtensions)) {
       skip('project has an instrumentation file');
-      return;
-    }
-    if (!nextSupportsInjectInstrumentation(projectDir)) {
-      skip('Next.js does not support injectInstrumentation');
       return;
     }
     if (!(await otelApiIsCompatible(projectDir))) {
@@ -96,26 +87,6 @@ async function projectHasInstrumentation(
     }
   }
   return false;
-}
-
-function nextSupportsInjectInstrumentation(projectDir: string): boolean {
-  try {
-    const fromProject = createRequire(path.join(projectDir, 'package.json'));
-    const nextPkg = fromProject.resolve('next/package.json');
-    const builtin = path.join(path.dirname(nextPkg), NEXT_INJECT_MODULE);
-    return hasInjectResolver(fromProject(builtin));
-  } catch {
-    return false;
-  }
-}
-
-function hasInjectResolver(loaded: unknown): boolean {
-  return (
-    typeof loaded === 'object' &&
-    loaded !== null &&
-    'resolveInstrumentationInject' in loaded &&
-    typeof loaded.resolveInstrumentationInject === 'function'
-  );
 }
 
 async function otelApiIsCompatible(projectDir: string): Promise<boolean> {
