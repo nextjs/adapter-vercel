@@ -6,11 +6,12 @@ import { debug } from '@vercel/build-utils';
 const INJECT_ENTRY = './.vercel/otel/instrumentation.js';
 const COPIED_PACKAGES = ['@vercel/otel', '@opentelemetry/api-logs'] as const;
 const OTEL_API = '@opentelemetry/api';
-// @vercel/otel 2.x declares >=1.9.0, but only uses API features that 1.6.0 has.
-// Next.js vendors 1.6.0 and uses it when the app has no copy of its own.
-const OTEL_API_MIN = [1, 6, 0] as const;
-// OpenTelemetry JS SDK 2.x, which @vercel/otel 2.x bundles, caps the API below 1.10.
-const OTEL_API_MAX = [1, 10, 0] as const;
+// Accepted @opentelemetry/api range: >=1.6.0 <1.10.0. @vercel/otel 2.x declares
+// >=1.9.0, but only uses API features that 1.6.0 has, and Next.js vendors 1.6.0
+// for apps without their own copy. OpenTelemetry JS SDK 2.x, which @vercel/otel
+// 2.x bundles, caps the API below 1.10.
+const OTEL_API_MIN_MINOR = 6;
+const OTEL_API_MAX_MINOR = 9;
 
 // VERCEL_PROJECT_NAME is a system env var. When it's missing, @vercel/otel
 // falls back to "app". A customer-set OTEL_SERVICE_NAME still wins.
@@ -99,26 +100,10 @@ function isResolvable(projectDir: string, name: string): boolean {
 }
 
 function otelApiVersionOk(version: string): boolean {
-  const match =
-    /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(
-      version
-    );
-  if (!match || match[4]) return false;
-  const parts = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const [major, minor] = version.split('.').map(Number);
   return (
-    compareParts(parts, OTEL_API_MIN) >= 0 &&
-    compareParts(parts, OTEL_API_MAX) < 0
+    major === 1 && minor >= OTEL_API_MIN_MINOR && minor <= OTEL_API_MAX_MINOR
   );
-}
-
-function compareParts(
-  left: readonly number[],
-  right: readonly number[]
-): number {
-  for (let i = 0; i < 3; i++) {
-    if (left[i] !== right[i]) return left[i] - right[i];
-  }
-  return 0;
 }
 
 async function resolvedPackageVersion(
