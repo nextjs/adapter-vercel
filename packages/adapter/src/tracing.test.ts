@@ -4,11 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  injectDefaultTracing,
-  VERCEL_DEFAULT_TRACING_ENABLED,
-  VERCEL_OTEL_PACKAGES_DIR,
-} from './tracing';
+import adapter from './index';
+import { injectDefaultTracing } from './tracing';
 
 const INJECT_ENTRY = './.vercel/otel/instrumentation.js';
 const WRAPPER_SOURCE = `import { registerOTel } from '@vercel/otel'
@@ -95,15 +92,29 @@ describe('injectDefaultTracing', () => {
 
   async function inject(
     projectDir: string,
-    packagesDir: string | undefined,
-    tracingConfig: TracingConfig = config(),
-    phase: string = PHASE_PRODUCTION_BUILD,
-    enabled: string | null = '1'
+    packagesDir: string,
+    tracingConfig: TracingConfig = config()
   ): Promise<TracingConfig> {
-    vi.stubEnv(VERCEL_DEFAULT_TRACING_ENABLED, enabled ?? undefined);
-    vi.stubEnv(VERCEL_OTEL_PACKAGES_DIR, packagesDir);
-    await injectDefaultTracing(tracingConfig, { phase, projectDir });
+    await injectDefaultTracing(tracingConfig, projectDir, packagesDir);
     return tracingConfig;
+  }
+
+  // Runs the adapter's real modifyConfig, which decides whether to inject.
+  async function modifyConfig(
+    projectDir: string,
+    env: { enabled?: string; packagesDir?: string },
+    phase: string = PHASE_PRODUCTION_BUILD
+  ): Promise<TracingConfig> {
+    vi.stubEnv('VERCEL_DEFAULT_TRACING_ENABLED', env.enabled);
+    vi.stubEnv('VERCEL_OTEL_PACKAGES_DIR', env.packagesDir);
+    const nextConfig = { ...config(), experimental: {} };
+    await adapter.modifyConfig?.(
+      nextConfig as unknown as Parameters<
+        NonNullable<typeof adapter.modifyConfig>
+      >[0],
+      { phase, projectDir, nextVersion: '16.5.0' }
+    );
+    return nextConfig;
   }
 
   function otelRoot(projectDir: string): string {
@@ -196,29 +207,43 @@ describe('injectDefaultTracing', () => {
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
+  it('injects through modifyConfig when default tracing is enabled', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+
+    const tracingConfig = await modifyConfig(projectDir, {
+      enabled: '1',
+      packagesDir,
+    });
+
+    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+  });
+
   it.each([
-    ['unset', null],
+    ['unset', undefined],
     ['0', '0'],
     ['true', 'true'],
   ])('does not inject when default tracing is %s', async (_label, enabled) => {
     const { projectDir, packagesDir } = await readyProject();
 
-    const tracingConfig = await inject(
-      projectDir,
+    const tracingConfig = await modifyConfig(projectDir, {
+      enabled,
       packagesDir,
-      config(),
-      PHASE_PRODUCTION_BUILD,
-      enabled
-    );
+    });
 
     expect(tracingConfig.injectInstrumentation).toBeUndefined();
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
-  it('does not inject when the packages dir env is unset', async () => {
+  it.each([
+    ['unset', undefined],
+    ['blank', '  '],
+  ])('does not inject when the packages dir env is %s', async (_label, dir) => {
     const { projectDir } = await readyProject();
 
-    const tracingConfig = await inject(projectDir, undefined);
+    const tracingConfig = await modifyConfig(projectDir, {
+      enabled: '1',
+      packagesDir: dir,
+    });
 
     expect(tracingConfig.injectInstrumentation).toBeUndefined();
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
@@ -335,10 +360,9 @@ describe('injectDefaultTracing', () => {
   it('does not inject outside the production build', async () => {
     const { projectDir, packagesDir } = await readyProject();
 
-    const tracingConfig = await inject(
+    const tracingConfig = await modifyConfig(
       projectDir,
-      packagesDir,
-      config(),
+      { enabled: '1', packagesDir },
       'phase-development-server'
     );
 

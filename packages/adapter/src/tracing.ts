@@ -2,10 +2,6 @@ import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { debug } from '@vercel/build-utils';
-import { PHASE_PRODUCTION_BUILD } from 'next/constants';
-
-export const VERCEL_DEFAULT_TRACING_ENABLED = 'VERCEL_DEFAULT_TRACING_ENABLED';
-export const VERCEL_OTEL_PACKAGES_DIR = 'VERCEL_OTEL_PACKAGES_DIR';
 
 const INJECT_ENTRY = './.vercel/otel/instrumentation.js';
 const COPIED_PACKAGES = ['@vercel/otel', '@opentelemetry/api-logs'] as const;
@@ -31,17 +27,17 @@ type TracingConfig = {
   injectInstrumentation?: string[];
 };
 
+/**
+ * Copies `@vercel/otel` from the build image into the project and adds a
+ * wrapper to `injectInstrumentation`. `modifyConfig` decides whether default
+ * tracing is enabled. Any failed check skips the inject without failing the
+ * build.
+ */
 export async function injectDefaultTracing(
   config: TracingConfig,
-  ctx: { phase: string; projectDir?: string }
+  projectDir: string,
+  packagesDir: string
 ): Promise<void> {
-  if (ctx.phase !== PHASE_PRODUCTION_BUILD || !ctx.projectDir) return;
-  if (process.env[VERCEL_DEFAULT_TRACING_ENABLED] !== '1') return;
-
-  const packagesDir = process.env[VERCEL_OTEL_PACKAGES_DIR]?.trim();
-  if (!packagesDir) return;
-
-  const projectDir = ctx.projectDir;
   try {
     if (await projectHasInstrumentation(projectDir, config.pageExtensions)) {
       skip('project has an instrumentation file');
