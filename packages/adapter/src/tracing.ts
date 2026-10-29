@@ -24,6 +24,7 @@ export function register() {
 
 type TracingConfig = {
   pageExtensions: readonly string[];
+  outputFileTracingRoot: string;
   injectInstrumentation?: string[];
 };
 
@@ -39,7 +40,7 @@ export async function injectDefaultTracing(
   packagesDir: string
 ): Promise<void> {
   try {
-    if (await projectHasInstrumentation(projectDir, config.pageExtensions)) {
+    if (await projectHasInstrumentation(projectDir, config)) {
       skip('project has an instrumentation file');
       return;
     }
@@ -72,19 +73,27 @@ function skip(reason: string): void {
   debug(`Skipping Vercel tracing inject: ${reason}`);
 }
 
+// Next.js chains injected instrumentation before the project's own file, so
+// skip whenever Next.js would find one. Turbopack looks in the project and each
+// parent folder up to the tracing root, at the folder itself and in `src/`.
 async function projectHasInstrumentation(
   projectDir: string,
-  pageExtensions: readonly string[]
+  config: Pick<TracingConfig, 'pageExtensions' | 'outputFileTracingRoot'>
 ): Promise<boolean> {
-  for (const ext of pageExtensions) {
-    for (const file of [
-      path.join(projectDir, `instrumentation.${ext}`),
-      path.join(projectDir, 'src', `instrumentation.${ext}`),
-    ]) {
-      if (await isFile(file)) return true;
+  const root = path.resolve(config.outputFileTracingRoot);
+  for (let dir = path.resolve(projectDir); ; dir = path.dirname(dir)) {
+    for (const base of [dir, path.join(dir, 'src')]) {
+      for (const ext of config.pageExtensions) {
+        if (await isFile(path.join(base, `instrumentation.${ext}`))) {
+          return true;
+        }
+      }
+    }
+    const relative = path.relative(root, dir);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+      return false;
     }
   }
-  return false;
 }
 
 async function otelApiIsCompatible(projectDir: string): Promise<boolean> {

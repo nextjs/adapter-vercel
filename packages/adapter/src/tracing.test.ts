@@ -17,6 +17,7 @@ export function register() {
 
 type TracingConfig = {
   pageExtensions: string[];
+  outputFileTracingRoot?: string;
   injectInstrumentation?: string[];
 };
 
@@ -95,7 +96,13 @@ describe('injectDefaultTracing', () => {
     packagesDir: string,
     tracingConfig: TracingConfig = config()
   ): Promise<TracingConfig> {
-    await injectDefaultTracing(tracingConfig, projectDir, packagesDir);
+    tracingConfig.outputFileTracingRoot ??= projectDir;
+    await injectDefaultTracing(
+      tracingConfig as Required<Pick<TracingConfig, 'outputFileTracingRoot'>> &
+        TracingConfig,
+      projectDir,
+      packagesDir
+    );
     return tracingConfig;
   }
 
@@ -107,7 +114,11 @@ describe('injectDefaultTracing', () => {
   ): Promise<TracingConfig> {
     vi.stubEnv('VERCEL_DEFAULT_TRACING_ENABLED', env.enabled);
     vi.stubEnv('VERCEL_OTEL_PACKAGES_DIR', env.packagesDir);
-    const nextConfig = { ...config(), experimental: {} };
+    const nextConfig = {
+      ...config(),
+      outputFileTracingRoot: projectDir,
+      experimental: {},
+    };
     await adapter.modifyConfig?.(
       nextConfig as unknown as Parameters<
         NonNullable<typeof adapter.modifyConfig>
@@ -191,6 +202,41 @@ describe('injectDefaultTracing', () => {
 
     expect(tracingConfig.injectInstrumentation).toBeUndefined();
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
+  });
+
+  it('does not inject when a parent folder inside the tracing root has an instrumentation file', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+    const app = path.join(projectDir, 'apps', 'web');
+    await fs.mkdir(app, { recursive: true });
+    await fs.writeFile(
+      path.join(projectDir, 'instrumentation.ts'),
+      'export function register() {}\n'
+    );
+
+    const tracingConfig = await inject(app, packagesDir, {
+      ...config(),
+      outputFileTracingRoot: projectDir,
+    });
+
+    expect(tracingConfig.injectInstrumentation).toBeUndefined();
+    await expect(fs.stat(otelRoot(app))).rejects.toThrow();
+  });
+
+  it('ignores an instrumentation file above the tracing root', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+    const app = path.join(projectDir, 'apps', 'web');
+    await fs.mkdir(app, { recursive: true });
+    await fs.writeFile(
+      path.join(projectDir, 'instrumentation.ts'),
+      'export function register() {}\n'
+    );
+
+    const tracingConfig = await inject(app, packagesDir, {
+      ...config(),
+      outputFileTracingRoot: app,
+    });
+
+    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
   });
 
   it('does not inject when src/ has an instrumentation file', async () => {
