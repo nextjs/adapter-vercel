@@ -3,7 +3,9 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { debug } from '@vercel/build-utils';
 
-const INJECT_ENTRY = './.vercel/otel/instrumentation.js';
+// .mjs, so webpack parses it as ESM even when the app's package.json sets
+// "type": "commonjs". .vercel/otel/ has no package.json of its own.
+const INJECT_ENTRY = './.vercel/otel/instrumentation.mjs';
 const COPIED_PACKAGES = ['@vercel/otel', '@opentelemetry/api-logs'] as const;
 const OTEL_API = '@opentelemetry/api';
 // Accepted @opentelemetry/api range: >=1.6.0 <1.10.0. @vercel/otel 2.x declares
@@ -200,7 +202,7 @@ async function writeTracingTree(
       },
     });
   }
-  const wrapper = path.join(otelDir, 'instrumentation.js');
+  const wrapper = path.join(otelDir, 'instrumentation.mjs');
   await fs.writeFile(wrapper, WRAPPER_SOURCE);
   return wrapper;
 }

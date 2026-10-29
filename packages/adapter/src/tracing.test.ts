@@ -1,13 +1,15 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import adapter from './index';
 import { injectDefaultTracing } from './tracing';
 
-const INJECT_ENTRY = './.vercel/otel/instrumentation.js';
+const INJECT_ENTRY = './.vercel/otel/instrumentation.mjs';
 const WRAPPER_SOURCE = `import { registerOTel } from '@vercel/otel'
 
 export function register() {
@@ -138,7 +140,7 @@ describe('injectDefaultTracing', () => {
 
     expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
 
-    const wrapper = path.join(otelRoot(projectDir), 'instrumentation.js');
+    const wrapper = path.join(otelRoot(projectDir), 'instrumentation.mjs');
     expect(await fs.readFile(wrapper, 'utf8')).toBe(WRAPPER_SOURCE);
 
     const copiedOtel = path.join(
@@ -189,6 +191,30 @@ describe('injectDefaultTracing', () => {
         )
       )
     );
+  });
+
+  it('writes a wrapper that loads as ESM in a "type": "commonjs" app', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+    await fs.writeFile(
+      path.join(projectDir, 'package.json'),
+      JSON.stringify({ name: 'app', type: 'commonjs' })
+    );
+    const tracingConfig = await inject(projectDir, packagesDir);
+    const [entry] = tracingConfig.injectInstrumentation ?? [];
+
+    // Node and webpack both read .js as CommonJS here, so a .js wrapper's
+    // import/export would fail to parse.
+    const wrapper = pathToFileURL(path.resolve(projectDir, entry)).href;
+    const output = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const m = await import(${JSON.stringify(wrapper)}); console.log(typeof m.register)`,
+      ],
+      { encoding: 'utf8' }
+    );
+    expect(output.trim()).toBe('function');
   });
 
   it('does not inject when the project has an instrumentation file', async () => {
