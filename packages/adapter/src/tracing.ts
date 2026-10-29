@@ -176,19 +176,21 @@ async function writeTracingTree(
       recursive: true,
       dereference: true,
       force: true,
-      filter: (source) => !wouldShadowAppOtelApi(source),
+      // Skip any nested @opentelemetry/api, so @vercel/otel uses the app's
+      // copy if it has one, or Next.js's vendored copy. Next.js's spans and
+      // the provider then share one API.
+      filter: (source) => {
+        const parts = source.split(path.sep);
+        return !parts.some(
+          (part, index) =>
+            part === '@opentelemetry' && parts[index + 1] === 'api'
+        );
+      },
     });
   }
   const wrapper = path.join(otelDir, 'instrumentation.js');
   await fs.writeFile(wrapper, WRAPPER_SOURCE);
   return wrapper;
-}
-
-function wouldShadowAppOtelApi(source: string): boolean {
-  const parts = source.split(path.sep);
-  return parts.some(
-    (part, index) => part === '@opentelemetry' && parts[index + 1] === 'api'
-  );
 }
 
 function wrapperResolves(wrapperPath: string): boolean {
