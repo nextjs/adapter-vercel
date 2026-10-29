@@ -5,7 +5,6 @@ import { debug } from '@vercel/build-utils';
 
 const INJECT_ENTRY = './.vercel/otel/instrumentation.js';
 const COPIED_PACKAGES = ['@vercel/otel', '@opentelemetry/api-logs'] as const;
-const FALLBACK_EXTENSIONS = ['ts', 'js', 'mjs'] as const;
 const OTEL_API = '@opentelemetry/api';
 // @vercel/otel 2.x declares >=1.9.0, but only uses API features that 1.6.0 has.
 // Next.js vendors 1.6.0 and uses it when the app has no copy of its own.
@@ -23,7 +22,7 @@ export function register() {
 `;
 
 type TracingConfig = {
-  pageExtensions?: readonly string[];
+  pageExtensions: readonly string[];
   injectInstrumentation?: string[];
 };
 
@@ -71,12 +70,9 @@ function skip(reason: string): void {
 
 async function projectHasInstrumentation(
   projectDir: string,
-  pageExtensions: readonly string[] | undefined
+  pageExtensions: readonly string[]
 ): Promise<boolean> {
-  const extensions = pageExtensions?.length
-    ? pageExtensions
-    : FALLBACK_EXTENSIONS;
-  for (const ext of extensions) {
+  for (const ext of pageExtensions) {
     for (const file of [
       path.join(projectDir, `instrumentation.${ext}`),
       path.join(projectDir, 'src', `instrumentation.${ext}`),

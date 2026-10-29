@@ -16,7 +16,7 @@ export function register() {
 `;
 
 type TracingConfig = {
-  pageExtensions?: string[];
+  pageExtensions: string[];
   injectInstrumentation?: string[];
 };
 
@@ -365,19 +365,6 @@ describe('injectDefaultTracing', () => {
       { enabled: '1', packagesDir },
       'phase-development-server'
     );
-
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
-  });
-
-  it('treats instrumentation.mjs as a project file when pageExtensions is unset', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    await fs.writeFile(
-      path.join(projectDir, 'instrumentation.mjs'),
-      'export function register() {}\n'
-    );
-
-    const tracingConfig = await inject(projectDir, packagesDir, {});
 
     expect(tracingConfig.injectInstrumentation).toBeUndefined();
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
