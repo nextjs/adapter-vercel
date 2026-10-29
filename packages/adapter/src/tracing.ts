@@ -53,11 +53,14 @@ export async function injectDefaultTracing(
     }
 
     const wrapper = await writeTracingTree(projectDir, packagesDir);
-    if (!wrapperResolves(wrapper)) {
-      skip('copied packages do not resolve from the wrapper');
-      return;
+    // Throws, and so skips, if a copied package doesn't resolve from the wrapper.
+    const requireFromWrapper = createRequire(wrapper);
+    for (const name of COPIED_PACKAGES) requireFromWrapper.resolve(name);
+
+    config.injectInstrumentation ??= [];
+    if (!config.injectInstrumentation.includes(INJECT_ENTRY)) {
+      config.injectInstrumentation.push(INJECT_ENTRY);
     }
-    pushEntry(config);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     skip(message);
@@ -191,23 +194,6 @@ async function writeTracingTree(
   const wrapper = path.join(otelDir, 'instrumentation.js');
   await fs.writeFile(wrapper, WRAPPER_SOURCE);
   return wrapper;
-}
-
-function wrapperResolves(wrapperPath: string): boolean {
-  try {
-    const req = createRequire(wrapperPath);
-    for (const name of COPIED_PACKAGES) req.resolve(name);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function pushEntry(config: TracingConfig): void {
-  config.injectInstrumentation ??= [];
-  if (!config.injectInstrumentation.includes(INJECT_ENTRY)) {
-    config.injectInstrumentation.push(INJECT_ENTRY);
-  }
 }
 
 async function isFile(file: string): Promise<boolean> {
