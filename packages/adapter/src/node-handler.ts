@@ -11,6 +11,7 @@ export const getHandlerSource = (ctx: {
   projectRelativeDistDir: string;
   prerenderFallbackFalseMap: Record<string, string[]>;
   isMiddleware?: boolean;
+  previewPropsManifest?: { path: string; isPrerenderManifest: boolean };
   nextConfig?: NextConfig;
   nextEnvLoaderPathRelativeToProjectDir?: string;
 }) =>
@@ -44,6 +45,8 @@ export const getHandlerSource = (ctx: {
           const relativeDistDir = process.env
             .__PRIVATE_RELATIVE_DIST_DIR as string;
 
+          const previewProps = process.env.__PRIVATE_PREVIEW_PROPS;
+
           type Context = {
             waitUntil?: (promise: Promise<unknown>) => void;
             headers?: Record<string, string>;
@@ -66,6 +69,7 @@ export const getHandlerSource = (ctx: {
 
             const context = getRequestContext();
             const response = await middlewareHandler(request, {
+              previewProps,
               waitUntil: context.waitUntil,
               requestMeta: {
                 // we use '.' for relative project dir since we process.chdir
@@ -512,6 +516,14 @@ export const getHandlerSource = (ctx: {
     .replaceAll(
       'process.env.__PRIVATE_RELATIVE_DIST_DIR',
       `"${ctx.projectRelativeDistDir}"`
+    )
+    .replaceAll(
+      'process.env.__PRIVATE_PREVIEW_PROPS',
+      ctx.previewPropsManifest
+        ? `require(${JSON.stringify(`./${ctx.previewPropsManifest.path}`)})${
+            ctx.previewPropsManifest.isPrerenderManifest ? '.preview' : ''
+          }`
+        : 'undefined'
     )
     .replaceAll(
       'process.env.__PRIVATE_PRERENDER_FALLBACK_MAP',
