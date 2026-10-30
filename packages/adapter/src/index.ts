@@ -25,6 +25,8 @@ import { generateToolbarScript } from './toolbar';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
+// Smoke-test edit for the preview build pipeline: this comment only exists
+// to produce a distinct commit for a preview tarball. Safe to revert.
 const myAdapter: NextAdapter = {
   name: 'Vercel',
   async modifyConfig(config, ctx) {
