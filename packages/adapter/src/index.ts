@@ -22,6 +22,7 @@ import {
   normalizeRewrites,
 } from './routing';
 import { generateToolbarScript } from './toolbar';
+import { injectDefaultTracing } from './tracing';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
@@ -87,6 +88,16 @@ const myAdapter: NextAdapter = {
       config.instrumentationClientInject.push(
         `./.vercel/adapter-toolbar-script.js`
       );
+    }
+
+    const otelPackagesDir = process.env.VERCEL_OTEL_PACKAGES_DIR?.trim();
+    if (
+      ctx.phase === PHASE_PRODUCTION_BUILD &&
+      typeof ctx.projectDir !== 'undefined' &&
+      process.env.VERCEL_DEFAULT_TRACING_ENABLED === '1' &&
+      otelPackagesDir
+    ) {
+      await injectDefaultTracing(config, ctx.projectDir, otelPackagesDir);
     }
 
     return config;
