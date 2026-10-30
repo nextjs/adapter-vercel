@@ -317,3 +317,152 @@ describe('node handler route captures', () => {
     expect(invocation.url).toBe(url);
   });
 });
+
+describe('node handler preload', () => {
+  const originalCwd = process.cwd();
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalPreloadEntries = process.env.NEXT_PRIVATE_PRELOAD_ENTRIES;
+  const projectDirs: string[] = [];
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+
+    for (const [key, value] of [
+      ['NODE_ENV', originalNodeEnv],
+      ['NEXT_PRIVATE_PRELOAD_ENTRIES', originalPreloadEntries],
+    ] as const) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+
+    await Promise.all(
+      projectDirs
+        .splice(0)
+        .map((projectDir) =>
+          fs.rm(projectDir, { recursive: true, force: true })
+        )
+    );
+  });
+
+  // A function that serves `/included` but shares a routes manifest that also
+  // lists `/not-in-this-function`, whose module wasn't traced into it.
+  async function setupFunction({
+    preloadEntries,
+  }: {
+    preloadEntries: boolean;
+  }) {
+    if (preloadEntries) {
+      process.env.NEXT_PRIVATE_PRELOAD_ENTRIES = '1';
+    } else {
+      delete process.env.NEXT_PRIVATE_PRELOAD_ENTRIES;
+    }
+
+    const projectDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'adapter-node-handler-preload-')
+    );
+    projectDirs.push(projectDir);
+
+    const distDir = path.join(projectDir, '.next');
+    await fs.mkdir(path.join(distDir, 'server', 'app', 'included'), {
+      recursive: true,
+    });
+    await fs.mkdir(path.join(projectDir, 'node_modules', 'next'), {
+      recursive: true,
+    });
+
+    await fs.writeFile(
+      path.join(distDir, 'routes-manifest.json'),
+      JSON.stringify({
+        staticRoutes: [
+          { page: '/included', regex: '^/included(?:/)?$' },
+          {
+            page: '/not-in-this-function',
+            regex: '^/not-in-this-function(?:/)?$',
+          },
+        ],
+        dynamicRoutes: [],
+      })
+    );
+    await fs.writeFile(
+      path.join(distDir, 'app-path-routes-manifest.json'),
+      JSON.stringify({
+        '/included/page': '/included',
+        '/not-in-this-function/page': '/not-in-this-function',
+      })
+    );
+    await fs.writeFile(
+      path.join(distDir, 'server', 'app', 'included', 'page.js'),
+      `globalThis.__preloadTestLoads = (globalThis.__preloadTestLoads || 0) + 1;
+      module.exports.handler = async (req, res) => {
+        res.statusCode = 200;
+        res.end('included');
+      };`
+    );
+    await fs.writeFile(
+      path.join(projectDir, 'node_modules', 'next', 'package.json'),
+      JSON.stringify({ name: 'next', main: 'setup-node-env.js' })
+    );
+    await fs.writeFile(
+      path.join(projectDir, 'node_modules', 'next', 'setup-node-env.js'),
+      ''
+    );
+
+    const launcherPath = path.join(projectDir, 'launcher.cjs');
+    await fs.writeFile(
+      launcherPath,
+      getHandlerSource({
+        projectRelativeDistDir: '.next',
+        prerenderFallbackFalseMap: {},
+        nextConfig: {},
+      })
+    );
+
+    return require(launcherPath) as LauncherModule & {
+      preload?: () => Promise<void>;
+    };
+  }
+
+  it('does not export preload unless NEXT_PRIVATE_PRELOAD_ENTRIES is set', async () => {
+    const launcher = await setupFunction({ preloadEntries: false });
+
+    expect(launcher.preload).toBeUndefined();
+  });
+
+  it('loads the route modules in this function and skips the others', async () => {
+    const launcher = await setupFunction({ preloadEntries: true });
+    (globalThis as { __preloadTestLoads?: number }).__preloadTestLoads = 0;
+
+    await expect(launcher.preload?.()).resolves.toBeUndefined();
+    expect(
+      (globalThis as { __preloadTestLoads?: number }).__preloadTestLoads
+    ).toBe(1);
+
+    const response = {
+      statusCode: 0,
+      body: undefined as string | undefined,
+      setHeader() {},
+      end(body?: string) {
+        this.body = body;
+      },
+    };
+    await launcher(
+      {
+        url: '/included',
+        method: 'GET',
+        headers: { host: 'example.test', 'x-matched-path': '/included' },
+      },
+      response,
+      {}
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe('included');
+    // The request reuses the preloaded module instead of loading it again.
+    expect(
+      (globalThis as { __preloadTestLoads?: number }).__preloadTestLoads
+    ).toBe(1);
+  });
+});
