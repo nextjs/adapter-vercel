@@ -1,5 +1,15 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.36
+
+### Patch Changes
+
+- [#85](https://github.com/nextjs/adapter-vercel/pull/85) [`3b9b6e1`](https://github.com/nextjs/adapter-vercel/commit/3b9b6e1cc5d357c64ce8450394465558e1081735) Thanks [@mischnic](https://github.com/mischnic)! - Fix assetHash key of the launcher
+
+- [#144](https://github.com/nextjs/adapter-vercel/pull/144) [`e1d596e`](https://github.com/nextjs/adapter-vercel/commit/e1d596ed53f6a80334b2b43091f1bdd066b03586) Thanks [@tobiaslins](https://github.com/tobiaslins)! - Load the proxy (middleware) module while the function initializes instead of during the first request.
+
+- [#84](https://github.com/nextjs/adapter-vercel/pull/84) [`a1c108d`](https://github.com/nextjs/adapter-vercel/commit/a1c108dfb7bb0f56e79260879e20f4626f4b87a7) Thanks [@mischnic](https://github.com/mischnic)! - Add missing assetHash for Pages 404
+
 ## 0.0.1-beta.35
 
 ### Patch Changes
