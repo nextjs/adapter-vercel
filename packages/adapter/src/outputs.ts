@@ -433,6 +433,7 @@ export async function handleNodeOutputs(
 
   const fsSema = new Sema(16, { capacity: nodeOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
+  const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
 
   let pages404Output: undefined | FuncOutputs[0];
   let pagesErrorOutput: undefined | FuncOutputs[0];
@@ -466,9 +467,8 @@ export async function handleNodeOutputs(
   let nextEnvLoaderPathRelativeToProjectDir: string | undefined;
 
   for (const envFile of envFiles) {
-    envFilePathMap[
-      path.posix.join(path.posix.relative(repoRoot, projectDir), envFile)
-    ] = path.posix.relative(repoRoot, path.join(projectDir, envFile));
+    envFilePathMap[path.posix.join(handlerRelativeDir, envFile)] =
+      path.posix.relative(repoRoot, path.join(projectDir, envFile));
     envFileHashes[envFile] = sha256(
       await fs.readFile(path.join(projectDir, envFile))
     );
@@ -506,7 +506,7 @@ export async function handleNodeOutputs(
   });
   const handlerSourceHash = sha256(handlerSource);
   const handlerRelativePath = path.posix.join(
-    path.posix.relative(repoRoot, projectDir),
+    handlerRelativeDir,
     '___next_launcher.cjs'
   );
 
@@ -991,10 +991,7 @@ export async function handleEdgeOutputs(
       const edgeConfig: EdgeFunctionConfig = {
         runtime: 'edge',
         name: params.name,
-        entrypoint: path.posix.join(
-          path.posix.relative(repoRoot, projectDir),
-          'index.js'
-        ),
+        entrypoint: path.posix.join(handlerRelativeDir, 'index.js'),
         filePathMap: files,
         assets: nonJsAssetFiles,
         deploymentTarget: 'v8-worker',
