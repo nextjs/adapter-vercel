@@ -17,10 +17,13 @@ const OTEL_API_MAX_MINOR = 9;
 
 // VERCEL_PROJECT_NAME is a system env var. When it's missing, @vercel/otel
 // falls back to "app". A customer-set OTEL_SERVICE_NAME still wins.
-const WRAPPER_SOURCE = `import { registerOTel } from '@vercel/otel'
-
-export function register() {
-  registerOTel({ serviceName: process.env.VERCEL_PROJECT_NAME })
+// The import sits behind NEXT_RUNTIME, which Next.js inlines per runtime, so
+// Edge bundles don't include @vercel/otel.
+const WRAPPER_SOURCE = `export async function register() {
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    const { registerOTel } = await import('@vercel/otel')
+    registerOTel({ serviceName: process.env.VERCEL_PROJECT_NAME })
+  }
 }
 `;
 

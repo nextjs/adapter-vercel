@@ -10,10 +10,11 @@ import adapter from './index';
 import { injectDefaultTracing } from './tracing';
 
 const INJECT_ENTRY = './.vercel/otel/instrumentation.mjs';
-const WRAPPER_SOURCE = `import { registerOTel } from '@vercel/otel'
-
-export function register() {
-  registerOTel({ serviceName: process.env.VERCEL_PROJECT_NAME })
+const WRAPPER_SOURCE = `export async function register() {
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    const { registerOTel } = await import('@vercel/otel')
+    registerOTel({ serviceName: process.env.VERCEL_PROJECT_NAME })
+  }
 }
 `;
 
