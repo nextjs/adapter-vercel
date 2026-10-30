@@ -3,6 +3,8 @@ import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
+import { collectGoRouteOutputs, handleGoOutputs } from './go-outputs';
+import { getGoRouting } from './go-routing';
 import {
   type FuncOutputs,
   handleEdgeOutputs,
@@ -101,6 +103,8 @@ const myAdapter: NextAdapter = {
     projectDir,
     nextVersion,
   }) {
+    const goOutputs = collectGoRouteOutputs(outputs);
+    const goRouting = getGoRouting(goOutputs, config, routing.dynamicRoutes);
     const vercelOutputDir = path.join(distDir, 'output');
     await fs.mkdir(vercelOutputDir, { recursive: true });
 
@@ -259,6 +263,13 @@ const myAdapter: NextAdapter = {
       prerenderFallbackFalseMap,
     });
 
+    await handleGoOutputs(goOutputs, {
+      config,
+      projectDir,
+      nextVersion,
+      vercelOutputDir,
+    });
+
     // handle prerenders (must come after handle node outputs)
     await handlePrerenderOutputs(outputs.prerenders, {
       config,
@@ -297,6 +308,8 @@ const myAdapter: NextAdapter = {
     let addedNextData404Route = false;
 
     for (const route of routing.dynamicRoutes) {
+      const goRoute = goRouting.dynamicRoute(route);
+      if (goRoute === null) continue;
       // add route to ensure we 404 for non-existent _next/data
       // routes before trying page dynamic routes
       if (hasPagesDir && !hasMiddleware) {
@@ -314,13 +327,16 @@ const myAdapter: NextAdapter = {
         }
       }
 
-      dynamicRoutes.push({
-        src: route.sourceRegex,
-        dest: route.destination,
-        check: true,
-        has: route.has,
-        missing: route.missing,
-      });
+      dynamicRoutes.push(
+        ...(goRoute ? [] : goRouting.beforeDynamicRoute(route)),
+        goRoute || {
+          src: route.sourceRegex,
+          dest: route.destination,
+          check: true,
+          has: route.has,
+          missing: route.missing,
+        }
+      );
     }
 
     vercelConfig.routes = [
@@ -881,12 +897,15 @@ const myAdapter: NextAdapter = {
 
       ...onMatchRoutes,
 
+      ...goRouting.hitRoutes,
+
       // add internal matched path header for function bundle mapping
       {
-        src:
+        src: goRouting.nodeHitRouteSrc(
           config.basePath && config.basePath !== '/'
             ? path.posix.join('/', config.basePath, '/?(?:index)?(?:/)?$')
-            : `/(?:index)?(?:/)?$`,
+            : `/(?:index)?(?:/)?$`
+        ),
         headers: {
           'x-matched-path': '/',
         },
@@ -894,10 +913,8 @@ const myAdapter: NextAdapter = {
         important: true,
       },
       {
-        src: path.posix.join(
-          '/',
-          config.basePath || '',
-          `/((?!index$).*?)(?:/)?$`
+        src: goRouting.nodeHitRouteSrc(
+          path.posix.join('/', config.basePath || '', `/((?!index$).*?)(?:/)?$`)
         ),
         headers: {
           'x-matched-path': '/$1',
