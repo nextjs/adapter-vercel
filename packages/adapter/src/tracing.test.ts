@@ -421,6 +421,58 @@ describe('injectDefaultTracing', () => {
     );
   });
 
+  it.each(['1.10.0', '1.8.0', '1.9.0-rc.0'])(
+    'does not inject when the build image has @opentelemetry/api %s',
+    async (version) => {
+      const { projectDir, packagesDir } = await readyProject();
+      await writePackage(
+        path.join(packagesDir, '@opentelemetry', 'api'),
+        '@opentelemetry/api',
+        version
+      );
+
+      const tracingConfig = await inject(projectDir, packagesDir);
+
+      expect(tracingConfig.injectInstrumentation).toBeUndefined();
+      await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
+    }
+  );
+
+  it('skips @opentelemetry/api nested under a copied package', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+    const apiLogs = path.join(packagesDir, '@opentelemetry', 'api-logs');
+    await writePackage(
+      path.join(apiLogs, 'node_modules', '@opentelemetry', 'api'),
+      '@opentelemetry/api',
+      '1.10.0'
+    );
+
+    const tracingConfig = await inject(projectDir, packagesDir);
+
+    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+    const copiedApiLogs = path.join(
+      otelRoot(projectDir),
+      'node_modules',
+      '@opentelemetry',
+      'api-logs'
+    );
+    await expect(
+      fs.stat(path.join(copiedApiLogs, 'node_modules', '@opentelemetry', 'api'))
+    ).rejects.toThrow();
+    const req = createRequire(path.join(copiedApiLogs, 'index.js'));
+    expect(await fs.realpath(req.resolve('@opentelemetry/api'))).toBe(
+      await fs.realpath(
+        path.join(
+          otelRoot(projectDir),
+          'node_modules',
+          '@opentelemetry',
+          'api',
+          'index.js'
+        )
+      )
+    );
+  });
+
   it.each(['@vercel/otel', '@opentelemetry/api-logs', '@opentelemetry/api'])(
     'does not inject when the build image is missing %s',
     async (name) => {

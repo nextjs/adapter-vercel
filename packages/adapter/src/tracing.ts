@@ -20,6 +20,7 @@ const COPIED_PACKAGES = [
 // reader from 1.0 to 1.9. A 1.10+ reader rejects it, a 2.x reader uses another
 // slot, and a prerelease reader only accepts its exact version.
 const OTEL_API_MAX_MINOR = 9;
+const IMAGE_OTEL_API = /^1\.9\.\d+$/;
 
 // VERCEL_PROJECT_NAME is a system env var. When it's missing, @vercel/otel
 // falls back to "app". A customer-set OTEL_SERVICE_NAME still wins.
@@ -61,6 +62,16 @@ export async function injectDefaultTracing(
     }
     if (!(await imagePackagesExist(packagesDir))) {
       skip(`build image is missing one of ${COPIED_PACKAGES.join(', ')}`);
+      return;
+    }
+    // A newer API breaks the SDK that @vercel/otel bundles (it caps the API
+    // below 1.10), and an older one can't reach 1.9 readers.
+    const imageApi = await readPackageVersion(
+      path.join(packagesDir, OTEL_API, 'package.json'),
+      OTEL_API
+    );
+    if (!imageApi || !IMAGE_OTEL_API.test(imageApi)) {
+      skip(`build image has @opentelemetry/api ${imageApi}, not 1.9.x`);
       return;
     }
 
@@ -197,17 +208,31 @@ async function writeTracingTree(
   const otelDir = path.join(projectDir, '.vercel', 'otel');
   const destModules = path.join(otelDir, 'node_modules');
   for (const name of COPIED_PACKAGES) {
+    const source = path.join(packagesDir, name);
     const dest = path.join(destModules, name);
     await fs.mkdir(path.dirname(dest), { recursive: true });
-    await fs.cp(path.join(packagesDir, name), dest, {
+    await fs.cp(source, dest, {
       recursive: true,
       dereference: true,
       force: true,
+      // yarn 1 nests a newer @opentelemetry/api under api-logs for its "^1.3.0"
+      // range. Skip nested copies so every package uses the pinned one.
+      filter: (file) => !isNestedOtelApi(path.relative(source, file)),
     });
   }
   const wrapper = path.join(otelDir, 'instrumentation.mjs');
   await fs.writeFile(wrapper, WRAPPER_SOURCE);
   return wrapper;
+}
+
+function isNestedOtelApi(relative: string): boolean {
+  const parts = relative.split(path.sep);
+  return parts.some(
+    (part, index) =>
+      part === 'node_modules' &&
+      parts[index + 1] === '@opentelemetry' &&
+      parts[index + 2] === 'api'
+  );
 }
 
 async function isFile(file: string): Promise<boolean> {
