@@ -467,9 +467,8 @@ export async function handleNodeOutputs(
   let nextEnvLoaderPathRelativeToProjectDir: string | undefined;
 
   for (const envFile of envFiles) {
-    envFilePathMap[
-      path.posix.join(path.posix.relative(repoRoot, projectDir), envFile)
-    ] = path.posix.relative(repoRoot, path.join(projectDir, envFile));
+    envFilePathMap[path.posix.join(handlerRelativeDir, envFile)] =
+      path.posix.relative(repoRoot, path.join(projectDir, envFile));
     envFileHashes[envFile] = sha256(
       await fs.readFile(path.join(projectDir, envFile))
     );
@@ -506,6 +505,10 @@ export async function handleNodeOutputs(
     nextEnvLoaderPathRelativeToProjectDir,
   });
   const handlerSourceHash = sha256(handlerSource);
+  const handlerRelativePath = path.posix.join(
+    handlerRelativeDir,
+    '___next_launcher.cjs'
+  );
 
   // most assets are shared between functions so cache the relative paths
   const relativeToRepoRootCache = new Map<string, string>();
@@ -571,16 +574,11 @@ export async function handleNodeOutputs(
         filesHashes[routesManifestRelativePath] = routesManifestHash;
       }
 
-      const handlerFilePath = path.join(
-        functionDir,
-        handlerRelativeDir,
-        '___next_launcher.cjs'
-      );
-
-      await fs.mkdir(path.dirname(handlerFilePath), { recursive: true });
-      await writeIfNotExists(handlerFilePath, handlerSource);
+      const handlerAbsolutePath = path.join(functionDir, handlerRelativePath);
+      await fs.mkdir(path.dirname(handlerAbsolutePath), { recursive: true });
+      await writeIfNotExists(handlerAbsolutePath, handlerSource);
       if (filesHashes) {
-        filesHashes['___next_launcher.cjs'] = handlerSourceHash;
+        filesHashes[handlerRelativePath] = handlerSourceHash;
       }
 
       const operationType =
@@ -621,10 +619,7 @@ export async function handleNodeOutputs(
           slug: 'nextjs',
           version: nextVersion,
         },
-        handler: path.posix.join(
-          path.posix.relative(repoRoot, projectDir),
-          '___next_launcher.cjs'
-        ),
+        handler: handlerRelativePath,
         runtime: nodeVersion.runtime,
         maxDuration,
         supportsMultiPayloads: true,
@@ -996,10 +991,7 @@ export async function handleEdgeOutputs(
       const edgeConfig: EdgeFunctionConfig = {
         runtime: 'edge',
         name: params.name,
-        entrypoint: path.posix.join(
-          path.posix.relative(repoRoot, projectDir),
-          'index.js'
-        ),
+        entrypoint: path.posix.join(handlerRelativeDir, 'index.js'),
         filePathMap: files,
         assets: nonJsAssetFiles,
         deploymentTarget: 'v8-worker',
