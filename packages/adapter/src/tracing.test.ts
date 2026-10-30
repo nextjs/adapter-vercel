@@ -74,11 +74,6 @@ describe('injectDefaultTracing', () => {
     const target = path.join(packagesDir, 'outside-target.js');
     await fs.writeFile(target, 'module.exports = { dereferenced: true }\n');
     await fs.symlink(target, path.join(otelReal, 'extra.js'));
-    await writePackage(
-      path.join(otelReal, 'node_modules', '@opentelemetry', 'api'),
-      '@opentelemetry/api',
-      '1.6.0'
-    );
     await fs.mkdir(path.join(packagesDir, '@vercel'), { recursive: true });
     await fs.symlink(otelReal, path.join(packagesDir, '@vercel', 'otel'));
     await writePackage(
@@ -86,8 +81,41 @@ describe('injectDefaultTracing', () => {
       '@opentelemetry/api-logs',
       '0.46.0'
     );
+    await writePackage(
+      path.join(packagesDir, '@opentelemetry', 'api'),
+      '@opentelemetry/api',
+      '1.9.0'
+    );
 
     return { projectDir, packagesDir };
+  }
+
+  // pnpm's isolated layout: `next` is a symlink into node_modules/.pnpm, and a
+  // dependency's @opentelemetry/api is hoisted to node_modules/.pnpm/node_modules,
+  // which Next.js can resolve but the project root can't.
+  async function hiddenOtelApi(
+    projectDir: string,
+    version: string
+  ): Promise<void> {
+    const modules = path.join(projectDir, 'node_modules');
+    await fs.rm(path.join(modules, '@opentelemetry'), {
+      recursive: true,
+      force: true,
+    });
+    const nextReal = path.join(
+      modules,
+      '.pnpm',
+      'next@16.5.0',
+      'node_modules',
+      'next'
+    );
+    await writePackage(nextReal, 'next', '16.5.0');
+    await fs.symlink(nextReal, path.join(modules, 'next'));
+    await writePackage(
+      path.join(modules, '.pnpm', 'node_modules', '@opentelemetry', 'api'),
+      '@opentelemetry/api',
+      version
+    );
   }
 
   function config(): TracingConfig {
@@ -160,10 +188,6 @@ describe('injectDefaultTracing', () => {
     expect(await fs.readFile(extra, 'utf8')).toBe(
       'module.exports = { dereferenced: true }\n'
     );
-    await expect(
-      fs.stat(path.join(copiedOtel, 'node_modules', '@opentelemetry', 'api'))
-    ).rejects.toThrow();
-
     const req = createRequire(wrapper);
     expect(await fs.realpath(req.resolve('@vercel/otel'))).toBe(
       await fs.realpath(path.join(copiedOtel, 'index.js'))
@@ -179,12 +203,10 @@ describe('injectDefaultTracing', () => {
         )
       )
     );
-    const apiEntry = req.resolve('@opentelemetry/api');
-    expect(apiEntry.includes(`${path.sep}.vercel${path.sep}`)).toBe(false);
-    expect(await fs.realpath(apiEntry)).toBe(
+    expect(await fs.realpath(req.resolve('@opentelemetry/api'))).toBe(
       await fs.realpath(
         path.join(
-          projectDir,
+          otelRoot(projectDir),
           'node_modules',
           '@opentelemetry',
           'api',
@@ -333,21 +355,7 @@ describe('injectDefaultTracing', () => {
     expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
   });
 
-  it('does not inject when @opentelemetry/api is below 1.6.0', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    await writePackage(
-      path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
-      '@opentelemetry/api',
-      '1.5.0'
-    );
-
-    const tracingConfig = await inject(projectDir, packagesDir);
-
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
-  });
-
-  it.each(['1.10.0', '2.0.0'])(
+  it.each(['1.10.0', '2.0.0', '1.9.0-rc.0'])(
     'does not inject when @opentelemetry/api is %s',
     async (version) => {
       const { projectDir, packagesDir } = await readyProject();
@@ -364,7 +372,7 @@ describe('injectDefaultTracing', () => {
     }
   );
 
-  it.each(['1.6.0', '1.9.1'])(
+  it.each(['1.4.1', '1.6.0', '1.9.1'])(
     'injects when @opentelemetry/api is %s',
     async (version) => {
       const { projectDir, packagesDir } = await readyProject();
@@ -380,15 +388,51 @@ describe('injectDefaultTracing', () => {
     }
   );
 
-  it('does not inject when the build image is missing a package', async () => {
+  it('does not inject when only Next.js resolves @opentelemetry/api 1.10.0', async () => {
     const { projectDir, packagesDir } = await readyProject();
-    await fs.rm(path.join(packagesDir, '@opentelemetry'), { recursive: true });
+    await hiddenOtelApi(projectDir, '1.10.0');
 
     const tracingConfig = await inject(projectDir, packagesDir);
 
     expect(tracingConfig.injectInstrumentation).toBeUndefined();
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
+
+  it('injects when only Next.js resolves @opentelemetry/api 1.9.0', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+    await hiddenOtelApi(projectDir, '1.9.0');
+
+    const tracingConfig = await inject(projectDir, packagesDir);
+
+    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+    const wrapper = path.join(otelRoot(projectDir), 'instrumentation.mjs');
+    expect(
+      await fs.realpath(createRequire(wrapper).resolve('@opentelemetry/api'))
+    ).toBe(
+      await fs.realpath(
+        path.join(
+          otelRoot(projectDir),
+          'node_modules',
+          '@opentelemetry',
+          'api',
+          'index.js'
+        )
+      )
+    );
+  });
+
+  it.each(['@vercel/otel', '@opentelemetry/api-logs', '@opentelemetry/api'])(
+    'does not inject when the build image is missing %s',
+    async (name) => {
+      const { projectDir, packagesDir } = await readyProject();
+      await fs.rm(path.join(packagesDir, name), { recursive: true });
+
+      const tracingConfig = await inject(projectDir, packagesDir);
+
+      expect(tracingConfig.injectInstrumentation).toBeUndefined();
+      await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
+    }
+  );
 
   it('keeps existing injectInstrumentation entries', async () => {
     const { projectDir, packagesDir } = await readyProject();

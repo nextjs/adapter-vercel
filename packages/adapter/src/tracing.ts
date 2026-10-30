@@ -6,13 +6,19 @@ import { debug } from '@vercel/build-utils';
 // .mjs, so webpack parses it as ESM even when the app's package.json sets
 // "type": "commonjs". .vercel/otel/ has no package.json of its own.
 const INJECT_ENTRY = './.vercel/otel/instrumentation.mjs';
-const COPIED_PACKAGES = ['@vercel/otel', '@opentelemetry/api-logs'] as const;
 const OTEL_API = '@opentelemetry/api';
-// Accepted @opentelemetry/api range: >=1.6.0 <1.10.0. @vercel/otel 2.x declares
-// >=1.9.0, but only uses API features that 1.6.0 has, and Next.js vendors 1.6.0
-// for apps without their own copy. OpenTelemetry JS SDK 2.x, which @vercel/otel
-// 2.x bundles, caps the API below 1.10.
-const OTEL_API_MIN_MINOR = 6;
+// The image pins @opentelemetry/api 1.9.0, so @vercel/otel always resolves an
+// API next to it, even when Next.js finds a copy the project root can't see
+// (pnpm's node_modules/.pnpm/node_modules).
+const COPIED_PACKAGES = [
+  '@vercel/otel',
+  '@opentelemetry/api-logs',
+  OTEL_API,
+] as const;
+// Every 1.x API copy shares one global slot and accepts a provider registered
+// by the same or a newer minor version, so registering through 1.9 reaches any
+// reader from 1.0 to 1.9. A 1.10+ reader rejects it, a 2.x reader uses another
+// slot, and a prerelease reader only accepts its exact version.
 const OTEL_API_MAX_MINOR = 9;
 
 // VERCEL_PROJECT_NAME is a system env var. When it's missing, @vercel/otel
@@ -50,11 +56,11 @@ export async function injectDefaultTracing(
       return;
     }
     if (!(await otelApiIsCompatible(projectDir))) {
-      skip('@opentelemetry/api is outside >=1.6.0 <1.10.0');
+      skip('@opentelemetry/api is outside >=1.0.0 <1.10.0');
       return;
     }
     if (!(await imagePackagesExist(packagesDir))) {
-      skip('build image is missing @vercel/otel or @opentelemetry/api-logs');
+      skip(`build image is missing one of ${COPIED_PACKAGES.join(', ')}`);
       return;
     }
 
@@ -101,39 +107,43 @@ async function projectHasInstrumentation(
   }
 }
 
+// Checks the copy the app's own code resolves, and the copy Next.js's tracer
+// resolves from its own folder, which pnpm can hide from the project root.
 async function otelApiIsCompatible(projectDir: string): Promise<boolean> {
-  if (!isResolvable(projectDir, OTEL_API)) return true;
-  const version = await resolvedPackageVersion(projectDir, OTEL_API);
-  return version !== undefined && otelApiVersionOk(version);
-}
-
-function isResolvable(projectDir: string, name: string): boolean {
-  try {
-    createRequire(path.join(projectDir, 'package.json')).resolve(name);
-    return true;
-  } catch {
-    return false;
+  const fromProject = path.join(projectDir, 'package.json');
+  const fromNext = resolveFrom(fromProject, 'next/package.json');
+  for (const from of fromNext ? [fromProject, fromNext] : [fromProject]) {
+    const entry = resolveFrom(from, OTEL_API);
+    if (!entry) continue;
+    const version = await packageVersion(entry, OTEL_API);
+    if (version === undefined || !otelApiVersionOk(version)) return false;
   }
+  return true;
 }
 
-function otelApiVersionOk(version: string): boolean {
-  const [major, minor] = version.split('.').map(Number);
-  return (
-    major === 1 && minor >= OTEL_API_MIN_MINOR && minor <= OTEL_API_MAX_MINOR
-  );
-}
-
-async function resolvedPackageVersion(
-  projectDir: string,
-  name: string
-): Promise<string | undefined> {
-  let entry: string;
+function resolveFrom(from: string, request: string): string | undefined {
   try {
-    entry = createRequire(path.join(projectDir, 'package.json')).resolve(name);
+    return createRequire(from).resolve(request);
   } catch {
     return undefined;
   }
+}
 
+// Prereleases fail the pattern: the API only accepts an exact version match
+// when either side has one.
+function otelApiVersionOk(version: string): boolean {
+  const match = /^(\d+)\.(\d+)\.\d+$/.exec(version);
+  return (
+    match !== null &&
+    Number(match[1]) === 1 &&
+    Number(match[2]) <= OTEL_API_MAX_MINOR
+  );
+}
+
+async function packageVersion(
+  entry: string,
+  name: string
+): Promise<string | undefined> {
   let dir = path.dirname(entry);
   for (;;) {
     const version = await readPackageVersion(
@@ -193,16 +203,6 @@ async function writeTracingTree(
       recursive: true,
       dereference: true,
       force: true,
-      // Skip any nested @opentelemetry/api, so @vercel/otel uses the app's
-      // copy if it has one, or Next.js's vendored copy. Next.js's spans and
-      // the provider then share one API.
-      filter: (source) => {
-        const parts = source.split(path.sep);
-        return !parts.some(
-          (part, index) =>
-            part === '@opentelemetry' && parts[index + 1] === 'api'
-        );
-      },
     });
   }
   const wrapper = path.join(otelDir, 'instrumentation.mjs');
