@@ -419,3 +419,163 @@ describe('node handler proxy loading', () => {
     );
   });
 });
+
+describe('node handler basePath without x-matched-path', () => {
+  const originalCwd = process.cwd();
+  const originalNodeEnv = process.env.NODE_ENV;
+  const projectDirs: string[] = [];
+  const basePath = '/docs';
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+
+    await Promise.all(
+      projectDirs
+        .splice(0)
+        .map((projectDir) =>
+          fs.rm(projectDir, { recursive: true, force: true })
+        )
+    );
+  });
+
+  // Each app entry maps a route (as Next.js reports it, without basePath) to
+  // its entry file under `.next/server/app`, e.g. `/foo` -> `/foo/route`.
+  async function setupApp(entries: Record<string, string>) {
+    const projectDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'adapter-node-handler-base-path-')
+    );
+    projectDirs.push(projectDir);
+
+    const distDir = path.join(projectDir, '.next');
+    await fs.mkdir(path.join(projectDir, 'node_modules', 'next'), {
+      recursive: true,
+    });
+
+    const appPathRoutes: Record<string, string> = {};
+    for (const [route, entry] of Object.entries(entries)) {
+      appPathRoutes[entry] = route;
+      const entryFile = path.join(distDir, 'server', 'app', `${entry}.js`);
+      await fs.mkdir(path.dirname(entryFile), { recursive: true });
+      await fs.writeFile(
+        entryFile,
+        `module.exports.handler = async (req, res) => {
+          res.statusCode = 200;
+          res.end(JSON.stringify({ entry: ${JSON.stringify(entry)}, url: req.url }));
+        };`
+      );
+    }
+
+    await fs.writeFile(
+      path.join(distDir, 'routes-manifest.json'),
+      JSON.stringify({
+        staticRoutes: Object.keys(entries).map((page) => ({
+          page,
+          regex: `^${page}(?:/)?$`,
+          namedRegex: `^${page}(?:/)?$`,
+          routeKeys: {},
+        })),
+        dynamicRoutes: [],
+      })
+    );
+    await fs.writeFile(
+      path.join(distDir, 'app-path-routes-manifest.json'),
+      JSON.stringify(appPathRoutes)
+    );
+    await fs.writeFile(
+      path.join(projectDir, 'node_modules', 'next', 'package.json'),
+      JSON.stringify({ name: 'next', main: 'setup-node-env.js' })
+    );
+    await fs.writeFile(
+      path.join(projectDir, 'node_modules', 'next', 'setup-node-env.js'),
+      ''
+    );
+
+    const launcherPath = path.join(projectDir, 'launcher.cjs');
+    await fs.writeFile(
+      launcherPath,
+      getHandlerSource({
+        projectRelativeDistDir: '.next',
+        prerenderFallbackFalseMap: {},
+        nextConfig: { basePath },
+      })
+    );
+
+    const launcher = require(launcherPath) as LauncherModule;
+
+    return async function invoke({
+      url,
+      matchedPath,
+    }: {
+      url: string;
+      matchedPath?: string;
+    }): Promise<{ entry: string; url: string }> {
+      const response = {
+        statusCode: 0,
+        body: undefined as string | undefined,
+        setHeader() {},
+        end(body?: string) {
+          this.body = body;
+        },
+      };
+      const headers: Record<string, string> = { host: 'example.test' };
+      if (matchedPath !== undefined) {
+        headers['x-matched-path'] = matchedPath;
+      }
+
+      await launcher({ url, method: 'POST', headers }, response, {});
+
+      expect(response.statusCode).toBe(200);
+      if (response.body === undefined) {
+        throw new Error('The entry stub did not write a response body.');
+      }
+      return JSON.parse(response.body) as { entry: string; url: string };
+    };
+  }
+
+  it('resolves an app route from a basePath-prefixed URL', async () => {
+    const invoke = await setupApp({ '/api/queue': '/api/queue/route' });
+
+    const invocation = await invoke({ url: `${basePath}/api/queue` });
+
+    expect(invocation.entry).toBe('/api/queue/route');
+    expect(invocation.url).toBe(`${basePath}/api/queue`);
+  });
+
+  it('resolves the root page from the bare basePath', async () => {
+    const invoke = await setupApp({ '/': '/page' });
+
+    const invocation = await invoke({ url: basePath });
+
+    expect(invocation.entry).toBe('/page');
+  });
+
+  it('keeps x-matched-path as the source of truth when present', async () => {
+    const invoke = await setupApp({
+      '/api/queue': '/api/queue/route',
+      [`${basePath}/api/queue`]: `${basePath}/api/queue/route`,
+    });
+
+    const invocation = await invoke({
+      url: `${basePath}${basePath}/api/queue`,
+      matchedPath: `${basePath}/api/queue`,
+    });
+
+    expect(invocation.entry).toBe(`${basePath}/api/queue/route`);
+  });
+
+  it('only strips the basePath at a segment boundary', async () => {
+    const invoke = await setupApp({
+      [`${basePath}-archive`]: `${basePath}-archive/route`,
+    });
+
+    const invocation = await invoke({ url: `${basePath}-archive` });
+
+    expect(invocation.entry).toBe(`${basePath}-archive/route`);
+  });
+});
