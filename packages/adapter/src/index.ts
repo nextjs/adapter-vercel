@@ -104,7 +104,7 @@ const myAdapter: NextAdapter = {
     nextVersion,
   }) {
     const goOutputs = collectGoRouteOutputs(outputs);
-    const goRouting = getGoRouting(goOutputs, config, routing.dynamicRoutes);
+    const goRouting = getGoRouting(goOutputs, config);
     const vercelOutputDir = path.join(distDir, 'output');
     await fs.mkdir(vercelOutputDir, { recursive: true });
 
@@ -309,7 +309,6 @@ const myAdapter: NextAdapter = {
 
     for (const route of routing.dynamicRoutes) {
       const goRoute = goRouting.dynamicRoute(route);
-      if (goRoute === null) continue;
       // add route to ensure we 404 for non-existent _next/data
       // routes before trying page dynamic routes
       if (hasPagesDir && !hasMiddleware) {
@@ -328,7 +327,6 @@ const myAdapter: NextAdapter = {
       }
 
       dynamicRoutes.push(
-        ...(goRoute ? [] : goRouting.beforeDynamicRoute(route)),
         goRoute || {
           src: route.sourceRegex,
           dest: route.destination,

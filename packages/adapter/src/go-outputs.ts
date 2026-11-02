@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getLambdaOptionsFromFunction } from '@vercel/build-utils';
 import type { AdapterOutput, NextConfig } from 'next';
-import { AdapterOutputType } from 'next/dist/shared/lib/constants';
+import { AdapterOutputType } from 'next/constants';
 import { GO_ROUTING_CONFIG, GO_ROUTING_ENV } from './go-routing';
 import {
   getSourceFilePathFromPage,

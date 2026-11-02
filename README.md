@@ -57,9 +57,13 @@ middleware rewrites. Dynamic Go routes do not use Node's internal parameter
 query transport, so encoded catch-all segment boundaries are preserved. The
 producer must reject missing or duplicate context headers when this mode is
 enabled and remove the context header before invoking user code.
-Go routing rules also precede synthetic Node RSC branches when those branches
-would select an existing Go segment artifact. Existing same-name Go/non-Go
-function artifact collisions are still rejected during packaging.
+Next.js supplies plain Go routing matchers and destinations without synthetic
+RSC suffixes or Node parameter queries. It also orders concrete Go RSC/segment
+artifacts before conflicting synthetic Node branches. The adapter consumes that
+metadata and ordering directly and adds the Vercel trusted pathname header.
+This requires the matching Next.js producer changes in the Go proof of concept;
+older producers that emit Go suffix rules are unsupported. Existing same-name
+Go/non-Go function artifact collisions are still rejected during packaging.
 
 Go outputs do not participate in Node.js function grouping. Go route bundling,
 Go pages, middleware, prerender parents, arm64, and CGO/native dependencies are

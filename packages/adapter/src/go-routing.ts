@@ -1,7 +1,6 @@
 import path from 'node:path';
 import type { RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter, NextConfig } from 'next';
-import { getNamedRouteRegex } from 'next/dist/shared/lib/router/utils/route-regex';
 import type { GoRouteOutput } from './go-outputs';
 import { normalizeIndexPathname } from './outputs';
 import { escapeStringRegexp } from './utils';
@@ -46,13 +45,6 @@ function literalPathPattern(pathname: string) {
     .join('');
 }
 
-function targetsOutput(route: DynamicRoute, pathname: string) {
-  const destination = route.destination?.split('?')[0];
-  return (
-    destination === pathname || destination?.replace(/\$\d+$/, '') === pathname
-  );
-}
-
 /**
  * The platform strips client-supplied x-matched-path and always forwards the
  * routing value, including when other routing headers are filtered out. Go
@@ -61,41 +53,10 @@ function targetsOutput(route: DynamicRoute, pathname: string) {
  */
 export function getGoRouting(
   outputs: readonly GoRouteOutput[],
-  config: NextConfig,
-  dynamicRoutes: readonly DynamicRoute[] = []
+  config: NextConfig
 ) {
   const basePath = config.basePath || '';
-  const byPathname = new Map(
-    outputs.map((output) => [output.pathname, output])
-  );
-  const ownRoutes = new Map<string, { route: DynamicRoute; index: number }>();
-  dynamicRoutes.forEach((route, index) => {
-    if (!route.source) return;
-    const pathname = path.posix.join('/', basePath, route.source);
-    if (byPathname.has(pathname) && targetsOutput(route, pathname)) {
-      ownRoutes.set(pathname, { route, index });
-    }
-  });
-
-  function concreteRoute(
-    output: GoRouteOutput,
-    route: DynamicRoute
-  ): RouteWithSrc {
-    const source = output.pathname.slice(basePath.length) || '/';
-    const regex = getNamedRouteRegex(source, {
-      prefixRouteKeys: true,
-    }).namedRegex.replace('^', () => `^${escapeStringRegexp(basePath)}[/]?`);
-    return {
-      src: `(?<nextGoRoutePath>${regex})`,
-      dest: output.pathname,
-      check: true,
-      has: route.has,
-      missing: route.missing,
-      headers: { 'x-matched-path': '$nextGoRoutePath' },
-      important: true,
-    };
-  }
-
+  const goPathnames = new Set(outputs.map((output) => output.pathname));
   // Keep the same winner as function materialization for root/index aliases.
   const byFunctionPath = new Map<string, GoRouteOutput>();
   for (const output of outputs) {
@@ -132,69 +93,22 @@ export function getGoRouting(
       // Each excluded pattern is already anchored at the end of the pathname.
       return `^(?!(?:${goHitPattern}))${src.replace(/^\^/, '')}`;
     },
-    beforeDynamicRoute(route: DynamicRoute): RouteWithSrc[] {
-      if (ownRoutes.size === 0) return [];
-      const destination = route.destination?.split('?')[0];
-      if (!destination) return [];
-      const prefix = destination.match(/^(.*)\$\d+$/)?.[1];
-      const hasRscSuffix = route.sourceRegex.includes(
-        '(\\.rsc|\\.segments/.+\\.segment\\.rsc'
-      );
-      const index = dynamicRoutes.indexOf(route);
-      return [...ownRoutes.entries()]
-        .filter(([pathname, own]) => {
-          if (own.index <= index) return false;
-          // Dedicated segment rules can target a Go artifact literally. The
-          // generic Node RSC branch instead appends its captured suffix.
-          if (pathname === destination) return true;
-          if (!prefix || !hasRscSuffix) return false;
-          return (
-            pathname === `${prefix}.rsc` ||
-            (pathname.startsWith(`${prefix}.segments/`) &&
-              pathname.endsWith('.segment.rsc'))
-          );
-        })
-        .sort(([, a], [, b]) => a.index - b.index)
-        .map(([pathname, own]) => {
-          const inserted = concreteRoute(
-            byPathname.get(pathname) as GoRouteOutput,
-            own.route
-          );
-          // Only move ahead when the preceding Node branch would run. Other
-          // requests retain the original producer ordering and conditions.
-          if (route.has?.length)
-            inserted.has = [...route.has, ...(inserted.has || [])];
-          if (route.missing?.length)
-            inserted.missing = [...route.missing, ...(inserted.missing || [])];
-          return inserted;
-        });
-    },
-    dynamicRoute(route: DynamicRoute): RouteWithSrc | null | undefined {
-      if (!route.source) return undefined;
-      const pathname = path.posix.join('/', basePath, route.source);
-      const candidate = byPathname.get(pathname);
-      const output =
-        candidate && targetsOutput(route, candidate.pathname)
-          ? candidate
-          : undefined;
-      if (!output) {
-        // Next emits synthetic RSC rules for every dynamic app entry. Go has
-        // no RSC output, and a failed lookup can otherwise retain Node's nxtP
-        // query parameters or replace the concrete path with a template.
-        if (
-          route.source.endsWith('.rsc') &&
-          byPathname.has(pathname.slice(0, -4)) &&
-          targetsOutput(route, pathname.slice(0, -4))
-        ) {
-          return null;
-        }
-        return undefined;
-      }
+    dynamicRoute(route: DynamicRoute): RouteWithSrc | undefined {
+      const pathname = route.destination?.split('?')[0];
+      if (!pathname || !goPathnames.has(pathname)) return undefined;
 
-      // Rebuild the plain route: Next can collapse its document and RSC rules
-      // into a suffix-bearing matcher and destination, but Go emits only the
-      // plain function. Named captures work in both the platform and CLI.
-      return concreteRoute(output, route);
+      // Next supplies the plain Go matcher, destination, conditions, and
+      // ordering. Vercel only adds trusted concrete pathname forwarding so the
+      // Go server can derive parameters without decoding catch-all boundaries.
+      return {
+        src: `(?<nextGoRoutePath>${route.sourceRegex})`,
+        dest: route.destination,
+        check: true,
+        has: route.has,
+        missing: route.missing,
+        headers: { 'x-matched-path': '$nextGoRoutePath' },
+        important: true,
+      };
     },
   };
 }

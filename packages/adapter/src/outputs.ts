@@ -9,8 +9,7 @@ import type { RouteWithSrc } from '@vercel/routing-utils';
 import { Sema } from 'async-sema';
 import fse from 'fs-extra';
 import type { AdapterOutput, NextConfig } from 'next';
-import type { RoutesManifest } from 'next/dist/build';
-import { AdapterOutputType } from 'next/dist/shared/lib/constants';
+import { AdapterOutputType } from 'next/constants';
 import type { NextjsParams } from './get-edge-function-source';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { getHandlerSource } from './node-handler';
@@ -344,9 +343,12 @@ export type FuncOutputs = Array<
  * Vercel).
  */
 async function writeDeterministicRoutesManifest(distDir: string) {
-  const manifest: RoutesManifest = require(
-    path.join(distDir, 'routes-manifest.json')
-  );
+  // Keep this JSON opaque apart from the fields normalized for deduplication.
+  const manifest = require(path.join(distDir, 'routes-manifest.json')) as {
+    headers: unknown[];
+    onMatchHeaders?: unknown[];
+    deploymentId?: string;
+  };
 
   manifest.headers = [];
   manifest.onMatchHeaders = [];

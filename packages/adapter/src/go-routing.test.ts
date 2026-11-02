@@ -3,11 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { normalizeRoutes, type RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
-import { getNamedRouteRegex } from 'next/dist/shared/lib/router/utils/route-regex';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GoRouteOutput } from './go-outputs';
 import { GO_ROUTING_CONFIG, GO_ROUTING_ENV, getGoRouting } from './go-routing';
 import adapter from './index';
+import { escapeStringRegexp } from './utils';
 
 type BuildContext = Parameters<NonNullable<NextAdapter['onBuildComplete']>>[0];
 type DynamicRoute = BuildContext['routing']['dynamicRoutes'][number];
@@ -33,33 +33,60 @@ function goOutput(pathname: string, basePath = ''): GoRouteOutput {
   } as GoRouteOutput;
 }
 
-/** Reproduce both producer routing forms, including its synthetic RSC suffix. */
-function producerRoute(
-  source: string,
+// Literal examples of the producer's public routing metadata. These fixtures
+// deliberately do not import a Next matcher or generate regexes from paths.
+const goMatchers: Record<string, string> = {
+  '/api/items/[slug]': '^/api/items/(?<nxtPslug>[^/]+?)(?:/)?$',
+  '/api/files/[...parts]': '^/api/files/(?<nxtPparts>.+?)(?:/)?$',
+  '/api/files/[[...parts]]': '^/api/files(?:/(?<nxtPparts>.+?))?(?:/)?$',
+  '/api/optional/[[...parts]]': '^/api/optional(?:/(?<nxtPparts>.+?))?(?:/)?$',
+  '/api/[id]/data.rsc': '^/api/(?<nxtPid>[^/]+?)/data\\.rsc(?:/)?$',
+  '/api/[id]/data.segments/piece.segment.rsc':
+    '^/api/(?<nxtPid>[^/]+?)/data\\.segments/piece\\.segment\\.rsc(?:/)?$',
+};
+
+function producerGoRoute(source: string, basePath = ''): DynamicRoute {
+  const sourceRegex = goMatchers[source];
+  if (!sourceRegex) throw new Error(`Missing producer fixture: ${source}`);
+  return {
+    source,
+    sourceRegex: sourceRegex.replace(
+      '^',
+      () => `^${escapeStringRegexp(basePath)}[/]?`
+    ),
+    destination: `${basePath}${source}`,
+  };
+}
+
+function producerNodeRoute(
+  source: '/api/node/[slug]' | '/api/[id]/data',
   basePath = '',
   form: 'plain' | 'collapsed' | 'rsc' = 'plain'
 ): DynamicRoute {
-  const { namedRegex, routeKeys } = getNamedRouteRegex(source, {
-    prefixRouteKeys: true,
-  });
-  const suffixIndex = Object.keys(routeKeys).length + 1;
-  const suffix =
-    form === 'collapsed'
-      ? '(\\.rsc|\\.segments/.+\\.segment\\.rsc|)(?:/)?$'
-      : '(\\.rsc|\\.segments/.+\\.segment\\.rsc)(?:/)?$';
+  const fixtures = {
+    '/api/node/[slug]': {
+      plain: '^/api/node/(?<nxtPslug>[^/]+?)(?:/)?$',
+      rsc: '^/api/node/(?<nxtPslug>[^/]+?)(\\.rsc|\\.segments/.+\\.segment\\.rsc)(?:/)?$',
+      collapsed:
+        '^/api/node/(?<nxtPslug>[^/]+?)(\\.rsc|\\.segments/.+\\.segment\\.rsc|)(?:/)?$',
+      query: '?nxtPslug=$nxtPslug',
+    },
+    '/api/[id]/data': {
+      plain: '^/api/(?<nxtPid>[^/]+?)/data(?:/)?$',
+      rsc: '^/api/(?<nxtPid>[^/]+?)/data(\\.rsc|\\.segments/.+\\.segment\\.rsc)(?:/)?$',
+      collapsed:
+        '^/api/(?<nxtPid>[^/]+?)/data(\\.rsc|\\.segments/.+\\.segment\\.rsc|)(?:/)?$',
+      query: '?nxtPid=$nxtPid',
+    },
+  };
+  const fixture = fixtures[source];
   return {
     source: source + (form === 'rsc' ? '.rsc' : ''),
-    sourceRegex: (form === 'plain'
-      ? namedRegex
-      : namedRegex.replace('(?:/)?$', suffix)
-    ).replace('^', `^${basePath}[/]?`),
-    destination:
-      `${basePath}${source}${form === 'plain' ? '' : `$${suffixIndex}`}?` +
-      Object.entries(routeKeys)
-        .map(([capture, name]) => `${name}=$${capture}`)
-        .join('&'),
-    has: undefined,
-    missing: undefined,
+    sourceRegex: fixture[form].replace(
+      '^',
+      () => `^${escapeStringRegexp(basePath)}[/]?`
+    ),
+    destination: `${basePath}${source}${form === 'plain' ? '' : '$2'}${fixture.query}`,
   };
 }
 
@@ -114,30 +141,39 @@ function nodeHitRoutes(
 }
 
 describe('Go routing context', () => {
-  it.each(['plain', 'collapsed'] as const)(
-    'uses the resolved escaped pathname instead of Node query transport (%s)',
-    (form) => {
-      const output = goOutput('/api/items/[slug]', '/base');
-      const source = producerRoute('/api/items/[slug]', '/base', form);
-      const routing = getGoRouting([output], { basePath: '/base' });
-      const route = required(routing.dynamicRoute(source));
-      expect(route).toMatchObject({
-        dest: '/base/api/items/[slug]',
-        important: true,
-        check: true,
-      });
-      expect(route.dest).not.toContain('?');
-      const concrete = '/base/api/items/a%20b';
+  it('forwards the producer matcher, destination and conditions with concrete context', () => {
+    const output = goOutput('/api/items/[slug]', '/base');
+    const source: DynamicRoute = {
+      // Output selection follows the destination, not a reconstructed source.
+      source: '/producer-owned-alias',
+      sourceRegex:
+        '^/base/(?:alias|api/items)/(?<producerCapture>[^/]+?)(?:/)?$',
+      destination: '/base/api/items/[slug]?producer=value',
+      has: [{ type: 'cookie', key: 'bypass', value: 'yes' }],
+      missing: [{ type: 'header', key: 'skip' }],
+    };
+    const routing = getGoRouting([output], { basePath: '/base' });
+    const route = required(routing.dynamicRoute(source));
+    expect(route).toEqual({
+      src: `(?<nextGoRoutePath>${source.sourceRegex})`,
+      dest: source.destination,
+      has: source.has,
+      missing: source.missing,
+      important: true,
+      check: true,
+      headers: { 'x-matched-path': '$nextGoRoutePath' },
+    });
+    for (const concrete of ['/base/api/items/a%20b', '/base/alias/a%2Fb/']) {
       const context = headerValue(route, concrete);
       expect(context).toBe(concrete);
       expect(hitHeader(routing.hitRoutes, output.pathname, context)).toBe(
         concrete
       );
-      expect(headerValue(route, '/base/api/items/name.rsc')).toBe(
-        '/base/api/items/name.rsc'
-      );
     }
-  );
+    expect(headerValue(route, '/base/api/items/name.rsc')).toBe(
+      '/base/api/items/name.rsc'
+    );
+  });
 
   it.each([
     ['/api/files/[...parts]', '/api/files/a%2Fb/c%20d'],
@@ -145,35 +181,30 @@ describe('Go routing context', () => {
     ['/api/files/[[...parts]]', '/api/files/a%2Fb/c%20d'],
   ])('preserves catch-all context for %s', (source, concrete) => {
     const routing = getGoRouting([goOutput(source)], {});
-    const route = required(routing.dynamicRoute(producerRoute(source)));
+    const route = required(routing.dynamicRoute(producerGoRoute(source)));
     expect(headerValue(route, concrete)).toBe(concrete);
     expect(route.dest).toBe(source);
   });
 
-  it('skips nonexistent synthetic RSC outputs and preserves other runtimes', () => {
-    const routing = getGoRouting([goOutput('/api/go/[slug]')], {});
+  it('leaves non-Go destinations and producer suffix rules unchanged', () => {
+    const routing = getGoRouting([goOutput('/api/items/[slug]')], {});
     expect(
-      routing.dynamicRoute(producerRoute('/api/go/[slug]', '', 'rsc'))
-    ).toBeNull();
-    expect(
-      routing.dynamicRoute(producerRoute('/api/node/[slug]', '', 'collapsed'))
+      routing.dynamicRoute(
+        producerNodeRoute('/api/node/[slug]', '', 'collapsed')
+      )
     ).toBeUndefined();
     expect(
-      routing.dynamicRoute(producerRoute('/api/edge/[slug]', '', 'collapsed'))
+      routing.dynamicRoute({
+        ...producerGoRoute('/api/items/[slug]'),
+        destination: '/api/items/[slug].rsc?nxtPslug=$nxtPslug',
+      })
     ).toBeUndefined();
     expect(
-      routing.dynamicRoute(producerRoute('/api/go/[slug].rsc', '', 'collapsed'))
+      routing.dynamicRoute({
+        ...producerGoRoute('/api/items/[slug]'),
+        destination: undefined,
+      })
     ).toBeUndefined();
-    const explicitRsc = getGoRouting(
-      [goOutput('/api/go/[slug]'), goOutput('/api/go/[slug].rsc')],
-      {}
-    );
-    expect(
-      explicitRsc.dynamicRoute(producerRoute('/api/go/[slug]', '', 'rsc'))
-    ).toBeNull();
-    expect(
-      explicitRsc.dynamicRoute(producerRoute('/api/go/[slug].rsc'))
-    ).toMatchObject({ dest: '/api/go/[slug].rsc' });
   });
 
   it('escapes literal paths and base paths without header or replacement interpolation', () => {
@@ -184,7 +215,7 @@ describe('Go routing context', () => {
       { basePath }
     );
     const route = required(
-      routing.dynamicRoute(producerRoute('/api/items/[slug]', basePath))
+      routing.dynamicRoute(producerGoRoute('/api/items/[slug]', basePath))
     );
     expect(headerValue(route, '/$&/api/items/a%2Fb')).toBe(
       '/$&/api/items/a%2Fb'
@@ -221,71 +252,26 @@ describe('Go routing context', () => {
     expect(hitHeader(terminal.hitRoutes, '/literal%2G')).toBe('/literal%252G');
   });
 
-  it.each(['plain', 'collapsed'] as const)(
-    'captures actual Go artifacts before a conflicting Node RSC branch (%s)',
-    (form) => {
-      const node = producerRoute(
-        '/api/[id]/data',
-        '/base',
-        form === 'plain' ? 'rsc' : form
-      );
-      node.has = [{ type: 'cookie', key: 'bypass', value: 'yes' }];
-      node.missing = [{ type: 'header', key: 'skip' }];
-      const paths = [
-        '/api/[id]/data.rsc',
-        '/api/[id]/data.segments/piece.segment.rsc',
-      ];
-      const own = paths.map((source) => producerRoute(source, '/base', form));
-      const routing = getGoRouting(
-        paths.map((source) => goOutput(source, '/base')),
-        { basePath: '/base' },
-        [node, ...own]
-      );
-      const inserted = routing.beforeDynamicRoute(node);
-      expect(inserted).toHaveLength(2);
-      for (const [index, route] of inserted.entries()) {
-        const concrete = `/base${paths[index].replace('[id]', '123')}`;
-        expect(headerValue(route, concrete)).toBe(concrete);
-        expect(route.dest).toBe(`/base${paths[index]}`);
-        expect(route.dest).not.toContain('?');
-        expect(route.has).toEqual(node.has);
-        expect(route.missing).toEqual(node.missing);
-      }
-      const plain = producerRoute('/api/[id]/data', '/base');
-      expect(routing.beforeDynamicRoute(plain)).toEqual([]);
-      const prefetch = getGoRouting(
-        [goOutput('/api/[id]/data.prefetch.rsc', '/base')],
-        { basePath: '/base' },
-        [node, producerRoute('/api/[id]/data.prefetch.rsc', '/base')]
-      );
-      expect(prefetch.beforeDynamicRoute(node)).toEqual([]);
-      const earlier = getGoRouting(
-        paths.map((source) => goOutput(source, '/base')),
-        { basePath: '/base' },
-        [...own, node]
-      );
-      expect(earlier.beforeDynamicRoute(node)).toEqual([]);
+  it.each([
+    ['/api/[id]/data.rsc', '/base/api/123/data.rsc'],
+    [
+      '/api/[id]/data.segments/piece.segment.rsc',
+      '/base/api/123/data.segments/piece.segment.rsc',
+    ],
+  ])(
+    'uses the producer matcher for a literal Go suffix artifact %s',
+    (pathname, concrete) => {
+      const routing = getGoRouting([goOutput(pathname, '/base')], {
+        basePath: '/base',
+      });
+      const supplied = producerGoRoute(pathname, '/base');
+      const route = required(routing.dynamicRoute(supplied));
+      expect(route.src).toBe(`(?<nextGoRoutePath>${supplied.sourceRegex})`);
+      expect(route.dest).toBe(supplied.destination);
+      expect(headerValue(route, concrete)).toBe(concrete);
+      expect(headerValue(route, `${concrete}.rsc`)).toBeUndefined();
     }
   );
-
-  it('captures a Go artifact targeted by a dedicated producer segment route', () => {
-    const output = goOutput('/api/[id]/data.segments/piece.segment.rsc');
-    const segment: DynamicRoute = {
-      source: '/api/[id]/data',
-      sourceRegex:
-        '^/api/(?<nxtPid>[^/]+?)/data\\.segments/piece\\.segment\\.rsc(?:/)?$',
-      destination: `${output.pathname}?nxtPid=$nxtPid`,
-    };
-    const routing = getGoRouting([output], {}, [
-      segment,
-      producerRoute(output.pathname),
-    ]);
-    const [inserted] = routing.beforeDynamicRoute(segment);
-    expect(
-      headerValue(inserted, '/api/123/data.segments/piece.segment.rsc')
-    ).toBe('/api/123/data.segments/piece.segment.rsc');
-    expect(inserted.dest).toBe(output.pathname);
-  });
 
   it.each([
     { basePath: '', reverse: false },
@@ -423,8 +409,8 @@ describe('adapter-generated Go route configuration', () => {
         '/café with space/100%',
         '/literal%20',
       ].map((route) => goOutput(route, '/base'));
-      const nodeRoute = producerRoute('/api/node/[slug]', '/base', form);
-      const nodeNeighbor = producerRoute(
+      const nodeRoute = producerNodeRoute('/api/node/[slug]', '/base', form);
+      const nodeNeighbor = producerNodeRoute(
         '/api/[id]/data',
         '/base',
         form === 'plain' ? 'rsc' : form
@@ -464,9 +450,9 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
       const nodeSource = path.join(root, 'app/api/node/[slug]/route.ts');
       await fs.mkdir(path.dirname(nodeSource), { recursive: true });
       await fs.writeFile(nodeSource, 'export function GET() {}');
-      const neighborSource = path.join(root, 'app/api/[id]/data/route.ts');
+      const neighborSource = path.join(root, 'app/api/[id]/data/page.tsx');
       await fs.mkdir(path.dirname(neighborSource), { recursive: true });
-      await fs.writeFile(neighborSource, 'export function GET() {}');
+      await fs.writeFile(neighborSource, 'export default function Page() {}');
       process.env.NEXT_ADAPTER_VERCEL_GO_PACKAGER_PATH = packagerPath;
       process.env.NEXT_ADAPTER_VERCEL_CONFIG = '{}';
       const context = {
@@ -484,13 +470,16 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
               runtime: 'nodejs',
               filePath: nodeSource,
             },
+          ],
+          appPages: [
             {
               ...goOutput('/api/[id]/data', '/base'),
+              type: 'APP_PAGE',
               runtime: 'nodejs',
+              sourcePage: '/api/[id]/data/page',
               filePath: neighborSource,
             },
           ],
-          appPages: [],
           pages: [],
           pagesApi: [],
           staticFiles: [
@@ -514,25 +503,28 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
           ],
           afterFiles: [],
           fallback: [],
+          // The producer owns conflicts between literal Go artifacts and
+          // synthetic Node suffix rules, including their final ordering.
           dynamicRoutes: [
+            producerGoRoute(
+              '/api/[id]/data.segments/piece.segment.rsc',
+              '/base'
+            ),
             nodeNeighbor,
             ...(form === 'plain'
-              ? [producerRoute('/api/[id]/data', '/base')]
+              ? [producerNodeRoute('/api/[id]/data', '/base')]
               : []),
-            ...routes
-              .slice(1)
-              .flatMap((route) => [
-                ...(form === 'plain'
-                  ? [producerRoute(route, '/base', 'rsc')]
-                  : []),
-                producerRoute(route, '/base', form),
-              ]),
+            ...routes.slice(1).map((route) => producerGoRoute(route, '/base')),
             nodeRoute,
           ],
           onMatch: [],
           shouldNormalizeNextData: false,
           rsc: {
             header: 'rsc',
+            prefetchHeader: 'next-router-prefetch',
+            prefetchSegmentHeader: 'next-router-segment-prefetch',
+            prefetchSegmentDirSuffix: '.segments',
+            prefetchSegmentSuffix: '.segment.rsc',
             varyHeader: 'rsc',
             contentTypeHeader: 'text/x-component',
           },
@@ -547,6 +539,34 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
         (route) => route.headers?.['x-matched-path'] === '$nextGoRoutePath'
       );
       expect(goRules).toHaveLength(5);
+      const suppliedRoutes = context.routing.dynamicRoutes.map((route) => ({
+        src: goOutputs.some(
+          (output) => output.pathname === route.destination?.split('?')[0]
+        )
+          ? `(?<nextGoRoutePath>${route.sourceRegex})`
+          : route.sourceRegex,
+        dest: route.destination,
+        check: true,
+      }));
+      const dynamicPhaseIndex = generated.routes.findIndex(
+        (route) => 'handle' in route && route.handle === 'rewrite'
+      );
+      expect(
+        generated.routes.slice(
+          dynamicPhaseIndex + 1,
+          dynamicPhaseIndex + 1 + suppliedRoutes.length
+        )
+      ).toEqual(
+        suppliedRoutes.map((route) =>
+          route.src.startsWith('(?<nextGoRoutePath>')
+            ? {
+                ...route,
+                headers: { 'x-matched-path': '$nextGoRoutePath' },
+                important: true,
+              }
+            : route
+        )
+      );
       expect(generated.routes).toContainEqual({
         src: nodeRoute.sourceRegex,
         dest: nodeRoute.destination,
@@ -561,6 +581,10 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
         )
       );
       expect(rewrite.dest).toBe('/base/api/items/$value?key=rewritten');
+      expect(rewrite.headers).toEqual({
+        'x-nextjs-rewritten-path': '/base/api/items/$value',
+        'x-nextjs-rewritten-query': 'key=rewritten',
+      });
       expect(itemsRule.dest).not.toContain('nxtP');
       const rewriteIndex = generated.routes.findIndex(
         (route) => 'handle' in route && route.handle === 'rewrite'
@@ -584,7 +608,7 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
       );
       expect(nodeSelected.dest).toBe(
         form === 'plain'
-          ? producerRoute('/api/[id]/data', '/base').destination
+          ? producerNodeRoute('/api/[id]/data', '/base').destination
           : nodeNeighbor.destination
       );
       const concrete = '/base/api/items/new%20value';

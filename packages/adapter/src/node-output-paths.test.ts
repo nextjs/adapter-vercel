@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import { posix as path, relative as relativeOnDisk } from 'node:path';
-import { AdapterOutputType } from 'next/dist/shared/lib/constants';
+import { AdapterOutputType } from 'next/constants';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type FuncOutputs, handleNodeOutputs } from './outputs';
 
