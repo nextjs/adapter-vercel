@@ -37,12 +37,12 @@ const WRAPPER_SOURCE = `export async function register() {
 type TracingConfig = {
   pageExtensions: readonly string[];
   outputFileTracingRoot: string;
-  injectInstrumentation?: string[];
+  instrumentationInject?: string[];
 };
 
 /**
  * Copies `@vercel/otel` from the build image into the project and adds a
- * wrapper to `injectInstrumentation`. `modifyConfig` decides whether default
+ * wrapper to `instrumentationInject`. `modifyConfig` decides whether default
  * tracing is enabled. Any failed check skips the inject without failing the
  * build.
  */
@@ -80,9 +80,9 @@ export async function injectDefaultTracing(
     const requireFromWrapper = createRequire(wrapper);
     for (const name of COPIED_PACKAGES) requireFromWrapper.resolve(name);
 
-    config.injectInstrumentation ??= [];
-    if (!config.injectInstrumentation.includes(INJECT_ENTRY)) {
-      config.injectInstrumentation.push(INJECT_ENTRY);
+    config.instrumentationInject ??= [];
+    if (!config.instrumentationInject.includes(INJECT_ENTRY)) {
+      config.instrumentationInject.push(INJECT_ENTRY);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

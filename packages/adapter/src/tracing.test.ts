@@ -21,7 +21,7 @@ const WRAPPER_SOURCE = `export async function register() {
 type TracingConfig = {
   pageExtensions: string[];
   outputFileTracingRoot?: string;
-  injectInstrumentation?: string[];
+  instrumentationInject?: string[];
 };
 
 describe('injectDefaultTracing', () => {
@@ -167,7 +167,7 @@ describe('injectDefaultTracing', () => {
     const { projectDir, packagesDir } = await readyProject();
     const tracingConfig = await inject(projectDir, packagesDir);
 
-    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
 
     const wrapper = path.join(otelRoot(projectDir), 'instrumentation.mjs');
     expect(await fs.readFile(wrapper, 'utf8')).toBe(WRAPPER_SOURCE);
@@ -223,7 +223,7 @@ describe('injectDefaultTracing', () => {
       JSON.stringify({ name: 'app', type: 'commonjs' })
     );
     const tracingConfig = await inject(projectDir, packagesDir);
-    const [entry] = tracingConfig.injectInstrumentation ?? [];
+    const [entry] = tracingConfig.instrumentationInject ?? [];
 
     // Node and webpack both read .js as CommonJS here, so a .js wrapper's
     // import/export would fail to parse.
@@ -249,7 +249,7 @@ describe('injectDefaultTracing', () => {
 
     const tracingConfig = await inject(projectDir, packagesDir);
 
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
+    expect(tracingConfig.instrumentationInject).toBeUndefined();
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
@@ -267,7 +267,7 @@ describe('injectDefaultTracing', () => {
       outputFileTracingRoot: projectDir,
     });
 
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
+    expect(tracingConfig.instrumentationInject).toBeUndefined();
     await expect(fs.stat(otelRoot(app))).rejects.toThrow();
   });
 
@@ -285,7 +285,7 @@ describe('injectDefaultTracing', () => {
       outputFileTracingRoot: app,
     });
 
-    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
   });
 
   it('does not inject when src/ has an instrumentation file', async () => {
@@ -298,7 +298,7 @@ describe('injectDefaultTracing', () => {
 
     const tracingConfig = await inject(projectDir, packagesDir);
 
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
+    expect(tracingConfig.instrumentationInject).toBeUndefined();
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
@@ -310,7 +310,7 @@ describe('injectDefaultTracing', () => {
       packagesDir,
     });
 
-    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
   });
 
   it.each([
@@ -325,7 +325,7 @@ describe('injectDefaultTracing', () => {
       packagesDir,
     });
 
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
+    expect(tracingConfig.instrumentationInject).toBeUndefined();
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
@@ -340,7 +340,7 @@ describe('injectDefaultTracing', () => {
       packagesDir: dir,
     });
 
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
+    expect(tracingConfig.instrumentationInject).toBeUndefined();
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
@@ -352,7 +352,7 @@ describe('injectDefaultTracing', () => {
 
     const tracingConfig = await inject(projectDir, packagesDir);
 
-    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
   });
 
   it.each(['1.10.0', '2.0.0', '1.9.0-rc.0'])(
@@ -367,7 +367,7 @@ describe('injectDefaultTracing', () => {
 
       const tracingConfig = await inject(projectDir, packagesDir);
 
-      expect(tracingConfig.injectInstrumentation).toBeUndefined();
+      expect(tracingConfig.instrumentationInject).toBeUndefined();
       await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
     }
   );
@@ -384,7 +384,7 @@ describe('injectDefaultTracing', () => {
 
       const tracingConfig = await inject(projectDir, packagesDir);
 
-      expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+      expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
     }
   );
 
@@ -394,7 +394,7 @@ describe('injectDefaultTracing', () => {
 
     const tracingConfig = await inject(projectDir, packagesDir);
 
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
+    expect(tracingConfig.instrumentationInject).toBeUndefined();
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
@@ -404,7 +404,7 @@ describe('injectDefaultTracing', () => {
 
     const tracingConfig = await inject(projectDir, packagesDir);
 
-    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
     const wrapper = path.join(otelRoot(projectDir), 'instrumentation.mjs');
     expect(
       await fs.realpath(createRequire(wrapper).resolve('@opentelemetry/api'))
@@ -433,7 +433,7 @@ describe('injectDefaultTracing', () => {
 
       const tracingConfig = await inject(projectDir, packagesDir);
 
-      expect(tracingConfig.injectInstrumentation).toBeUndefined();
+      expect(tracingConfig.instrumentationInject).toBeUndefined();
       await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
     }
   );
@@ -449,7 +449,7 @@ describe('injectDefaultTracing', () => {
 
     const tracingConfig = await inject(projectDir, packagesDir);
 
-    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
     const copiedApiLogs = path.join(
       otelRoot(projectDir),
       'node_modules',
@@ -481,19 +481,19 @@ describe('injectDefaultTracing', () => {
 
       const tracingConfig = await inject(projectDir, packagesDir);
 
-      expect(tracingConfig.injectInstrumentation).toBeUndefined();
+      expect(tracingConfig.instrumentationInject).toBeUndefined();
       await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
     }
   );
 
-  it('keeps existing injectInstrumentation entries', async () => {
+  it('keeps existing instrumentationInject entries', async () => {
     const { projectDir, packagesDir } = await readyProject();
     const tracingConfig = config();
-    tracingConfig.injectInstrumentation = ['./custom.js'];
+    tracingConfig.instrumentationInject = ['./custom.js'];
 
     await inject(projectDir, packagesDir, tracingConfig);
 
-    expect(tracingConfig.injectInstrumentation).toEqual([
+    expect(tracingConfig.instrumentationInject).toEqual([
       './custom.js',
       INJECT_ENTRY,
     ]);
@@ -535,7 +535,7 @@ describe('injectDefaultTracing', () => {
       'phase-development-server'
     );
 
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
+    expect(tracingConfig.instrumentationInject).toBeUndefined();
     await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
@@ -546,7 +546,7 @@ describe('injectDefaultTracing', () => {
 
     const tracingConfig = await inject(projectDir, packagesDir);
 
-    expect(tracingConfig.injectInstrumentation).toBeUndefined();
+    expect(tracingConfig.instrumentationInject).toBeUndefined();
   });
 
   it('does not add a second entry when called again', async () => {
@@ -554,6 +554,6 @@ describe('injectDefaultTracing', () => {
     const tracingConfig = await inject(projectDir, packagesDir);
     await inject(projectDir, packagesDir, tracingConfig);
 
-    expect(tracingConfig.injectInstrumentation).toEqual([INJECT_ENTRY]);
+    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
   });
 });
