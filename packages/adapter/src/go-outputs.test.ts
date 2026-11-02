@@ -8,7 +8,6 @@ import {
   type GoRouteOutput,
   handleGoOutputs,
 } from './go-outputs';
-import { GO_ROUTING_CONFIG } from './go-routing';
 import * as outputUtils from './outputs';
 import { getSourceFilePathFromPage, usesSrcDirectory } from './outputs';
 
@@ -187,7 +186,6 @@ describe('hosted Go route outputs', () => {
         `${route}.func`
       );
       expect(await readConfig(route)).toEqual({
-        environment: { NEXT_GO_ADAPTER_ROUTING: GO_ROUTING_CONFIG },
         runtime: 'executable',
         handler: 'executable',
         runtimeLanguage: 'go',

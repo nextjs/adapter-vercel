@@ -45,25 +45,17 @@ into a separate `.func` directory for each Go output. Asset destinations are
 relative to the function root, which is also the server's working directory.
 The `executable`, `user-server`, and `.vc-config.json` names are reserved.
 
-The adapter supplies `NEXT_GO_ADAPTER_ROUTING` through the function's
-environment with the generic runtime configuration
-`{"version":1,"pathHeader":"x-matched-path"}`. A compatible producer derives
-route parameters from this trusted, concrete escaped pathname while preserving
-the request URI forwarded by the platform for the handler. Vercel middleware
-can normalize query encoding before HTTP delivery, such as changing `+` to
-`%20`, while preserving the decoded query values. The platform strips client
-values of `x-matched-path`; Go routing rules set it after rewrites, including
-middleware rewrites. Dynamic Go routes do not use Node's internal parameter
-query transport, so encoded catch-all segment boundaries are preserved. The
-producer must reject missing or duplicate context headers when this mode is
-enabled and remove the context header before invoking user code.
-Next.js supplies plain Go routing matchers and destinations without synthetic
-RSC suffixes or Node parameter queries. It also orders concrete Go RSC/segment
-artifacts before conflicting synthetic Node branches. The adapter consumes that
-metadata and ordering directly and adds the Vercel trusted pathname header.
-This requires the matching Next.js producer changes in the Go proof of concept;
-older producers that emit Go suffix rules are unsupported. Existing same-name
-Go/non-Go function artifact collisions are still rejected during packaging.
+Go functions use the URL provided by Vercel. The Next.js executable derives
+parameters from that URL. This first version does not forward a separate matched
+or rewritten pathname, inject Go routing headers or environment settings, or
+change the runtime-visible request URL. Rewrites that require a different URL
+inside the Go handler are not supported yet.
+
+The adapter consumes Next.js routing matchers, destinations, conditions, and
+ordering directly, including its RSC suffix rules and parameter query metadata.
+It does not rebuild Next.js matchers or adjust producer routing semantics.
+Existing same-name Go/non-Go function artifact collisions are rejected during
+packaging.
 
 Go outputs do not participate in Node.js function grouping. Go route bundling,
 Go pages, middleware, prerender parents, arm64, and CGO/native dependencies are
