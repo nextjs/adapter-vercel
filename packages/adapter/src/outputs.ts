@@ -402,10 +402,6 @@ function resolveNextEnvLoaderPath(projectDir: string): string {
   return requireFromNext.resolve('@next/env');
 }
 
-function relativeFilesystemPath(from: string, to: string): string {
-  return path.relative(from, to).split(path.sep).join('/');
-}
-
 export async function handleNodeOutputs(
   nodeOutputs: FuncOutputs,
   {
@@ -437,17 +433,7 @@ export async function handleNodeOutputs(
 
   const fsSema = new Sema(16, { capacity: nodeOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
-  // Filesystem paths are native; function paths always use POSIX separators.
-  const relativeToRepoRootCache = new Map<string, string>();
-  const relativeToRepoRoot = (fsPath: string) => {
-    let relPath = relativeToRepoRootCache.get(fsPath);
-    if (relPath === undefined) {
-      relPath = relativeFilesystemPath(repoRoot, fsPath);
-      relativeToRepoRootCache.set(fsPath, relPath);
-    }
-    return relPath;
-  };
-  const handlerRelativeDir = relativeToRepoRoot(projectDir);
+  const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
 
   let pages404Output: undefined | FuncOutputs[0];
   let pagesErrorOutput: undefined | FuncOutputs[0];
@@ -471,7 +457,7 @@ export async function handleNodeOutputs(
     await writeDeterministicRoutesManifest(distDir);
 
   const routesManifestRelativePath = path.posix.join(
-    relativeToRepoRoot(distDir),
+    path.posix.relative(repoRoot, distDir),
     'routes-manifest.json'
   );
   const envFiles = await getProjectEnvFiles(projectDir);
@@ -482,7 +468,7 @@ export async function handleNodeOutputs(
 
   for (const envFile of envFiles) {
     envFilePathMap[path.posix.join(handlerRelativeDir, envFile)] =
-      relativeToRepoRoot(path.join(projectDir, envFile));
+      path.posix.relative(repoRoot, path.join(projectDir, envFile));
     envFileHashes[envFile] = sha256(
       await fs.readFile(path.join(projectDir, envFile))
     );
@@ -497,12 +483,12 @@ export async function handleNodeOutputs(
     }
 
     const nextEnvLoaderPath = resolveNextEnvLoaderPath(projectDir);
-    envFilePathMap[relativeToRepoRoot(nextEnvLoaderPath)] =
-      relativeToRepoRoot(nextEnvLoaderPath);
-    envFileHashes[relativeToRepoRoot(nextEnvLoaderPath)] = sha256(
+    envFilePathMap[path.posix.relative(repoRoot, nextEnvLoaderPath)] =
+      path.posix.relative(repoRoot, nextEnvLoaderPath);
+    envFileHashes[path.posix.relative(repoRoot, nextEnvLoaderPath)] = sha256(
       await fs.readFile(nextEnvLoaderPath)
     );
-    nextEnvLoaderPathRelativeToProjectDir = relativeFilesystemPath(
+    nextEnvLoaderPathRelativeToProjectDir = path.posix.relative(
       projectDir,
       nextEnvLoaderPath
     );
@@ -512,7 +498,7 @@ export async function handleNodeOutputs(
 
   // the launcher is the same for every function so only generate it once
   const handlerSource = getHandlerSource({
-    projectRelativeDistDir: relativeFilesystemPath(projectDir, distDir),
+    projectRelativeDistDir: path.posix.relative(projectDir, distDir),
     prerenderFallbackFalseMap,
     isMiddleware,
     nextConfig: config,
@@ -523,6 +509,17 @@ export async function handleNodeOutputs(
     handlerRelativeDir,
     '___next_launcher.cjs'
   );
+
+  // most assets are shared between functions so cache the relative paths
+  const relativeToRepoRootCache = new Map<string, string>();
+  const relativeToRepoRoot = (fsPath: string) => {
+    let relPath = relativeToRepoRootCache.get(fsPath);
+    if (relPath === undefined) {
+      relPath = path.posix.relative(repoRoot, fsPath);
+      relativeToRepoRootCache.set(fsPath, relPath);
+    }
+    return relPath;
+  };
 
   await Promise.all(
     nodeOutputs.map(async (output) => {
@@ -541,8 +538,8 @@ export async function handleNodeOutputs(
       for (const [relPath, fsPath] of Object.entries(output.assets)) {
         files[relPath] = relativeToRepoRoot(fsPath);
       }
-      const entrypointRelativePath = relativeToRepoRoot(output.filePath);
-      files[entrypointRelativePath] = entrypointRelativePath;
+      files[path.posix.relative(repoRoot, output.filePath)] =
+        path.posix.relative(repoRoot, output.filePath);
       if (hasProjectEnvFiles) {
         Object.assign(files, envFilePathMap);
         if (filesHashes) {
@@ -564,19 +561,21 @@ export async function handleNodeOutputs(
               filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
             }
           }
-          const notFoundRelativePath = relativeToRepoRoot(
+          const relPath = path.posix.relative(
+            repoRoot,
             notFoundOutput.filePath
           );
-          files[notFoundRelativePath] = notFoundRelativePath;
+          files[relPath] = relPath;
           if (filesHashes) {
-            filesHashes[notFoundRelativePath] =
-              notFoundOutput.assetsHashes?.[notFoundRelativePath];
+            filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
           }
         }
       }
 
-      files[routesManifestRelativePath] =
-        relativeToRepoRoot(routesManifestPath);
+      files[routesManifestRelativePath] = path.posix.relative(
+        repoRoot,
+        routesManifestPath
+      );
       if (filesHashes) {
         filesHashes[routesManifestRelativePath] = routesManifestHash;
       }
