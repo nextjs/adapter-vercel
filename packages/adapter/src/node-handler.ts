@@ -4,20 +4,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'http';
 import type { NextConfig } from 'next';
-
-// Only the manifest fields consumed by the generated Node launcher.
-type LauncherRoute = {
-  page: string;
-  regex: string;
-  namedRegex?: string;
-  routeKeys?: Record<string, string>;
-};
-
-type LauncherRoutesManifest = {
-  dynamicRoutes: LauncherRoute[];
-  staticRoutes: LauncherRoute[];
-  i18n?: NextConfig['i18n'];
-};
+import type { RoutesManifest } from 'next/dist/build';
 
 export const getHandlerSource = (ctx: {
   // relative to launcher file
@@ -123,7 +110,7 @@ export const getHandlerSource = (ctx: {
             i18n,
           } = require(
             `./${path.posix.join(relativeDistDir, 'routes-manifest.json')}`
-          ) as LauncherRoutesManifest;
+          ) as RoutesManifest;
 
           const matchOperatorsRegex = /[|\\{}()[\]^$+*?.-]/g;
 

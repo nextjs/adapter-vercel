@@ -10,6 +10,7 @@ import { Sema } from 'async-sema';
 import fse from 'fs-extra';
 import type { AdapterOutput, NextConfig } from 'next';
 import { AdapterOutputType } from 'next/constants';
+import type { RoutesManifest } from 'next/dist/build';
 import type { NextjsParams } from './get-edge-function-source';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { getHandlerSource } from './node-handler';
@@ -343,12 +344,9 @@ export type FuncOutputs = Array<
  * Vercel).
  */
 async function writeDeterministicRoutesManifest(distDir: string) {
-  // Keep this JSON opaque apart from the fields normalized for deduplication.
-  const manifest = require(path.join(distDir, 'routes-manifest.json')) as {
-    headers: unknown[];
-    onMatchHeaders?: unknown[];
-    deploymentId?: string;
-  };
+  const manifest: RoutesManifest = require(
+    path.join(distDir, 'routes-manifest.json')
+  );
 
   manifest.headers = [];
   manifest.onMatchHeaders = [];
