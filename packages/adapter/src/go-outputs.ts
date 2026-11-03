@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getLambdaOptionsFromFunction } from '@vercel/build-utils';
-import type { AdapterOutput, NextConfig } from 'next';
+import type { AdapterOutput, NextAdapter, NextConfig } from 'next';
 import { AdapterOutputType } from 'next/constants';
 import {
   getSourceFilePathFromPage,
@@ -9,20 +9,14 @@ import {
   usesSrcDirectory,
 } from './outputs';
 
-/** Proposed producer contract for the hosted Go route-handler proof of concept. */
+/** Temporary runtime widening until Next.js publishes the Go output types. */
 export type GoRouteOutput = Omit<AdapterOutput['APP_ROUTE'], 'runtime'> & {
   runtime: 'go';
 };
 
-type OutputCollections = {
-  appRoutes: readonly unknown[];
-  appPages: readonly unknown[];
-  pages: readonly unknown[];
-  pagesApi: readonly unknown[];
-  staticFiles: readonly unknown[];
-  middleware?: unknown;
-  prerenders: readonly { parentOutputId: string }[];
-};
+type BuildOutputs = Parameters<
+  NonNullable<NextAdapter['onBuildComplete']>
+>[0]['outputs'];
 
 type PreparedGoFunction = {
   files: Record<string, { fsPath: string; mode: number }>;
@@ -164,20 +158,24 @@ function assertGoRouteOutput(value: unknown): asserts value is GoRouteOutput {
 }
 
 /** Validate before any output is materialized; Node/Edge retain their existing paths. */
-export function collectGoRouteOutputs(
-  outputs: OutputCollections
-): GoRouteOutput[] {
+export function collectGoRouteOutputs(outputs: BuildOutputs): GoRouteOutput[] {
   const goOutputs: GoRouteOutput[] = [];
-  const collections = {
-    appRoutes: outputs.appRoutes,
-    appPages: outputs.appPages,
-    pages: outputs.pages,
-    pagesApi: outputs.pagesApi,
-    staticFiles: outputs.staticFiles,
-    middleware: outputs.middleware ? [outputs.middleware] : [],
-  };
-  for (const [kind, entries] of Object.entries(collections)) {
-    for (const output of entries) {
+  for (const kind of [
+    'appRoutes',
+    'appPages',
+    'pages',
+    'pagesApi',
+    'staticFiles',
+    'middleware',
+  ] as const) {
+    const entries =
+      kind === 'middleware'
+        ? outputs.middleware
+          ? [outputs.middleware]
+          : []
+        : outputs[kind];
+    for (const candidate of entries) {
+      const output: unknown = candidate;
       if (!isRecord(output) || !('runtime' in output)) continue;
       if (output.runtime === 'nodejs' || output.runtime === 'edge') continue;
       if (output.runtime !== 'go') {
@@ -201,9 +199,7 @@ export function collectGoRouteOutputs(
     goIds.add(output.id);
   }
   if (outputs.prerenders.some((output) => goIds.has(output.parentOutputId))) {
-    throw new Error(
-      'Go route outputs cannot be prerender parents in this proof of concept'
-    );
+    throw new Error('Go route outputs cannot be prerender parents');
   }
   return goOutputs;
 }
@@ -264,9 +260,7 @@ function preferredRegions(
   const regions =
     typeof preferredRegion === 'string' ? [preferredRegion] : preferredRegion;
   if (regions.includes('global')) {
-    throw new Error(
-      'Go preferredRegion="global" is unsupported in this proof of concept'
-    );
+    throw new Error('Go preferredRegion="global" is unsupported');
   }
   if (regions.includes('auto')) return undefined;
   const normalized = regions.flatMap((region) =>
