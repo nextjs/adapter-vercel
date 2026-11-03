@@ -10,8 +10,8 @@ import adapter from './index';
 type BuildContext = Parameters<NonNullable<NextAdapter['onBuildComplete']>>[0];
 type DynamicRoute = BuildContext['routing']['dynamicRoutes'][number];
 
-// Literal routing tables captured from the unchanged Next.js producer. The
-// conditions exercise the same public contract without generating matchers.
+// Matcher shapes captured from the unchanged Next.js producer. The additional
+// conditions and query entries exercise preservation without generating matchers.
 const producerRoutes: Record<'split' | 'collapsed', DynamicRoute[]> = {
   split: [
     {
@@ -47,7 +47,8 @@ const producerRoutes: Record<'split' | 'collapsed', DynamicRoute[]> = {
     {
       source: '/native/[id]',
       sourceRegex: '^/base[/]?/native/(?<nxtPid>[^/]+?)(?:/)?$',
-      destination: '/base/native/[id]?nxtPid=$nxtPid',
+      destination:
+        '/base/native/[id]?keep=one&nxtPid=$nxtPid&key=one&nxtIid=$nxtPid&key=two&encoded=%2F%24nxtPid%3F&capture=$nxtPid&nxtIextra=$nxtPid',
     },
     {
       source: '/node/[id].rsc',
@@ -70,6 +71,20 @@ const producerRoutes: Record<'split' | 'collapsed', DynamicRoute[]> = {
       source: '/optional/[[...slug]]',
       sourceRegex: '^/base[/]?/optional(?:/(?<nxtPslug>.+?))?(?:/)?$',
       destination: '/base/optional/[[...slug]]?nxtPslug=$nxtPslug',
+    },
+    {
+      source: '/node/[id]',
+      sourceRegex:
+        '^/base[/]?/node/(?<nxtPid>[^/]+?)\\.segments/(?<segmentPath>.+?)\\.segment\\.rsc(?:/)?$',
+      destination:
+        '/base/node/[id].segments/$segmentPath.segment.rsc?nxtPid=$nxtPid',
+    },
+    {
+      source: '/node/[id].segments/[...slug]',
+      sourceRegex:
+        '^/base[/]?/node/(?<nxtPid>[^/]+?)\\.segments/(?<nxtPslug>.+?)(?:/)?$',
+      destination:
+        '/base/node/[id].segments/[...slug]?nxtPid=$nxtPid&nxtPslug=$nxtPslug',
     },
   ],
   collapsed: [
@@ -96,7 +111,8 @@ const producerRoutes: Record<'split' | 'collapsed', DynamicRoute[]> = {
       source: '/native/[id]',
       sourceRegex:
         '^/base[/]?/native/(?<nxtPid>[^/]+?)(\\.rsc|\\.segments/.+\\.segment\\.rsc|)(?:/)?$',
-      destination: '/base/native/[id]$2?nxtPid=$nxtPid',
+      destination:
+        '/base/native/[id]$2?keep=one&nxtPid=$nxtPid&key=one&nxtIid=$nxtPid&key=two&encoded=%2F%24nxtPid%3F&capture=$nxtPid&nxtIextra=$nxtPid',
     },
     {
       source: '/node/[id]',
@@ -110,6 +126,35 @@ const producerRoutes: Record<'split' | 'collapsed', DynamicRoute[]> = {
         '^/base[/]?/optional(?:/(?<nxtPslug>.+?))?(\\.rsc|\\.segments/.+\\.segment\\.rsc|)(?:/)?$',
       destination: '/base/optional/[[...slug]]$2?nxtPslug=$nxtPslug',
     },
+    {
+      source: '/node/[id].segments/[...slug]',
+      sourceRegex:
+        '^/base[/]?/node/(?<nxtPid>[^/]+?)\\.segments/(?<nxtPslug>.+?)(?:/)?$',
+      destination:
+        '/base/node/[id].segments/[...slug]?nxtPid=$nxtPid&nxtPslug=$nxtPslug',
+    },
+  ],
+};
+
+const expectedDestinations: Record<'split' | 'collapsed', string[]> = {
+  split: [
+    '/base/catch/[...slug]$2',
+    '/base/catch/[...slug]',
+    '/base/native/[id]$2',
+    '/base/native/[id]?keep=one&key=one&key=two&encoded=%2F%24nxtPid%3F&capture=$nxtPid',
+    '/base/node/[id]$2?nxtPid=$nxtPid',
+    '/base/node/[id]?nxtPid=$nxtPid',
+    '/base/optional/[[...slug]]$2',
+    '/base/optional/[[...slug]]',
+    '/base/node/[id].segments/$segmentPath.segment.rsc?nxtPid=$nxtPid',
+    '/base/node/[id].segments/[...slug]',
+  ],
+  collapsed: [
+    '/base/catch/[...slug]$2',
+    '/base/native/[id]$2?keep=one&key=one&key=two&encoded=%2F%24nxtPid%3F&capture=$nxtPid',
+    '/base/node/[id]$2?nxtPid=$nxtPid',
+    '/base/optional/[[...slug]]$2',
+    '/base/node/[id].segments/[...slug]',
   ],
 };
 
@@ -119,7 +164,7 @@ function goOutput(pathname: string, filePath: string): GoRouteOutput {
     runtime: 'go',
     id: pathname,
     pathname: `/base${pathname}`,
-    sourcePage: `${pathname}/route`,
+    sourcePage: `/(group)${pathname}/route`,
     filePath,
     assets: {},
     assetsHashes: {},
@@ -147,9 +192,13 @@ describe('adapter-generated mixed Go and Node routing', () => {
     );
   });
 
-  it.each(['split', 'collapsed'] as const)(
-    'preserves producer matchers, destinations, conditions and ordering (%s)',
-    async (form) => {
+  it.each([
+    ['split', false],
+    ['collapsed', false],
+    ['split', true],
+  ] as const)(
+    'omits Go destination parameters and preserves producer matching and Node routing (%s, Node RSC output=%s)',
+    async (form, hasNodeRscOutput) => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), 'go-routing-'));
       roots.push(root);
       const distDir = path.join(root, '.next');
@@ -188,6 +237,7 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
         '/native/[id]',
         '/catch/[...slug]',
         '/optional/[[...slug]]',
+        '/node/[id].segments/[...slug]',
         '/static-go',
       ].map((pathname) => goOutput(pathname, binaryPath));
       for (const output of goOutputs) {
@@ -262,6 +312,20 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
           },
         },
       } as unknown as BuildContext;
+      if (hasNodeRscOutput) {
+        const sourcePage = '/native/[id].rsc/page';
+        const source = path.join(root, 'app', `${sourcePage}.tsx`);
+        await fs.mkdir(path.dirname(source), { recursive: true });
+        await fs.writeFile(source, 'export default function Page() {}');
+        const nodeOutput = context.outputs.appPages[0];
+        if (!nodeOutput) throw new Error('Expected Node output');
+        context.outputs.appPages.push({
+          ...nodeOutput,
+          id: '/native/[id].rsc',
+          pathname: '/base/native/[id].rsc',
+          sourcePage,
+        });
+      }
       if (!adapter.onBuildComplete) throw new Error('Expected build hook');
       await adapter.onBuildComplete(context);
       const generated = JSON.parse(
@@ -278,10 +342,14 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
         rewriteIndex + 1,
         hitIndex
       );
+      const destinations = [...expectedDestinations[form]];
+      if (hasNodeRscOutput) {
+        destinations[2] = '/base/native/[id]$2?nxtPid=$nxtPid';
+      }
       expect(emittedDynamicRoutes).toEqual(
-        dynamicRoutes.map((route) => ({
+        dynamicRoutes.map((route, index) => ({
           src: route.sourceRegex,
-          dest: route.destination,
+          dest: destinations[index],
           check: true,
           ...(route.has ? { has: route.has } : {}),
           ...(route.missing ? { missing: route.missing } : {}),
@@ -295,14 +363,22 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
       }
       // Numeric suffix references retain their capture positions, and the
       // supplied matcher keeps percent-encoded catch-all values untouched.
-      expect(emittedDynamicRoutes[0].dest).toBe(
-        '/base/catch/[...slug]$2?nxtPslug=$nxtPslug'
-      );
+      expect(emittedDynamicRoutes[0].dest).toBe('/base/catch/[...slug]$2');
       const match = new RegExp(emittedDynamicRoutes[0].src).exec(
         '/base/catch/one%2Ftwo/three%20four.rsc'
       );
       expect(match?.groups?.nxtPslug).toBe('one%2Ftwo/three%20four');
       expect(match?.[2]).toBe('.rsc');
+      const matchingDestination = (pathname: string) =>
+        emittedDynamicRoutes.find((route) =>
+          new RegExp(route.src).test(pathname)
+        )?.dest;
+      expect(
+        matchingDestination('/base/node/123.segments/piece.segment.rsc')
+      ).toBe('/base/node/[id]$2?nxtPid=$nxtPid');
+      expect(matchingDestination('/base/node/123.segments/piece.txt')).toBe(
+        '/base/node/[id].segments/[...slug]'
+      );
       const hitEnd = generated.routes.findIndex(
         (route, index) => index > hitIndex && 'handle' in route
       );

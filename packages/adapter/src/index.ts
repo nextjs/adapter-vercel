@@ -21,6 +21,7 @@ import {
   modifyWithRewriteHeaders,
   normalizeNextDataRoutes,
   normalizeRewrites,
+  removeGoRouteParams,
 } from './routing';
 import { generateToolbarScript } from './toolbar';
 import type { VercelConfig } from './types';
@@ -303,6 +304,10 @@ const myAdapter: NextAdapter = {
     const onMatchRoutes = extractOnMatchRoutes(routing);
 
     const dynamicRoutes: RouteWithSrc[] = [];
+    const goPathnames = new Set(goOutputs.map((output) => output.pathname));
+    const otherPathnames = new Set(
+      [...nodeOutputs, ...edgeOutputs].map((output) => output.pathname)
+    );
     let addedNextData404Route = false;
 
     for (const route of routing.dynamicRoutes) {
@@ -323,9 +328,21 @@ const myAdapter: NextAdapter = {
         }
       }
 
+      const sourcePath = route.source
+        ? path.posix.join('/', config.basePath || '', route.source)
+        : undefined;
+      // The producer also emits an RSC-suffixed rule for each App Router route.
+      const isGoRoute =
+        sourcePath &&
+        (goPathnames.has(sourcePath) ||
+          (!otherPathnames.has(sourcePath) &&
+            sourcePath.endsWith('.rsc') &&
+            goPathnames.has(sourcePath.slice(0, -4))));
       dynamicRoutes.push({
         src: route.sourceRegex,
-        dest: route.destination,
+        dest: isGoRoute
+          ? removeGoRouteParams(route.destination)
+          : route.destination,
         check: true,
         has: route.has,
         missing: route.missing,

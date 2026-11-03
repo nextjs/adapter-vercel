@@ -7,6 +7,29 @@ type AdapterRouting = Parameters<
 
 type AdapterRoute = AdapterRouting['beforeFiles'][0];
 
+/** Go handlers derive route parameters from the supplied pathname. */
+export function removeGoRouteParams(
+  destination: string | undefined
+): string | undefined {
+  if (!destination) return destination;
+  const queryIndex = destination.indexOf('?');
+  if (queryIndex === -1) return destination;
+  const hashIndex = destination.indexOf('#', queryIndex);
+  const queryEnd = hashIndex === -1 ? destination.length : hashIndex;
+  const params = destination.slice(queryIndex + 1, queryEnd).split('&');
+  const remaining = params.filter((param) => {
+    const key = param.split('=')[0];
+    return !key.startsWith('nxtP') && !key.startsWith('nxtI');
+  });
+  if (remaining.length === params.length) return destination;
+  const query = remaining.join('&');
+  return (
+    destination.slice(0, queryIndex) +
+    (query ? `?${query}` : '') +
+    destination.slice(queryEnd)
+  );
+}
+
 export function modifyWithRewriteHeaders(
   rewrites: RouteWithSrc[],
   {
