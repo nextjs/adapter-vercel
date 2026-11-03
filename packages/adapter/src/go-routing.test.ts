@@ -181,8 +181,6 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
     executable: { fsPath: userServerPath, mode: 0o755 },
     'user-server': { fsPath: userServerPath, mode: 0o755 },
   },
-  config: { runtime: 'executable', handler: 'executable', runtimeLanguage: 'go',
-    architecture: 'x86_64', supportsResponseStreaming: true },
 });`
         ),
       ]);

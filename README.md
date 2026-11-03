@@ -33,17 +33,17 @@ The adapter resolves the existing `sourcePage` to an App Router `route.go` file,
 using the same source resolver as Node.js with Go-aware extension handling and
 `src/app` detection. That resolved path is used for per-function configuration.
 The host validates the precompiled binary against the proof of concept's fixed
-static Linux x86_64 requirement, and architecture overrides must agree with the
-host's executable configuration.
+static Linux x86_64 requirement, and architecture overrides must be `x86_64`.
 
 A compatible `@vercel/next` host must supply
 `NEXT_ADAPTER_VERCEL_GO_PACKAGER_PATH`, an absolute CommonJS module path. Version
 1 of that module exports `version = 1` and
-`prepareGoFunction({ userServerPath })`, returning executable file descriptors
-and runtime metadata. The adapter copies the server, proxy, and declared assets
-into a separate `.func` directory for each Go output. Asset destinations are
-relative to the function root, which is also the server's working directory.
-The `executable`, `user-server`, and `.vc-config.json` names are reserved.
+`prepareGoFunction({ userServerPath })`, returning file descriptors for the
+executable proxy and user server. The adapter sets Vercel's executable runtime
+configuration and copies the server, proxy, and declared assets into a separate
+`.func` directory for each Go output. Asset destinations are relative to the
+function root, which is also the server's working directory. The `executable`,
+`user-server`, and `.vc-config.json` names are reserved.
 
 Go functions use the URL provided by Vercel. The Next.js executable derives
 parameters from that URL. This first version does not forward a separate matched

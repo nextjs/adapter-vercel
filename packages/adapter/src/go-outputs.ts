@@ -26,13 +26,6 @@ type OutputCollections = {
 
 type PreparedGoFunction = {
   files: Record<string, { fsPath: string; mode: number }>;
-  config: {
-    runtime: 'executable';
-    handler: 'executable';
-    runtimeLanguage: 'go';
-    architecture: 'x86_64';
-    supportsResponseStreaming: true;
-  };
 };
 
 type GoPackager = {
@@ -238,7 +231,7 @@ function loadGoPackager(): GoPackager {
 function assertPreparedGoFunction(
   value: unknown
 ): asserts value is PreparedGoFunction {
-  if (!isRecord(value) || !isRecord(value.files) || !isRecord(value.config)) {
+  if (!isRecord(value) || !isRecord(value.files)) {
     throw new Error('Invalid Go packager response');
   }
   if (
@@ -261,18 +254,6 @@ function assertPreparedGoFunction(
         'Go packager files must have absolute paths and mode 0755'
       );
     }
-  }
-  const config = value.config;
-  if (
-    config.runtime !== 'executable' ||
-    config.handler !== 'executable' ||
-    config.runtimeLanguage !== 'go' ||
-    config.architecture !== 'x86_64' ||
-    config.supportsResponseStreaming !== true
-  ) {
-    throw new Error(
-      'Invalid Go executable runtime configuration from host packager'
-    );
   }
 }
 
@@ -413,10 +394,7 @@ export async function handleGoOutputs(
       userServerPath: output.filePath,
     });
     assertPreparedGoFunction(prepared);
-    if (
-      overrides.architecture &&
-      overrides.architecture !== prepared.config.architecture
-    ) {
+    if (overrides.architecture && overrides.architecture !== 'x86_64') {
       throw new Error(
         `Go target architecture conflicts with function configuration for ${sourceFile}`
       );
@@ -448,11 +426,11 @@ export async function handleGoOutputs(
       // Deliberately omit Node launcher, multipayload and bundling properties.
       const functionConfig = {
         ...overrides,
-        runtime: prepared.config.runtime,
-        handler: prepared.config.handler,
-        runtimeLanguage: prepared.config.runtimeLanguage,
-        architecture: prepared.config.architecture,
-        supportsResponseStreaming: prepared.config.supportsResponseStreaming,
+        runtime: 'executable',
+        handler: 'executable',
+        runtimeLanguage: 'go',
+        architecture: 'x86_64',
+        supportsResponseStreaming: true,
         maxDuration: output.config.maxDuration ?? overrides.maxDuration,
         regions:
           overrides.regions ?? preferredRegions(output.config.preferredRegion),

@@ -123,10 +123,6 @@ describe('hosted Go route outputs', () => {
           executable: { fsPath: ${JSON.stringify(proxyPath)}, mode: 0o755 },
           'user-server': { fsPath: userServerPath, mode: 0o755 },
         },
-        config: {
-          runtime: 'executable', handler: 'executable', runtimeLanguage: 'go',
-          architecture: 'x86_64', supportsResponseStreaming: true,
-        },
       });
       ${extraSource}
     `
@@ -612,14 +608,31 @@ describe('hosted Go route outputs', () => {
     await expect(handle([output()])).rejects.toThrow('protocol version 1');
   });
 
-  it('rejects invalid host runtime metadata', async () => {
+  it.each([
+    {
+      description: 'a missing user server',
+      mutation: "delete result.files['user-server'];",
+      error: 'Go packager must provide executable and user-server files',
+    },
+    {
+      description: 'a relative executable path',
+      mutation: "result.files.executable.fsPath = 'relative-proxy';",
+      error: 'Go packager files must have absolute paths and mode 0755',
+    },
+    {
+      description: 'non-executable server permissions',
+      mutation: "result.files['user-server'].mode = 0o644;",
+      error: 'Go packager files must have absolute paths and mode 0755',
+    },
+  ])('rejects host files with $description', async ({ mutation, error }) => {
     await writePackager(`const prepare = exports.prepareGoFunction;
       exports.prepareGoFunction = async (options) => {
-        const result = await prepare(options); result.config.runtime = 'nodejs24.x'; return result;
+        const result = await prepare(options); ${mutation} return result;
       };`);
-    await expect(handle([output()])).rejects.toThrow(
-      'Invalid Go executable runtime configuration'
-    );
+    await expect(handle([output()])).rejects.toThrow(error);
+    await expect(
+      fs.stat(path.join(vercelOutputDir, 'functions/api/hello.func'))
+    ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('cleans up staged files when a later required asset is missing', async () => {
