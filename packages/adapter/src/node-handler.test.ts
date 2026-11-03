@@ -317,3 +317,105 @@ describe('node handler route captures', () => {
     expect(invocation.url).toBe(url);
   });
 });
+
+describe('node handler proxy loading', () => {
+  const originalCwd = process.cwd();
+  const originalNodeEnv = process.env.NODE_ENV;
+  const projectDirs: string[] = [];
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+    delete (globalThis as { __proxyLoads?: number }).__proxyLoads;
+
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+
+    await Promise.all(
+      projectDirs
+        .splice(0)
+        .map((projectDir) =>
+          fs.rm(projectDir, { recursive: true, force: true })
+        )
+    );
+  });
+
+  async function setupProxy(proxySource: string) {
+    const projectDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'adapter-node-handler-proxy-')
+    );
+    projectDirs.push(projectDir);
+
+    await fs.mkdir(path.join(projectDir, '.next', 'server'), {
+      recursive: true,
+    });
+    await fs.mkdir(path.join(projectDir, 'node_modules', 'next'), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(projectDir, '.next', 'server', 'middleware.js'),
+      proxySource
+    );
+    await fs.writeFile(
+      path.join(projectDir, 'node_modules', 'next', 'package.json'),
+      JSON.stringify({ name: 'next', main: 'setup-node-env.js' })
+    );
+    await fs.writeFile(
+      path.join(projectDir, 'node_modules', 'next', 'setup-node-env.js'),
+      ''
+    );
+
+    const launcherPath = path.join(projectDir, 'launcher.cjs');
+    await fs.writeFile(
+      launcherPath,
+      getHandlerSource({
+        projectRelativeDistDir: '.next',
+        prerenderFallbackFalseMap: {},
+        isMiddleware: true,
+      })
+    );
+
+    return () =>
+      require(launcherPath) as (request: Request) => Promise<Response>;
+  }
+
+  it('loads the proxy when the function initializes', async () => {
+    const loadLauncher = await setupProxy(
+      `globalThis.__proxyLoads = (globalThis.__proxyLoads || 0) + 1;
+      module.exports.handler = async () => new Response('from proxy');`
+    );
+
+    const handler = loadLauncher();
+    expect((globalThis as { __proxyLoads?: number }).__proxyLoads).toBe(1);
+
+    const response = await handler(new Request('https://example.test/'));
+    expect(await response.text()).toBe('from proxy');
+    expect((globalThis as { __proxyLoads?: number }).__proxyLoads).toBe(1);
+  });
+
+  it('reports a proxy that fails to load on the request instead of on initialization', async () => {
+    const loadLauncher = await setupProxy(
+      `throw new Error('proxy failed to load');`
+    );
+
+    const handler = loadLauncher();
+
+    await expect(handler(new Request('https://example.test/'))).rejects.toThrow(
+      'proxy failed to load'
+    );
+  });
+
+  it('reports an async proxy that fails to load on the request', async () => {
+    const loadLauncher = await setupProxy(
+      `module.exports = Promise.reject(new Error('async proxy failed to load'));`
+    );
+
+    const handler = loadLauncher();
+
+    await expect(handler(new Request('https://example.test/'))).rejects.toThrow(
+      'async proxy failed to load'
+    );
+  });
+});

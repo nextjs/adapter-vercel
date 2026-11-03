@@ -1,5 +1,13 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.35
+
+### Patch Changes
+
+- [#138](https://github.com/nextjs/adapter-vercel/pull/138) [`069914a`](https://github.com/nextjs/adapter-vercel/commit/069914ad63e72b69e9ac2e329fad540c610768ab) Thanks [@mischnic](https://github.com/mischnic)! - Don't throw from the Vercel Toolbar script inside sandboxed iframes
+
+- [#135](https://github.com/nextjs/adapter-vercel/pull/135) [`1528d4d`](https://github.com/nextjs/adapter-vercel/commit/1528d4d8a24e5e2b8d0dc73a9fe5c0cfe1ff7a21) Thanks [@andrewimm](https://github.com/andrewimm)! - Avoid repeated work per function when writing Node.js function outputs
+
 ## 0.0.1-beta.34
 
 ### Patch Changes

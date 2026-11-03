@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import { posix as path, relative as relativeOnDisk } from 'node:path';
@@ -84,7 +85,10 @@ describe('Node output Windows filesystem paths', () => {
         assets: {
           'fallback-data.txt': path.join(repoRoot, 'shared/fallback.txt'),
         },
-        assetsHashes: { 'fallback-data.txt': 'fallback-asset-hash' },
+        assetsHashes: {
+          'fallback-data.txt': 'fallback-asset-hash',
+          'apps/web/.output/next/server/pages/404.js': 'not-found-entry-hash',
+        },
         config: {},
       },
     ];
@@ -139,9 +143,13 @@ describe('Node output Windows filesystem paths', () => {
     expect(config.fileHashes).toMatchObject({
       'app-data/message.txt': 'hello-asset-hash',
       'fallback-data.txt': 'fallback-asset-hash',
+      'apps/web/.output/next/server/pages/404.js': 'not-found-entry-hash',
       'node_modules/@next/env/index.js': expect.any(String),
       'apps/web/.output/next/routes-manifest.json': expect.any(String),
     });
+    for (const hashPath of Object.keys(config.fileHashes)) {
+      expect(hashPath).not.toMatch(/\\|^(?:\/|[A-Za-z]:|\.\.(?:\/|$))/);
+    }
     for (const [destination, source] of Object.entries(config.filePathMap)) {
       for (const location of [destination, source]) {
         expect(location).not.toMatch(/\\|^(?:\/|[A-Za-z]:|\.\.(?:\/|$))/);
@@ -165,6 +173,10 @@ describe('Node output Windows filesystem paths', () => {
       path.join(functionDir, config.handler),
       'utf8'
     );
+    expect(config.fileHashes[config.handler]).toBe(
+      createHash('sha256').update(launcher).digest('hex')
+    );
+    expect(config.fileHashes).not.toHaveProperty('___next_launcher.cjs');
     expect(launcher).toContain('".output/next"');
     expect(launcher).toContain('"../../node_modules/@next/env/index.js"');
   });
