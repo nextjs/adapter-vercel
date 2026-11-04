@@ -51,15 +51,17 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+	stopProfile := startProfile()
+	defer stopProfile()
 	var req request
-	check(json.NewDecoder(os.Stdin).Decode(&req))
+	profilePhase("decode", func() { check(json.NewDecoder(os.Stdin).Decode(&req)) })
 	if req.Version != 1 {
 		panic(fmt.Errorf("unsupported adapter protocol %d", req.Version))
 	}
 	if req.DistDir == "" || req.ProjectDir == "" || req.RepoRoot == "" {
 		panic("adapter paths must be provided")
 	}
-	build(req)
+	profilePhase("build", func() { build(req) })
 }
 
 func check(err error) {

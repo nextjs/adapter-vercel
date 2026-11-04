@@ -78,6 +78,11 @@ const adapter: NextAdapter = {
       ),
       functionRules,
     };
+    const prepared = performance.now();
+    let serializationMs = 0;
+    let requestBytes: number | undefined;
+    let spawnedUnixMs = 0;
+    let childPid: number | undefined;
     const binary =
       process.env.NEXT_ADAPTER_GO_BINARY ||
       path.join(
@@ -86,9 +91,11 @@ const adapter: NextAdapter = {
         `adapter-vercel-${process.platform}-${process.arch}`
       );
     await new Promise<void>((resolve, reject) => {
+      spawnedUnixMs = Date.now();
       const child = spawn(binary, [], {
         stdio: ['pipe', 'inherit', 'inherit'],
       });
+      childPid = child.pid;
       const cancel = () => child.kill('SIGTERM');
       process.once('SIGTERM', cancel);
       process.once('SIGINT', cancel);
@@ -109,11 +116,16 @@ const adapter: NextAdapter = {
         // The close event reports a binary failure; EPIPE is its consequence.
         if ((err as NodeJS.ErrnoException).code !== 'EPIPE') reject(err);
       });
-      child.stdin.end(JSON.stringify(request));
+      const serializationStarted = performance.now();
+      const payload = JSON.stringify(request);
+      serializationMs = performance.now() - serializationStarted;
+      if (process.env.NEXT_ADAPTER_GO_PROFILE === '1')
+        requestBytes = Buffer.byteLength(payload);
+      child.stdin.end(payload);
     });
     if (process.env.NEXT_NATIVE_BUILD_TIMINGS === '1') {
       console.log(
-        `[adapter-benchmark] ${JSON.stringify({ implementation: 'go', durationMs: performance.now() - started })}`
+        `[adapter-benchmark] ${JSON.stringify({ implementation: 'go', durationMs: performance.now() - started, preparationMs: prepared - started, serializationMs, requestBytes, spawnedUnixMs, childPid, profiled: process.env.NEXT_ADAPTER_GO_PROFILE === '1' })}`
       );
     }
   },

@@ -45,8 +45,8 @@ func build(req request) {
 	a.hasApp = len(arr(req.Outputs["appPages"]))+len(arr(req.Outputs["appRoutes"])) > 0
 	a.hasPages = len(arr(req.Outputs["pages"]))+len(arr(req.Outputs["pagesApi"])) > 0
 	a.hasMiddleware = req.Outputs["middleware"] != nil
-	a.publicFiles()
-	a.staticFiles()
+	profilePhase("public", func() { a.publicFiles() })
+	profilePhase("static", func() { a.staticFiles() })
 	nodes, edges := []any{}, []any{}
 	for _, key := range []string{"appPages", "appRoutes", "pages", "pagesApi", "staticFiles"} {
 		for _, v := range arr(req.Outputs[key]) {
@@ -86,7 +86,7 @@ func build(req request) {
 			a.has500 = true
 		}
 	}
-	a.edgeOutputs(edges)
+	profilePhase("edge", func() { a.edgeOutputs(edges) })
 	base := str(req.Config["basePath"])
 	for _, v := range arr(req.Outputs["prerenders"]) {
 		o := obj(v)
@@ -129,10 +129,12 @@ func build(req request) {
 			middlewareRoutes = append(middlewareRoutes, r)
 		}
 	}
-	a.nodeOutputs(nodes, false)
-	a.prerenders(arr(req.Outputs["prerenders"]))
-	a.vercelConfig["routes"] = a.routes(middlewareRoutes)
-	writeJSON(filepath.Join(a.outputDir, "config.json"), a.vercelConfig)
+	profilePhase("node", func() { a.nodeOutputs(nodes, false) })
+	profilePhase("prerenders", func() { a.prerenders(arr(req.Outputs["prerenders"])) })
+	profilePhase("routes", func() {
+		a.vercelConfig["routes"] = a.routes(middlewareRoutes)
+		writeJSON(filepath.Join(a.outputDir, "config.json"), a.vercelConfig)
+	})
 }
 
 func (a *adapter) routes(middleware []any) []any {

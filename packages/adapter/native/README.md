@@ -23,6 +23,12 @@ at the JavaScript boundary. Function policy is normalized once per configured
 rule; Go performs matching and all per-output work. Unsupported protocol/runtime
 values fail the build instead of silently falling back.
 
+Set `NEXT_ADAPTER_GO_PROFILE=1` on a diagnostic deployment to collect phase wall
+times, allocation counts, runtime CPU settings and a labeled Go CPU profile.
+The profile is emitted as indexed `[adapter-cpu-profile]` base64 chunks so it
+can be recovered from remote build logs. Profiling runs include sampling and
+profile-flush overhead and must be kept out of performance comparisons.
+
 ```sh
 pnpm --filter @next-community/adapter-vercel build
 pnpm --filter @next-community/adapter-vercel exec vitest run
