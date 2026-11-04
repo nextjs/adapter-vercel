@@ -141,6 +141,7 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 	}
 	manifestPath := filepath.Join(a.DistDir, "routes-manifest-deterministic.json")
 	manifest := deterministicManifest(read(filepath.Join(a.DistDir, "routes-manifest.json")))
+	manifestHash := hash(manifest)
 	write(manifestPath, manifest)
 	manifestRel := join(rel(a.RepoRoot, a.DistDir), "routes-manifest.json")
 	projectRel := rel(a.RepoRoot, a.ProjectDir)
@@ -176,18 +177,21 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 			pagesError = o
 		}
 	}
+	notFound := pages404
+	if notFound == nil {
+		notFound = pagesError
+	}
+	notFoundHashes := a.hashes(notFound)
 	parallel(outputs, func(o object) {
 		functionDir := outputPath(filepath.Join(a.outputDir, "functions"), a.normalized(str(o["pathname"]))+".func")
 		mkdir(functionDir)
 		files := object{}
 		hashes := object{}
-		hasHashes := o["assetsHashes"] != nil
+		hasHashes := o["assetsHashes"] != nil || o["assetHashMapId"] != nil
 		if hasHashes {
-			hashes = clone(obj(o["assetsHashes"]))
+			hashes = a.hashes(o)
 		}
-		for name, p := range obj(o["assets"]) {
-			files[name] = rel(a.RepoRoot, str(p))
-		}
+		a.eachMap(o, "assets", "assetMapId", func(name, p string) { files[name] = a.relative(p) })
 		p := rel(a.RepoRoot, str(o["filePath"]))
 		files[p] = p
 		if len(envFiles) > 0 {
@@ -197,27 +201,23 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 			}
 		}
 		if o["type"] == "PAGES" {
-			notFound := pages404
-			if notFound == nil {
-				notFound = pagesError
-			}
 			if notFound != nil {
-				for name, source := range obj(notFound["assets"]) {
-					files[name] = rel(a.RepoRoot, str(source))
+				a.eachMap(notFound, "assets", "assetMapId", func(name, source string) {
+					files[name] = a.relative(source)
 					if hasHashes {
-						setFrom(hashes, name, obj(notFound["assetsHashes"]), name)
+						setFrom(hashes, name, notFoundHashes, name)
 					}
-				}
+				})
 				p := rel(a.RepoRoot, str(notFound["filePath"]))
 				files[p] = p
 				if hasHashes {
-					setFrom(hashes, p, obj(notFound["assetsHashes"]), p)
+					setFrom(hashes, p, notFoundHashes, p)
 				}
 			}
 		}
 		files[manifestRel] = rel(a.RepoRoot, manifestPath)
 		if hasHashes {
-			hashes[manifestRel] = hash(manifest)
+			hashes[manifestRel] = manifestHash
 		}
 		writeOnce(outputPath(functionDir, handlerRel), handler)
 		if hasHashes {

@@ -8,6 +8,7 @@ import {
 import minimatch from 'minimatch';
 import type { NextAdapter } from 'next';
 import { modifyConfig } from './config';
+import { encodeOutputMaps } from './native-wire';
 import { getImagesConfig } from './utils';
 
 // Keep JavaScript-specific configuration and module resolution at the hook boundary.
@@ -56,8 +57,9 @@ const adapter: NextAdapter = {
       ...(ctx.outputs.middleware ? [ctx.outputs.middleware] : []),
     ];
     const request = {
-      version: 1,
+      version: 2,
       ...ctx,
+      ...encodeOutputMaps(ctx.outputs),
       configJSON: JSON.stringify(ctx.config),
       edgeConfigJSON: JSON.stringify({
         basePath: ctx.config.basePath,
@@ -68,13 +70,17 @@ const adapter: NextAdapter = {
       nextEnvLoaderPath: nextRequire.resolve('@next/env'),
       templatesDir: path.join(__dirname, 'native-templates'),
       assetOrder: Object.fromEntries(
-        functions.map((output) => [output.id, Object.keys(output.assets)])
+        functions
+          .filter((output) => output.runtime === 'edge')
+          .map((output) => [output.id, Object.keys(output.assets)])
       ),
       wasmOrder: Object.fromEntries(
-        functions.map((output) => [
-          output.id,
-          Object.keys('wasmAssets' in output ? output.wasmAssets || {} : {}),
-        ])
+        functions
+          .filter((output) => output.runtime === 'edge')
+          .map((output) => [
+            output.id,
+            Object.keys('wasmAssets' in output ? output.wasmAssets || {} : {}),
+          ])
       ),
       functionRules,
     };

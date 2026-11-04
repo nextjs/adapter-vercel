@@ -36,6 +36,8 @@ type request struct {
 	AssetOrder        map[string][]string `json:"assetOrder"`
 	WasmOrder         map[string][]string `json:"wasmOrder"`
 	EdgeConfigJSON    string              `json:"edgeConfigJSON"`
+	AssetBindings     [][2]string         `json:"assetBindings"`
+	AssetMaps         [][]uint32          `json:"assetMaps"`
 }
 
 type functionRule struct {
@@ -55,7 +57,7 @@ func main() {
 	defer stopProfile()
 	var req request
 	profilePhase("decode", func() { check(json.NewDecoder(os.Stdin).Decode(&req)) })
-	if req.Version != 1 {
+	if req.Version != 1 && req.Version != 2 {
 		panic(fmt.Errorf("unsupported adapter protocol %d", req.Version))
 	}
 	if req.DistDir == "" || req.ProjectDir == "" || req.RepoRoot == "" {
@@ -138,6 +140,9 @@ func jsonText(v any) string {
 	check(e.Encode(v))
 	// JSON.stringify emits these two characters literally as well.
 	encoded := strings.TrimSuffix(b.String(), "\n")
+	if !strings.Contains(encoded, `\u2028`) && !strings.Contains(encoded, `\u2029`) {
+		return encoded
+	}
 	var result strings.Builder
 	for i := 0; i < len(encoded); {
 		if encoded[i] == '\\' && i+1 < len(encoded) {

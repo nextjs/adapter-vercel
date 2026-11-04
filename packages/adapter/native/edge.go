@@ -41,7 +41,7 @@ func (a *adapter) edgeOutputs(outputs []any) {
 	parallel(outputs, func(o object) {
 		functionDir := outputPath(filepath.Join(a.outputDir, "functions"), a.normalized(str(o["pathname"]))+".func")
 		mkdir(functionDir)
-		assets, wasm := obj(o["assets"]), obj(o["wasmAssets"])
+		assets, wasm := a.assets(o), obj(o["wasmAssets"])
 		files := object{}
 		nonJS := []any{}
 		chunks := []string{}

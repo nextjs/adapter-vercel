@@ -17,11 +17,20 @@ type adapter struct {
 	fallbacks                                                    object
 	fallbackOrder                                                []string
 	functionMatchers                                             []*regexp2.Regexp
+	relativePaths                                                map[string]string
 	hasApp, hasPages, hasMiddleware, has404, has500, hasNotFound bool
 }
 
 func build(req request) {
 	a := &adapter{request: req, outputDir: filepath.Join(req.DistDir, "output"), vercelConfig: object{"version": 3, "overrides": object{}, "images": req.Images}, parents: map[string]object{}, fallbacks: object{}}
+	a.relativePaths = make(map[string]string)
+	for _, entry := range req.AssetBindings {
+		if filepath.IsAbs(entry[1]) {
+			if _, exists := a.relativePaths[entry[1]]; !exists {
+				a.relativePaths[entry[1]] = rel(req.RepoRoot, entry[1])
+			}
+		}
+	}
 	mkdir(a.outputDir)
 	for _, rule := range a.FunctionRules {
 		re, err := regexp2.Compile(rule.Regexp, regexp2.ECMAScript)

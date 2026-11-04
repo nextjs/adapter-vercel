@@ -134,6 +134,13 @@ describe('native adapter parity with the JavaScript adapter', () => {
           '/blog/page'
         );
         const pages404 = await output('404', 'PAGES', '/404', 'nodejs', '/404');
+        const sharedAsset = await write('.next/server/shared.js');
+        const pageAsset = await write('.next/server/page-only.js');
+        const notFoundAsset = await write('.next/server/404-only.js');
+        page.assets = { shared: sharedAsset, selected: pageAsset };
+        page.assetsHashes = { shared: 'shared-hash', selected: 'page-hash' };
+        pages404.assets = { shared: sharedAsset, selected: notFoundAsset };
+        pages404.assetsHashes = { shared: 'shared-hash', selected: '404-hash' };
         const edge = await output(
           'edge',
           'PAGES_API',
