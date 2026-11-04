@@ -9,7 +9,9 @@ const INJECT_ENTRY = './.vercel/otel/instrumentation.mjs';
 const OTEL_API = '@opentelemetry/api';
 // The image pins @opentelemetry/api 1.9.0, so @vercel/otel always resolves an
 // API next to it, even when Next.js finds a copy the project root can't see
-// (pnpm's node_modules/.pnpm/node_modules).
+// (pnpm's node_modules/.pnpm/node_modules). When Next.js finds no API at all,
+// webpack aliases every import to Next's compiled 1.6.0 instead, so @vercel/otel
+// runs on that. Both expose the API surface it uses.
 const COPIED_PACKAGES = [
   '@vercel/otel',
   '@opentelemetry/api-logs',
