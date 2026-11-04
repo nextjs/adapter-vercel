@@ -58,6 +58,12 @@ export async function injectDefaultTracing(
       skip('project has an instrumentation file');
       return;
     }
+    // Another setter, such as a config wrapper, already injected instrumentation.
+    // It may register its own provider, so don't add a second one.
+    if (config.instrumentationInject?.some((entry) => entry !== INJECT_ENTRY)) {
+      skip('instrumentationInject already has other entries');
+      return;
+    }
     if (!(await otelApiIsCompatible(projectDir))) {
       skip('@opentelemetry/api is outside >=1.0.0 <1.10.0');
       return;

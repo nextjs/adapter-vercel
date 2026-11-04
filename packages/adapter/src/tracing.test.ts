@@ -486,17 +486,25 @@ describe('injectDefaultTracing', () => {
     }
   );
 
-  it('keeps existing instrumentationInject entries', async () => {
+  it('does not inject when instrumentationInject already has other entries', async () => {
     const { projectDir, packagesDir } = await readyProject();
     const tracingConfig = config();
     tracingConfig.instrumentationInject = ['./custom.js'];
 
     await inject(projectDir, packagesDir, tracingConfig);
 
-    expect(tracingConfig.instrumentationInject).toEqual([
-      './custom.js',
-      INJECT_ENTRY,
-    ]);
+    expect(tracingConfig.instrumentationInject).toEqual(['./custom.js']);
+    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
+  });
+
+  it('injects once when the entry is already there', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+    const tracingConfig = config();
+    tracingConfig.instrumentationInject = [INJECT_ENTRY];
+
+    await inject(projectDir, packagesDir, tracingConfig);
+
+    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
   });
 
   it('does not log a skip unless builder debug is on', async () => {
