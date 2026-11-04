@@ -486,6 +486,43 @@ describe('injectDefaultTracing', () => {
     }
   );
 
+  it('does not inject when a copied package has runtime dependencies', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+    const pkgPath = path.join(packagesDir, '@vercel', 'otel', 'package.json');
+    const pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'));
+    await fs.writeFile(
+      pkgPath,
+      JSON.stringify({ ...pkg, dependencies: { 'some-runtime-dep': '^1.0.0' } })
+    );
+
+    const tracingConfig = await inject(projectDir, packagesDir);
+
+    expect(tracingConfig.instrumentationInject).toBeUndefined();
+    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
+  });
+
+  it('allows api-logs to depend on the copied @opentelemetry/api', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+    const pkgPath = path.join(
+      packagesDir,
+      '@opentelemetry',
+      'api-logs',
+      'package.json'
+    );
+    const pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'));
+    await fs.writeFile(
+      pkgPath,
+      JSON.stringify({
+        ...pkg,
+        dependencies: { '@opentelemetry/api': '^1.3.0' },
+      })
+    );
+
+    const tracingConfig = await inject(projectDir, packagesDir);
+
+    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
+  });
+
   it('does not inject when instrumentationInject already has other entries', async () => {
     const { projectDir, packagesDir } = await readyProject();
     const tracingConfig = config();

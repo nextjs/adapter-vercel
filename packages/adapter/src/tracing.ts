@@ -72,6 +72,13 @@ export async function injectDefaultTracing(
       skip(`build image is missing one of ${COPIED_PACKAGES.join(', ')}`);
       return;
     }
+    // Only these packages are copied. One with runtime dependencies would pass
+    // the resolve check below and then fail the build on a missing import.
+    const withDependencies = await packagesWithDependencies(packagesDir);
+    if (withDependencies.length > 0) {
+      skip(`${withDependencies.join(', ')} has runtime dependencies`);
+      return;
+    }
     // A newer API breaks the SDK that @vercel/otel bundles (it caps the API
     // below 1.10), and an older one can't reach 1.9 readers.
     const imageApi = await readPackageVersion(
@@ -207,6 +214,29 @@ async function imagePackagesExist(packagesDir: string): Promise<boolean> {
     if (!(await isDirectory(path.join(packagesDir, name)))) return false;
   }
   return true;
+}
+
+// @opentelemetry/api-logs depends on @opentelemetry/api, which is copied too.
+async function packagesWithDependencies(
+  packagesDir: string
+): Promise<string[]> {
+  const found: string[] = [];
+  for (const name of COPIED_PACKAGES) {
+    let pkg: { dependencies?: Record<string, string> };
+    try {
+      pkg = JSON.parse(
+        await fs.readFile(path.join(packagesDir, name, 'package.json'), 'utf8')
+      );
+    } catch {
+      found.push(name);
+      continue;
+    }
+    const missing = Object.keys(pkg.dependencies ?? {}).filter(
+      (dep) => !(COPIED_PACKAGES as readonly string[]).includes(dep)
+    );
+    if (missing.length > 0) found.push(name);
+  }
+  return found;
 }
 
 async function writeTracingTree(
