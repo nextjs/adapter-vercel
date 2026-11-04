@@ -94,6 +94,7 @@ export const getHandlerSource = (ctx: {
             string,
             string[]
           >;
+          const basePath = process.env.__PRIVATE_BASE_PATH as string;
 
           // - we need to process dynamic routes for matching
           // - we need to normalize _next/data, .rsc, segment prefetch to match
@@ -437,6 +438,19 @@ export const getHandlerSource = (ctx: {
 
               if (typeof urlPathname !== 'string') {
                 urlPathname = parsedUrl.pathname || '/';
+
+                // Routing sets x-matched-path without the basePath. Requests
+                // that skip routing and target the function directly (such as
+                // queue trigger callbacks) arrive without the header, and
+                // their URL still carries the basePath, which the page lookup
+                // below must not see.
+                if (
+                  basePath &&
+                  (urlPathname === basePath ||
+                    urlPathname.startsWith(`${basePath}/`))
+                ) {
+                  urlPathname = urlPathname.slice(basePath.length) || '/';
+                }
               }
               const {
                 matchedPathname: page,
@@ -524,6 +538,10 @@ export const getHandlerSource = (ctx: {
     .replaceAll(
       'process.env.__PRIVATE_PRERENDER_FALLBACK_MAP',
       JSON.stringify(ctx.prerenderFallbackFalseMap)
+    )
+    .replaceAll(
+      'process.env.__PRIVATE_BASE_PATH',
+      JSON.stringify(ctx.nextConfig?.basePath || '')
     )
     .replaceAll(
       'process.env.__PRIVATE_NEXT_CONFIG',
