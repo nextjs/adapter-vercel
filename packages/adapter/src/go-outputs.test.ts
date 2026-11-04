@@ -293,7 +293,6 @@ describe('hosted Go route outputs', () => {
         'src/app/api/hello/route.go': { maxDuration: 5 },
       },
     });
-    expect(await usesSrcDirectory(projectDir, 'app')).toBe(false);
     await handle([output()]);
     expect(await readConfig()).toMatchObject({ maxDuration: 25 });
   });

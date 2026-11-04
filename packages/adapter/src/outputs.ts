@@ -1064,21 +1064,11 @@ export async function handleMiddleware(
   return routes;
 }
 
-export async function usesSrcDirectory(
-  workPath: string,
-  router?: 'app' | 'pages'
-): Promise<boolean> {
-  if (router) {
-    try {
-      if ((await fs.stat(path.join(workPath, router))).isDirectory()) {
-        return false;
-      }
-    } catch (_err) {}
-  }
-  const directories = router
-    ? [path.join(workPath, 'src', router)]
-    : [path.join(workPath, 'src', 'pages'), path.join(workPath, 'src', 'app')];
-  for (const dir of directories) {
+export async function usesSrcDirectory(workPath: string): Promise<boolean> {
+  for (const dir of [
+    path.join(workPath, 'src', 'pages'),
+    path.join(workPath, 'src', 'app'),
+  ]) {
     try {
       if ((await fs.stat(dir)).isDirectory()) {
         return true;

@@ -3,14 +3,9 @@ import path from 'node:path';
 import { getLambdaOptionsFromFunction } from '@vercel/build-utils';
 import type { AdapterOutput, NextAdapter, NextConfig } from 'next';
 import { AdapterOutputType } from 'next/constants';
-import {
-  getSourceFilePathFromPage,
-  normalizeIndexPathname,
-  usesSrcDirectory,
-} from './outputs';
+import { getSourceFilePathFromPage, normalizeIndexPathname } from './outputs';
 
-/** Temporary runtime widening until Next.js publishes the Go output types. */
-export type GoRouteOutput = Omit<AdapterOutput['APP_ROUTE'], 'runtime'> & {
+export type GoRouteOutput = AdapterOutput['APP_ROUTE'] & {
   runtime: 'go';
 };
 
@@ -330,6 +325,19 @@ async function ensureFunctionParent(functionsDir: string, functionDir: string) {
   }
 }
 
+async function usesSrcAppDirectory(workPath: string): Promise<boolean> {
+  try {
+    if ((await fs.stat(path.join(workPath, 'app'))).isDirectory()) {
+      return false;
+    }
+  } catch (_err) {}
+  try {
+    return (await fs.stat(path.join(workPath, 'src', 'app'))).isDirectory();
+  } catch (_err) {
+    return false;
+  }
+}
+
 export async function handleGoOutputs(
   outputs: GoRouteOutput[],
   {
@@ -350,7 +358,7 @@ export async function handleGoOutputs(
     process.env.NEXT_ADAPTER_VERCEL_CONFIG || '{}'
   );
   const functionsDir = path.join(vercelOutputDir, 'functions');
-  const usesSrcDir = await usesSrcDirectory(projectDir, 'app');
+  const usesSrcDir = await usesSrcAppDirectory(projectDir);
   const functionPaths = new Map<string, string>();
   for (const output of outputs) {
     assertGoRouteOutput(output);
