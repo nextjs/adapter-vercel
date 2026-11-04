@@ -245,28 +245,112 @@ async function packagesWithDependencies(
   return found;
 }
 
+// webpack runs modifyConfig again in each build worker, so several processes
+// can reach this at once. Each builds the tree in its own temp folder and
+// renames it into place, so no process ever reads a half-copied tree. A stamp
+// of the source folder and package versions lets later calls reuse the tree.
 async function writeTracingTree(
   projectDir: string,
   packagesDir: string
 ): Promise<string> {
-  const otelDir = path.join(projectDir, '.vercel', 'otel');
-  const destModules = path.join(otelDir, 'node_modules');
-  for (const name of COPIED_PACKAGES) {
-    const source = path.join(packagesDir, name);
-    const dest = path.join(destModules, name);
-    await fs.mkdir(path.dirname(dest), { recursive: true });
-    await fs.cp(source, dest, {
-      recursive: true,
-      dereference: true,
-      force: true,
-      // yarn 1 nests a newer @opentelemetry/api under api-logs for its "^1.3.0"
-      // range. Skip nested copies so every package uses the pinned one.
-      filter: (file) => !isNestedOtelApi(path.relative(source, file)),
-    });
-  }
+  const vercelDir = path.join(projectDir, '.vercel');
+  const otelDir = path.join(vercelDir, 'otel');
   const wrapper = path.join(otelDir, 'instrumentation.mjs');
-  await fs.writeFile(wrapper, WRAPPER_SOURCE);
+  const stamp = await tracingTreeStamp(packagesDir);
+
+  if ((await readStamp(otelDir)) === stamp) {
+    return wrapper;
+  }
+
+  await fs.mkdir(vercelDir, { recursive: true });
+  const tmpDir = await fs.mkdtemp(path.join(vercelDir, 'otel.tmp-'));
+  try {
+    for (const name of COPIED_PACKAGES) {
+      const source = path.join(packagesDir, name);
+      const dest = path.join(tmpDir, 'node_modules', name);
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      await fs.cp(source, dest, {
+        recursive: true,
+        dereference: true,
+        // yarn 1 nests a newer @opentelemetry/api under api-logs for its
+        // "^1.3.0" range. Skip nested copies so every package uses the pinned one.
+        filter: (file) => !isNestedOtelApi(path.relative(source, file)),
+      });
+    }
+    await fs.writeFile(
+      path.join(tmpDir, 'instrumentation.mjs'),
+      WRAPPER_SOURCE
+    );
+    await fs.writeFile(path.join(tmpDir, STAMP_FILE), stamp);
+
+    await placeTree(tmpDir, otelDir, stamp);
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
   return wrapper;
+}
+
+const STAMP_FILE = '.stamp';
+
+// Moves a finished tree into place. If another worker already placed the same
+// tree, keep theirs. A stale tree from an older image is replaced.
+async function placeTree(
+  tmpDir: string,
+  otelDir: string,
+  stamp: string
+): Promise<void> {
+  try {
+    await fs.rename(tmpDir, otelDir);
+    return;
+  } catch (error) {
+    if (!isCode(error, 'ENOTEMPTY') && !isCode(error, 'EEXIST')) throw error;
+  }
+  if ((await readStamp(otelDir)) === stamp) return;
+  const stale = `${otelDir}.stale-${process.pid}-${Date.now()}`;
+  await fs.rename(otelDir, stale).catch((error) => {
+    if (!isCode(error, 'ENOENT')) throw error;
+  });
+  await fs.rm(stale, { recursive: true, force: true });
+  try {
+    await fs.rename(tmpDir, otelDir);
+  } catch (error) {
+    // Another worker placed a tree between our two renames.
+    if (!isCode(error, 'ENOTEMPTY') && !isCode(error, 'EEXIST')) throw error;
+    if ((await readStamp(otelDir)) !== stamp) throw error;
+  }
+}
+
+async function tracingTreeStamp(packagesDir: string): Promise<string> {
+  const versions: string[] = [];
+  for (const name of COPIED_PACKAGES) {
+    const version = await readPackageVersion(
+      path.join(packagesDir, name, 'package.json'),
+      name
+    );
+    versions.push(`${name}@${version}`);
+  }
+  return JSON.stringify({
+    packagesDir: path.resolve(packagesDir),
+    versions,
+    wrapper: WRAPPER_SOURCE,
+  });
+}
+
+async function readStamp(otelDir: string): Promise<string | undefined> {
+  try {
+    return await fs.readFile(path.join(otelDir, STAMP_FILE), 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+function isCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === code
+  );
 }
 
 function isNestedOtelApi(relative: string): boolean {

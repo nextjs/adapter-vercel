@@ -277,6 +277,69 @@ describe('injectDefaultTracing', () => {
     expect(output.trim()).toBe('resolved');
   });
 
+  it('builds one complete tree when several build workers inject at once', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+
+    const configs = await Promise.all(
+      Array.from({ length: 6 }, () => inject(projectDir, packagesDir))
+    );
+
+    for (const c of configs) {
+      expect(c.instrumentationInject).toEqual([INJECT_ENTRY]);
+    }
+    const otel = otelRoot(projectDir);
+    expect(
+      await fs.readFile(path.join(otel, 'instrumentation.mjs'), 'utf8')
+    ).toBe(WRAPPER_SOURCE);
+    expect(
+      createRequire(path.join(otel, 'instrumentation.mjs')).resolve(
+        '@vercel/otel'
+      )
+    ).toContain(path.join('.vercel', 'otel', 'node_modules'));
+    const leftovers = (
+      await fs.readdir(path.join(projectDir, '.vercel'))
+    ).filter((name) => name !== 'otel');
+    expect(leftovers).toEqual([]);
+  });
+
+  it('reuses a tree with a matching stamp instead of copying again', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+    await inject(projectDir, packagesDir);
+    const marker = path.join(otelRoot(projectDir), 'marker');
+    await fs.writeFile(marker, '');
+
+    await inject(projectDir, packagesDir);
+
+    await expect(fs.stat(marker)).resolves.toBeTruthy();
+  });
+
+  it('replaces a tree built from a different image', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+    await inject(projectDir, packagesDir);
+    const marker = path.join(otelRoot(projectDir), 'marker');
+    await fs.writeFile(marker, '');
+    const pkgPath = path.join(packagesDir, '@vercel', 'otel', 'package.json');
+    const pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'));
+    await fs.writeFile(pkgPath, JSON.stringify({ ...pkg, version: '2.0.1' }));
+
+    await inject(projectDir, packagesDir);
+
+    await expect(fs.stat(marker)).rejects.toThrow();
+    const copied = JSON.parse(
+      await fs.readFile(
+        path.join(
+          otelRoot(projectDir),
+          'node_modules',
+          '@vercel',
+          'otel',
+          'package.json'
+        ),
+        'utf8'
+      )
+    );
+    expect(copied.version).toBe('2.0.1');
+  });
+
   it('does not inject when the project has an instrumentation file', async () => {
     const { projectDir, packagesDir } = await readyProject();
     await fs.writeFile(
