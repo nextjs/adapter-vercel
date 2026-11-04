@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import adapter from './index';
-import { injectDefaultTracing } from './tracing';
+import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
 
 const INJECT_ENTRY = './.vercel/otel/instrumentation.mjs';
 const WRAPPER_SOURCE = `export async function register() {
@@ -700,5 +700,50 @@ describe('injectDefaultTracing', () => {
     await inject(projectDir, packagesDir, tracingConfig);
 
     expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
+  });
+});
+
+describe('defaultTracingWasInjected', () => {
+  async function distDirWith(instrumentation: boolean): Promise<string> {
+    const distDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adapter-dist-'));
+    await fs.mkdir(path.join(distDir, 'server'), { recursive: true });
+    if (instrumentation) {
+      await fs.writeFile(
+        path.join(distDir, 'server', 'instrumentation.js'),
+        'module.exports = {}\n'
+      );
+    }
+    return distDir;
+  }
+
+  it('is true when the entry is set and Next.js compiled it', async () => {
+    const distDir = await distDirWith(true);
+    await expect(
+      defaultTracingWasInjected(
+        { instrumentationInject: [INJECT_ENTRY] },
+        distDir
+      )
+    ).resolves.toBe(true);
+    await fs.rm(distDir, { recursive: true, force: true });
+  });
+
+  it('is false when Next.js ignored the entry and compiled no instrumentation', async () => {
+    const distDir = await distDirWith(false);
+    await expect(
+      defaultTracingWasInjected(
+        { instrumentationInject: [INJECT_ENTRY] },
+        distDir
+      )
+    ).resolves.toBe(false);
+    await fs.rm(distDir, { recursive: true, force: true });
+  });
+
+  it('is false when the adapter did not inject', async () => {
+    const distDir = await distDirWith(true);
+    await expect(
+      defaultTracingWasInjected({ instrumentationInject: [] }, distDir)
+    ).resolves.toBe(false);
+    await expect(defaultTracingWasInjected({}, distDir)).resolves.toBe(false);
+    await fs.rm(distDir, { recursive: true, force: true });
   });
 });
