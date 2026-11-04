@@ -14,8 +14,10 @@ async function tree(root) {
         result[name] = { symlink: await fs.readlink(file) };
       else if (entry.isDirectory()) await walk(file);
       else {
-        const content = await fs.readFile(file, 'utf8');
-        result[name] = name.endsWith('.json') ? JSON.parse(content) : content;
+        const content = await fs.readFile(file);
+        result[name] = name.endsWith('.json')
+          ? JSON.parse(content.toString('utf8'))
+          : content;
       }
     }
   }

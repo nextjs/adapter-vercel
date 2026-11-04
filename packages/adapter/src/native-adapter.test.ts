@@ -18,8 +18,10 @@ async function tree(root: string) {
         result[name] = { symlink: await fs.readlink(file) };
       else if (entry.isDirectory()) await visit(file);
       else {
-        const content = await fs.readFile(file, 'utf8');
-        result[name] = name.endsWith('.json') ? JSON.parse(content) : content;
+        const content = await fs.readFile(file);
+        result[name] = name.endsWith('.json')
+          ? JSON.parse(content.toString('utf8'))
+          : content;
       }
     }
   }
@@ -99,6 +101,10 @@ describe('native adapter parity with the JavaScript adapter', () => {
         await write('app/blog/page.tsx');
         await write('pages/404.tsx');
         await write('public/robots.txt', 'Allow: /');
+        await fs.writeFile(
+          path.join(projectDir, 'public/binary.dat'),
+          Buffer.from([0, 255, 254, 195, 40, 10])
+        );
         await fs.symlink(
           'robots.txt',
           path.join(projectDir, 'public/robots-link.txt')
