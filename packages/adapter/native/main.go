@@ -167,12 +167,27 @@ func jsonText(v any) string {
 	}
 	return result.String()
 }
-func readJSON(p string) object  { var m object; check(json.Unmarshal(read(p), &m)); return m }
-func read(p string) []byte      { b, err := os.ReadFile(p); check(err); return b }
-func exists(p string) bool      { _, err := os.Stat(p); return err == nil }
-func mkdir(p string)            { check(os.MkdirAll(p, 0755)) }
-func write(p string, b []byte)  { mkdir(filepath.Dir(p)); check(os.WriteFile(p, b, 0644)) }
-func writeJSON(p string, v any) { write(p, []byte(jsonText(v))) }
+func readJSON(p string) object      { var m object; check(json.Unmarshal(read(p), &m)); return m }
+func read(p string) []byte          { b, err := os.ReadFile(p); check(err); return b }
+func exists(p string) bool          { _, err := os.Stat(p); return err == nil }
+func mkdir(p string)                { check(os.MkdirAll(p, 0755)) }
+func write(p string, b []byte)      { mkdir(filepath.Dir(p)); check(os.WriteFile(p, b, 0644)) }
+func writeJSON(p string, v any)     { writeJSONFile(p, v, os.O_WRONLY|os.O_CREATE|os.O_TRUNC) }
+func writeJSONOnce(p string, v any) { writeJSONFile(p, v, os.O_WRONLY|os.O_CREATE|os.O_EXCL) }
+func writeJSONFile(p string, v any, flags int) {
+	mkdir(filepath.Dir(p))
+	f, err := os.OpenFile(p, flags, 0644)
+	if flags&os.O_EXCL != 0 && os.IsExist(err) {
+		return
+	}
+	check(err)
+	encoder := json.NewEncoder(f)
+	encoder.SetEscapeHTML(false)
+	encodeErr := encoder.Encode(v)
+	closeErr := f.Close()
+	check(encodeErr)
+	check(closeErr)
+}
 func writeOnce(p string, b []byte) {
 	mkdir(filepath.Dir(p))
 	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)

@@ -248,7 +248,7 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 		if o["type"] == "APP_PAGE" || o["type"] == "PAGES" {
 			cfg["operationType"] = "PAGE"
 		}
-		writeOnce(filepath.Join(functionDir, ".vc-config.json"), []byte(jsonText(cfg)))
+		writeJSONOnce(filepath.Join(functionDir, ".vc-config.json"), cfg)
 	})
 }
 
@@ -422,7 +422,7 @@ func (a *adapter) prerenders(outputs []any) {
 			chain["outputPath"] = join("./", a.normalized(name))
 			result["chain"] = chain
 		}
-		writeOnce(configPath, []byte(jsonText(result)))
+		writeJSONOnce(configPath, result)
 		if file != "" && fallbackPath != "" && state == "" {
 			copyFile(file, fallbackPath)
 		}

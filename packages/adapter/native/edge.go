@@ -97,7 +97,7 @@ func (a *adapter) edgeOutputs(outputs []any) {
 				cfg["regions"] = regions
 			}
 		}
-		writeOnce(filepath.Join(functionDir, ".vc-config.json"), []byte(jsonText(cfg)))
+		writeJSONOnce(filepath.Join(functionDir, ".vc-config.json"), cfg)
 	})
 }
 func normalizeRegions(value any) any {
