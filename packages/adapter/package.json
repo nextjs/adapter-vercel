@@ -3,6 +3,12 @@
   "version": "0.0.1-beta.35",
   "type": "commonjs",
   "main": "dist/index.js",
+  "bin": {
+    "adapter-vercel-linux-x64": "dist/bin/adapter-vercel-linux-x64",
+    "adapter-vercel-linux-arm64": "dist/bin/adapter-vercel-linux-arm64",
+    "adapter-vercel-darwin-x64": "dist/bin/adapter-vercel-darwin-x64",
+    "adapter-vercel-darwin-arm64": "dist/bin/adapter-vercel-darwin-arm64"
+  },
   "files": [
     "dist"
   ],

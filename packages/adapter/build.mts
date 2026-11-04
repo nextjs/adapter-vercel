@@ -79,13 +79,7 @@ await fs.writeFile(
   templateModule.exports.template
 );
 await fs.mkdir('dist/bin', { recursive: true });
-const targets = new Set([
-  ...(['linux', 'darwin'].includes(process.platform)
-    ? [`${process.platform}-${process.arch}`]
-    : []),
-  'linux-x64',
-  'linux-arm64',
-]);
+const targets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'];
 const regexpModule = execFileSync(
   'go',
   ['list', '-m', '-f', '{{.Dir}}', 'github.com/dlclark/regexp2'],

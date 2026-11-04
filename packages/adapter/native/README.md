@@ -5,6 +5,9 @@
 the packaged `adapter-vercel-<platform>-<arch>` executable and awaits completion
 inside `onBuildComplete`, while Next.js's temporary traced assets still exist.
 
+Linux and macOS amd64/arm64 executables are declared in the package's `bin`
+metadata so npm and pnpm preserve execute permission when packing and installing.
+
 The native process handles public/static copying, ordered routing generation,
 Node/Edge function metadata, prerender aliases and fallback bodies, file hashes,
 and runtime-template assembly. Handler templates are produced from the existing
