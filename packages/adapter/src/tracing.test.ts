@@ -12,8 +12,12 @@ import { injectDefaultTracing } from './tracing';
 const INJECT_ENTRY = './.vercel/otel/instrumentation.mjs';
 const WRAPPER_SOURCE = `export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { registerOTel } = await import('@vercel/otel')
-    registerOTel({ serviceName: process.env.VERCEL_PROJECT_NAME })
+    try {
+      const { registerOTel } = await import('@vercel/otel')
+      registerOTel({ serviceName: process.env.VERCEL_PROJECT_NAME })
+    } catch (error) {
+      console.warn('Vercel tracing could not start:', error)
+    }
   }
 }
 `;
@@ -238,6 +242,39 @@ describe('injectDefaultTracing', () => {
       { encoding: 'utf8' }
     );
     expect(output.trim()).toBe('function');
+  });
+
+  it('writes a wrapper whose register() warns instead of throwing when @vercel/otel fails', async () => {
+    const { projectDir, packagesDir } = await readyProject();
+    const tracingConfig = await inject(projectDir, packagesDir);
+    const [entry] = tracingConfig.instrumentationInject ?? [];
+    const wrapper = path.resolve(projectDir, entry);
+    // Make @vercel/otel throw on import.
+    await fs.writeFile(
+      path.join(
+        otelRoot(projectDir),
+        'node_modules',
+        '@vercel',
+        'otel',
+        'index.js'
+      ),
+      "throw new Error('boom')\n"
+    );
+
+    const output = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const m = await import(${JSON.stringify(pathToFileURL(wrapper).href)}); await m.register(); console.log('resolved')`,
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, NEXT_RUNTIME: 'nodejs' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }
+    );
+    expect(output.trim()).toBe('resolved');
   });
 
   it('does not inject when the project has an instrumentation file', async () => {

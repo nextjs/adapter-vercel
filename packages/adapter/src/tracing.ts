@@ -28,10 +28,16 @@ const IMAGE_OTEL_API = /^1\.9\.\d+$/;
 // falls back to "app". A customer-set OTEL_SERVICE_NAME still wins.
 // The import sits behind NEXT_RUNTIME, which Next.js inlines per runtime, so
 // Edge bundles don't include @vercel/otel.
+// A failure to start only logs: Next.js awaits register() on every request, so
+// a throw here would fail every request for a customer who didn't opt in.
 const WRAPPER_SOURCE = `export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { registerOTel } = await import('@vercel/otel')
-    registerOTel({ serviceName: process.env.VERCEL_PROJECT_NAME })
+    try {
+      const { registerOTel } = await import('@vercel/otel')
+      registerOTel({ serviceName: process.env.VERCEL_PROJECT_NAME })
+    } catch (error) {
+      console.warn('Vercel tracing could not start:', error)
+    }
   }
 }
 `;
