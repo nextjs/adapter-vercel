@@ -1,5 +1,19 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.36
+
+### Patch Changes
+
+- [#151](https://github.com/nextjs/adapter-vercel/pull/151) [`75a230b`](https://github.com/nextjs/adapter-vercel/commit/75a230b21014792e2a438d7ea96a404e86fab455) Thanks [@VaguelySerious](https://github.com/VaguelySerious)! - Fix basePath apps failing to resolve functions invoked without routing, such as queue trigger callbacks
+
+- [#85](https://github.com/nextjs/adapter-vercel/pull/85) [`3b9b6e1`](https://github.com/nextjs/adapter-vercel/commit/3b9b6e1cc5d357c64ce8450394465558e1081735) Thanks [@mischnic](https://github.com/mischnic)! - Fix assetHash key of the launcher
+
+- [#147](https://github.com/nextjs/adapter-vercel/pull/147) [`d07e100`](https://github.com/nextjs/adapter-vercel/commit/d07e1004c79d50e8322b21983143ad0bf881c2ef) Thanks [@timneutkens](https://github.com/timneutkens)! - Package Go App Router handler outputs as separate executable functions when hosted by a compatible @vercel/next builder. Reuse existing output fields with runtime set to go, preserve Node.js output grouping, and reject unsupported Go output kinds and incompatible architecture overrides. Omit generated internal route-parameter query assignments for Go destinations so handlers parse the supplied pathname directly. Use published Next.js Go output types and discover Go App Router sources independently of legacy Node source detection.
+
+- [#144](https://github.com/nextjs/adapter-vercel/pull/144) [`e1d596e`](https://github.com/nextjs/adapter-vercel/commit/e1d596ed53f6a80334b2b43091f1bdd066b03586) Thanks [@tobiaslins](https://github.com/tobiaslins)! - Load the proxy (middleware) module while the function initializes instead of during the first request.
+
+- [#84](https://github.com/nextjs/adapter-vercel/pull/84) [`a1c108d`](https://github.com/nextjs/adapter-vercel/commit/a1c108dfb7bb0f56e79260879e20f4626f4b87a7) Thanks [@mischnic](https://github.com/mischnic)! - Add missing assetHash for Pages 404
+
 ## 0.0.1-beta.35
 
 ### Patch Changes
