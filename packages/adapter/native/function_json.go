@@ -254,14 +254,17 @@ func (c *functionConfigs) writeWith(file string, cfg object, files, hashes *meta
 			capacity += len(`,"fileHashes":`) + hashes.capacity(key.hashes.extra)
 		}
 		generated = appendFunctionConfig(make([]byte, 0, capacity), prefix, files, hashes)
-		if c.reserve(cap(generated)) {
-			entry.data = generated
-		}
 		if c.clone != nil && !c.cloneDisabled.Load() && len(generated) >= 32*1024 {
+			wroteFirst = true
 			if write(file, generated) {
 				entry.source = file
+				// The canonical independent file supplies future clones. Do not
+				// retain another copy of its bytes in the Go heap.
+				return
 			}
-			wroteFirst = true
+		}
+		if c.reserve(cap(generated)) {
+			entry.data = generated
 		}
 	})
 	if wroteFirst {

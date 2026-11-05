@@ -44,6 +44,9 @@ func TestConcurrentConfigClonesAndFallbackPreserveIndependentEdits(t *testing.T)
 			if cache.cloneDisabled.Load() == supported {
 				t.Fatal("incorrect filesystem support state")
 			}
+			if supported && cache.bytes.Load() != 0 {
+				t.Fatal("cloned configs must not retain duplicate encoded buffers")
+			}
 			write(paths[0], []byte("postbuild edit"))
 			for _, file := range paths[1:] {
 				if readJSON(file)["runtime"] != "nodejs" {
@@ -51,6 +54,24 @@ func TestConcurrentConfigClonesAndFallbackPreserveIndependentEdits(t *testing.T)
 				}
 			}
 		})
+	}
+}
+
+func TestCloneCacheDoesNotReusePreexistingOutputContent(t *testing.T) {
+	a := &adapter{request: request{RepoRoot: "/repo", AssetBindings: [][2]string{{"large", "/repo/" + strings.Repeat("x", 40*1024)}}, AssetMaps: [][]uint32{{0}}}}
+	a.encodeBindings()
+	files := a.metadata(object{"assetMapId": float64(0)}, true)
+	cache := functionConfigs{clone: func(out, in *os.File) (bool, error) {
+		t.Fatal("preexisting content cannot be used as a clone source")
+		return false, nil
+	}}
+	root := t.TempDir()
+	existing, created := filepath.Join(root, "existing"), filepath.Join(root, "created")
+	write(existing, []byte("preexisting content"))
+	cache.write(existing, object{"runtime": "nodejs"}, &files, nil)
+	cache.write(created, object{"runtime": "nodejs"}, &files, nil)
+	if string(read(existing)) != "preexisting content" || readJSON(created)["runtime"] != "nodejs" {
+		t.Fatal("reused preexisting content or failed to preserve it")
 	}
 }
 
