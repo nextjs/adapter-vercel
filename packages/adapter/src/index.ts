@@ -92,14 +92,12 @@ const myAdapter: NextAdapter = {
       );
     }
 
-    const otelPackagesDir = process.env.VERCEL_OTEL_PACKAGES_DIR?.trim();
     if (
       ctx.phase === PHASE_PRODUCTION_BUILD &&
       typeof ctx.projectDir !== 'undefined' &&
-      process.env.VERCEL_DEFAULT_TRACING_ENABLED === '1' &&
-      otelPackagesDir
+      process.env.VERCEL_DEFAULT_TRACING_ENABLED === '1'
     ) {
-      await injectDefaultTracing(config, ctx.projectDir, otelPackagesDir);
+      await injectDefaultTracing(config, ctx.projectDir);
     }
 
     return config;

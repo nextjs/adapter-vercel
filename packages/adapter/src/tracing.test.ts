@@ -1,26 +1,12 @@
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import adapter from './index';
 import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
 
 const INJECT_ENTRY = './.vercel/otel/instrumentation.mjs';
-const WRAPPER_SOURCE = `export async function register() {
-  if (process.env.NEXT_RUNTIME === 'nodejs') {
-    try {
-      const { registerOTel } = await import('@vercel/otel')
-      registerOTel({ serviceName: process.env.VERCEL_PROJECT_NAME })
-    } catch (error) {
-      console.warn('Vercel tracing could not start:', error)
-    }
-  }
-}
-`;
 
 type TracingConfig = {
   pageExtensions: string[];
@@ -47,51 +33,54 @@ describe('injectDefaultTracing', () => {
   async function writePackage(
     dir: string,
     name: string,
-    version: string,
-    extra = ''
+    version: string
   ): Promise<void> {
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(
       path.join(dir, 'package.json'),
       JSON.stringify({ name, version, main: 'index.js' })
     );
+    await fs.writeFile(path.join(dir, 'index.js'), 'module.exports = {}\n');
+  }
+
+  function otelRoot(projectDir: string): string {
+    return path.join(projectDir, '.vercel', 'otel');
+  }
+
+  // Lays out .vercel/otel/ the way the Vercel builder prepares it before
+  // `next build`.
+  async function prepareTree(projectDir: string): Promise<void> {
+    const modules = path.join(otelRoot(projectDir), 'node_modules');
+    await writePackage(
+      path.join(modules, '@vercel', 'otel'),
+      '@vercel/otel',
+      '2.2.0'
+    );
+    await writePackage(
+      path.join(modules, '@opentelemetry', 'api-logs'),
+      '@opentelemetry/api-logs',
+      '0.218.0'
+    );
+    await writePackage(
+      path.join(modules, '@opentelemetry', 'api'),
+      '@opentelemetry/api',
+      '1.9.0'
+    );
     await fs.writeFile(
-      path.join(dir, 'index.js'),
-      `module.exports = { ${extra} }\n`
+      path.join(otelRoot(projectDir), 'instrumentation.mjs'),
+      'export async function register() {}\n'
     );
   }
 
-  async function readyProject(): Promise<{
-    projectDir: string;
-    packagesDir: string;
-  }> {
+  async function readyProject(): Promise<string> {
     const projectDir = await tempDir('adapter-tracing-app-');
-    const packagesDir = await tempDir('adapter-tracing-image-');
     await writePackage(
       path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
       '@opentelemetry/api',
       '1.9.0'
     );
-
-    const otelReal = path.join(packagesDir, 'otel-real');
-    await writePackage(otelReal, '@vercel/otel', '2.0.0', 'registerOTel() {}');
-    const target = path.join(packagesDir, 'outside-target.js');
-    await fs.writeFile(target, 'module.exports = { dereferenced: true }\n');
-    await fs.symlink(target, path.join(otelReal, 'extra.js'));
-    await fs.mkdir(path.join(packagesDir, '@vercel'), { recursive: true });
-    await fs.symlink(otelReal, path.join(packagesDir, '@vercel', 'otel'));
-    await writePackage(
-      path.join(packagesDir, '@opentelemetry', 'api-logs'),
-      '@opentelemetry/api-logs',
-      '0.46.0'
-    );
-    await writePackage(
-      path.join(packagesDir, '@opentelemetry', 'api'),
-      '@opentelemetry/api',
-      '1.9.0'
-    );
-
-    return { projectDir, packagesDir };
+    await prepareTree(projectDir);
+    return projectDir;
   }
 
   // pnpm's isolated layout: `next` is a symlink into node_modules/.pnpm, and a
@@ -128,15 +117,13 @@ describe('injectDefaultTracing', () => {
 
   async function inject(
     projectDir: string,
-    packagesDir: string,
     tracingConfig: TracingConfig = config()
   ): Promise<TracingConfig> {
     tracingConfig.outputFileTracingRoot ??= projectDir;
     await injectDefaultTracing(
       tracingConfig as Required<Pick<TracingConfig, 'outputFileTracingRoot'>> &
         TracingConfig,
-      projectDir,
-      packagesDir
+      projectDir
     );
     return tracingConfig;
   }
@@ -144,11 +131,10 @@ describe('injectDefaultTracing', () => {
   // Runs the adapter's real modifyConfig, which decides whether to inject.
   async function modifyConfig(
     projectDir: string,
-    env: { enabled?: string; packagesDir?: string },
+    enabled: string | undefined,
     phase: string = PHASE_PRODUCTION_BUILD
   ): Promise<TracingConfig> {
-    vi.stubEnv('VERCEL_DEFAULT_TRACING_ENABLED', env.enabled);
-    vi.stubEnv('VERCEL_OTEL_PACKAGES_DIR', env.packagesDir);
+    vi.stubEnv('VERCEL_DEFAULT_TRACING_ENABLED', enabled);
     const nextConfig = {
       ...config(),
       outputFileTracingRoot: projectDir,
@@ -163,224 +149,90 @@ describe('injectDefaultTracing', () => {
     return nextConfig;
   }
 
-  function otelRoot(projectDir: string): string {
-    return path.join(projectDir, '.vercel', 'otel');
-  }
+  it('injects the prepared wrapper once', async () => {
+    const projectDir = await readyProject();
 
-  it('writes the tracing tree and injects one entry', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    const tracingConfig = await inject(projectDir, packagesDir);
+    const tracingConfig = await inject(projectDir);
 
     expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
+  });
 
+  it('does not change the prepared tree', async () => {
+    const projectDir = await readyProject();
     const wrapper = path.join(otelRoot(projectDir), 'instrumentation.mjs');
-    expect(await fs.readFile(wrapper, 'utf8')).toBe(WRAPPER_SOURCE);
+    const before = await fs.readFile(wrapper, 'utf8');
 
-    const copiedOtel = path.join(
-      otelRoot(projectDir),
+    await inject(projectDir);
+
+    expect(await fs.readFile(wrapper, 'utf8')).toBe(before);
+    expect(await fs.readdir(otelRoot(projectDir))).toEqual([
+      'instrumentation.mjs',
       'node_modules',
-      '@vercel',
-      'otel'
-    );
-    const copiedStat = await fs.lstat(copiedOtel);
-    expect(copiedStat.isSymbolicLink()).toBe(false);
-    expect(copiedStat.isDirectory()).toBe(true);
-
-    const extra = path.join(copiedOtel, 'extra.js');
-    const extraStat = await fs.lstat(extra);
-    expect(extraStat.isSymbolicLink()).toBe(false);
-    expect(await fs.readFile(extra, 'utf8')).toBe(
-      'module.exports = { dereferenced: true }\n'
-    );
-    const req = createRequire(wrapper);
-    expect(await fs.realpath(req.resolve('@vercel/otel'))).toBe(
-      await fs.realpath(path.join(copiedOtel, 'index.js'))
-    );
-    expect(await fs.realpath(req.resolve('@opentelemetry/api-logs'))).toBe(
-      await fs.realpath(
-        path.join(
-          otelRoot(projectDir),
-          'node_modules',
-          '@opentelemetry',
-          'api-logs',
-          'index.js'
-        )
-      )
-    );
-    expect(await fs.realpath(req.resolve('@opentelemetry/api'))).toBe(
-      await fs.realpath(
-        path.join(
-          otelRoot(projectDir),
-          'node_modules',
-          '@opentelemetry',
-          'api',
-          'index.js'
-        )
-      )
-    );
+    ]);
   });
 
-  it('writes a wrapper that loads as ESM in a "type": "commonjs" app', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    await fs.writeFile(
-      path.join(projectDir, 'package.json'),
-      JSON.stringify({ name: 'app', type: 'commonjs' })
-    );
-    const tracingConfig = await inject(projectDir, packagesDir);
-    const [entry] = tracingConfig.instrumentationInject ?? [];
+  it('does not inject when the builder did not prepare .vercel/otel', async () => {
+    const projectDir = await readyProject();
+    await fs.rm(otelRoot(projectDir), { recursive: true });
 
-    // Node and webpack both read .js as CommonJS here, so a .js wrapper's
-    // import/export would fail to parse.
-    const wrapper = pathToFileURL(path.resolve(projectDir, entry)).href;
-    const output = execFileSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `const m = await import(${JSON.stringify(wrapper)}); console.log(typeof m.register)`,
-      ],
-      { encoding: 'utf8' }
-    );
-    expect(output.trim()).toBe('function');
+    const tracingConfig = await inject(projectDir);
+
+    expect(tracingConfig.instrumentationInject).toBeUndefined();
   });
 
-  it('writes a wrapper whose register() warns instead of throwing when @vercel/otel fails', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    const tracingConfig = await inject(projectDir, packagesDir);
-    const [entry] = tracingConfig.instrumentationInject ?? [];
-    const wrapper = path.resolve(projectDir, entry);
-    // Make @vercel/otel throw on import.
-    await fs.writeFile(
-      path.join(
-        otelRoot(projectDir),
-        'node_modules',
-        '@vercel',
-        'otel',
-        'index.js'
-      ),
-      "throw new Error('boom')\n"
-    );
+  it.each(['@vercel/otel', '@opentelemetry/api-logs', '@opentelemetry/api'])(
+    'does not inject when .vercel/otel is missing %s',
+    async (name) => {
+      const projectDir = await readyProject();
+      await fs.rm(path.join(otelRoot(projectDir), 'node_modules', name), {
+        recursive: true,
+      });
 
-    const output = execFileSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `const m = await import(${JSON.stringify(pathToFileURL(wrapper).href)}); await m.register(); console.log('resolved')`,
-      ],
-      {
-        encoding: 'utf8',
-        env: { ...process.env, NEXT_RUNTIME: 'nodejs' },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }
-    );
-    expect(output.trim()).toBe('resolved');
-  });
+      const tracingConfig = await inject(projectDir);
 
-  it('builds one complete tree when several build workers inject at once', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-
-    const configs = await Promise.all(
-      Array.from({ length: 6 }, () => inject(projectDir, packagesDir))
-    );
-
-    for (const c of configs) {
-      expect(c.instrumentationInject).toEqual([INJECT_ENTRY]);
+      expect(tracingConfig.instrumentationInject).toBeUndefined();
     }
-    const otel = otelRoot(projectDir);
-    expect(
-      await fs.readFile(path.join(otel, 'instrumentation.mjs'), 'utf8')
-    ).toBe(WRAPPER_SOURCE);
-    expect(
-      createRequire(path.join(otel, 'instrumentation.mjs')).resolve(
-        '@vercel/otel'
-      )
-    ).toContain(path.join('.vercel', 'otel', 'node_modules'));
-    const leftovers = (
-      await fs.readdir(path.join(projectDir, '.vercel'))
-    ).filter((name) => name !== 'otel');
-    expect(leftovers).toEqual([]);
-  });
-
-  it('reuses a tree with a matching stamp instead of copying again', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    await inject(projectDir, packagesDir);
-    const marker = path.join(otelRoot(projectDir), 'marker');
-    await fs.writeFile(marker, '');
-
-    await inject(projectDir, packagesDir);
-
-    await expect(fs.stat(marker)).resolves.toBeTruthy();
-  });
-
-  it('replaces a tree built from a different image', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    await inject(projectDir, packagesDir);
-    const marker = path.join(otelRoot(projectDir), 'marker');
-    await fs.writeFile(marker, '');
-    const pkgPath = path.join(packagesDir, '@vercel', 'otel', 'package.json');
-    const pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'));
-    await fs.writeFile(pkgPath, JSON.stringify({ ...pkg, version: '2.0.1' }));
-
-    await inject(projectDir, packagesDir);
-
-    await expect(fs.stat(marker)).rejects.toThrow();
-    const copied = JSON.parse(
-      await fs.readFile(
-        path.join(
-          otelRoot(projectDir),
-          'node_modules',
-          '@vercel',
-          'otel',
-          'package.json'
-        ),
-        'utf8'
-      )
-    );
-    expect(copied.version).toBe('2.0.1');
-  });
+  );
 
   it('does not inject when the project has an instrumentation file', async () => {
-    const { projectDir, packagesDir } = await readyProject();
+    const projectDir = await readyProject();
     await fs.writeFile(
       path.join(projectDir, 'instrumentation.ts'),
       'export function register() {}\n'
     );
 
-    const tracingConfig = await inject(projectDir, packagesDir);
+    const tracingConfig = await inject(projectDir);
 
     expect(tracingConfig.instrumentationInject).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
   it('does not inject when a parent folder inside the tracing root has an instrumentation file', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    const app = path.join(projectDir, 'apps', 'web');
-    await fs.mkdir(app, { recursive: true });
+    const root = await tempDir('adapter-tracing-root-');
+    const app = path.join(root, 'apps', 'web');
+    await prepareTree(app);
     await fs.writeFile(
-      path.join(projectDir, 'instrumentation.ts'),
+      path.join(root, 'instrumentation.ts'),
       'export function register() {}\n'
     );
 
-    const tracingConfig = await inject(app, packagesDir, {
+    const tracingConfig = await inject(app, {
       ...config(),
-      outputFileTracingRoot: projectDir,
+      outputFileTracingRoot: root,
     });
 
     expect(tracingConfig.instrumentationInject).toBeUndefined();
-    await expect(fs.stat(otelRoot(app))).rejects.toThrow();
   });
 
   it('ignores an instrumentation file above the tracing root', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    const app = path.join(projectDir, 'apps', 'web');
-    await fs.mkdir(app, { recursive: true });
+    const root = await tempDir('adapter-tracing-root-');
+    const app = path.join(root, 'apps', 'web');
+    await prepareTree(app);
     await fs.writeFile(
-      path.join(projectDir, 'instrumentation.ts'),
+      path.join(root, 'instrumentation.ts'),
       'export function register() {}\n'
     );
 
-    const tracingConfig = await inject(app, packagesDir, {
+    const tracingConfig = await inject(app, {
       ...config(),
       outputFileTracingRoot: app,
     });
@@ -389,26 +241,22 @@ describe('injectDefaultTracing', () => {
   });
 
   it('does not inject when src/ has an instrumentation file', async () => {
-    const { projectDir, packagesDir } = await readyProject();
+    const projectDir = await readyProject();
     await fs.mkdir(path.join(projectDir, 'src'));
     await fs.writeFile(
       path.join(projectDir, 'src', 'instrumentation.js'),
       'export function register() {}\n'
     );
 
-    const tracingConfig = await inject(projectDir, packagesDir);
+    const tracingConfig = await inject(projectDir);
 
     expect(tracingConfig.instrumentationInject).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
   it('injects through modifyConfig when default tracing is enabled', async () => {
-    const { projectDir, packagesDir } = await readyProject();
+    const projectDir = await readyProject();
 
-    const tracingConfig = await modifyConfig(projectDir, {
-      enabled: '1',
-      packagesDir,
-    });
+    const tracingConfig = await modifyConfig(projectDir, '1');
 
     expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
   });
@@ -418,39 +266,32 @@ describe('injectDefaultTracing', () => {
     ['0', '0'],
     ['true', 'true'],
   ])('does not inject when default tracing is %s', async (_label, enabled) => {
-    const { projectDir, packagesDir } = await readyProject();
+    const projectDir = await readyProject();
 
-    const tracingConfig = await modifyConfig(projectDir, {
-      enabled,
-      packagesDir,
-    });
+    const tracingConfig = await modifyConfig(projectDir, enabled);
 
     expect(tracingConfig.instrumentationInject).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
-  it.each([
-    ['unset', undefined],
-    ['blank', '  '],
-  ])('does not inject when the packages dir env is %s', async (_label, dir) => {
-    const { projectDir } = await readyProject();
+  it('does not inject outside the production build', async () => {
+    const projectDir = await readyProject();
 
-    const tracingConfig = await modifyConfig(projectDir, {
-      enabled: '1',
-      packagesDir: dir,
-    });
+    const tracingConfig = await modifyConfig(
+      projectDir,
+      '1',
+      'phase-development-server'
+    );
 
     expect(tracingConfig.instrumentationInject).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
   it('injects when the app has no @opentelemetry/api', async () => {
-    const { projectDir, packagesDir } = await readyProject();
+    const projectDir = await readyProject();
     await fs.rm(path.join(projectDir, 'node_modules', '@opentelemetry'), {
       recursive: true,
     });
 
-    const tracingConfig = await inject(projectDir, packagesDir);
+    const tracingConfig = await inject(projectDir);
 
     expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
   });
@@ -458,188 +299,77 @@ describe('injectDefaultTracing', () => {
   it.each(['1.10.0', '2.0.0', '1.9.0-rc.0'])(
     'does not inject when @opentelemetry/api is %s',
     async (version) => {
-      const { projectDir, packagesDir } = await readyProject();
+      const projectDir = await readyProject();
       await writePackage(
         path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
         '@opentelemetry/api',
         version
       );
 
-      const tracingConfig = await inject(projectDir, packagesDir);
+      const tracingConfig = await inject(projectDir);
 
       expect(tracingConfig.instrumentationInject).toBeUndefined();
-      await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
     }
   );
 
   it.each(['1.4.1', '1.6.0', '1.9.1'])(
     'injects when @opentelemetry/api is %s',
     async (version) => {
-      const { projectDir, packagesDir } = await readyProject();
+      const projectDir = await readyProject();
       await writePackage(
         path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
         '@opentelemetry/api',
         version
       );
 
-      const tracingConfig = await inject(projectDir, packagesDir);
+      const tracingConfig = await inject(projectDir);
 
       expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
     }
   );
 
   it('does not inject when only Next.js resolves @opentelemetry/api 1.10.0', async () => {
-    const { projectDir, packagesDir } = await readyProject();
+    const projectDir = await readyProject();
     await hiddenOtelApi(projectDir, '1.10.0');
 
-    const tracingConfig = await inject(projectDir, packagesDir);
+    const tracingConfig = await inject(projectDir);
 
     expect(tracingConfig.instrumentationInject).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
   it('injects when only Next.js resolves @opentelemetry/api 1.9.0', async () => {
-    const { projectDir, packagesDir } = await readyProject();
+    const projectDir = await readyProject();
     await hiddenOtelApi(projectDir, '1.9.0');
 
-    const tracingConfig = await inject(projectDir, packagesDir);
-
-    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
-    const wrapper = path.join(otelRoot(projectDir), 'instrumentation.mjs');
-    expect(
-      await fs.realpath(createRequire(wrapper).resolve('@opentelemetry/api'))
-    ).toBe(
-      await fs.realpath(
-        path.join(
-          otelRoot(projectDir),
-          'node_modules',
-          '@opentelemetry',
-          'api',
-          'index.js'
-        )
-      )
-    );
-  });
-
-  it.each(['1.10.0', '1.8.0', '1.9.0-rc.0'])(
-    'does not inject when the build image has @opentelemetry/api %s',
-    async (version) => {
-      const { projectDir, packagesDir } = await readyProject();
-      await writePackage(
-        path.join(packagesDir, '@opentelemetry', 'api'),
-        '@opentelemetry/api',
-        version
-      );
-
-      const tracingConfig = await inject(projectDir, packagesDir);
-
-      expect(tracingConfig.instrumentationInject).toBeUndefined();
-      await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
-    }
-  );
-
-  it('skips @opentelemetry/api nested under a copied package', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    const apiLogs = path.join(packagesDir, '@opentelemetry', 'api-logs');
-    await writePackage(
-      path.join(apiLogs, 'node_modules', '@opentelemetry', 'api'),
-      '@opentelemetry/api',
-      '1.10.0'
-    );
-
-    const tracingConfig = await inject(projectDir, packagesDir);
-
-    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
-    const copiedApiLogs = path.join(
-      otelRoot(projectDir),
-      'node_modules',
-      '@opentelemetry',
-      'api-logs'
-    );
-    await expect(
-      fs.stat(path.join(copiedApiLogs, 'node_modules', '@opentelemetry', 'api'))
-    ).rejects.toThrow();
-    const req = createRequire(path.join(copiedApiLogs, 'index.js'));
-    expect(await fs.realpath(req.resolve('@opentelemetry/api'))).toBe(
-      await fs.realpath(
-        path.join(
-          otelRoot(projectDir),
-          'node_modules',
-          '@opentelemetry',
-          'api',
-          'index.js'
-        )
-      )
-    );
-  });
-
-  it.each(['@vercel/otel', '@opentelemetry/api-logs', '@opentelemetry/api'])(
-    'does not inject when the build image is missing %s',
-    async (name) => {
-      const { projectDir, packagesDir } = await readyProject();
-      await fs.rm(path.join(packagesDir, name), { recursive: true });
-
-      const tracingConfig = await inject(projectDir, packagesDir);
-
-      expect(tracingConfig.instrumentationInject).toBeUndefined();
-      await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
-    }
-  );
-
-  it('does not inject when a copied package has runtime dependencies', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    const pkgPath = path.join(packagesDir, '@vercel', 'otel', 'package.json');
-    const pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'));
-    await fs.writeFile(
-      pkgPath,
-      JSON.stringify({ ...pkg, dependencies: { 'some-runtime-dep': '^1.0.0' } })
-    );
-
-    const tracingConfig = await inject(projectDir, packagesDir);
-
-    expect(tracingConfig.instrumentationInject).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
-  });
-
-  it('allows api-logs to depend on the copied @opentelemetry/api', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    const pkgPath = path.join(
-      packagesDir,
-      '@opentelemetry',
-      'api-logs',
-      'package.json'
-    );
-    const pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'));
-    await fs.writeFile(
-      pkgPath,
-      JSON.stringify({
-        ...pkg,
-        dependencies: { '@opentelemetry/api': '^1.3.0' },
-      })
-    );
-
-    const tracingConfig = await inject(projectDir, packagesDir);
+    const tracingConfig = await inject(projectDir);
 
     expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
   });
 
   it('does not inject when instrumentationInject already has other entries', async () => {
-    const { projectDir, packagesDir } = await readyProject();
+    const projectDir = await readyProject();
     const tracingConfig = config();
     tracingConfig.instrumentationInject = ['./custom.js'];
 
-    await inject(projectDir, packagesDir, tracingConfig);
+    await inject(projectDir, tracingConfig);
 
     expect(tracingConfig.instrumentationInject).toEqual(['./custom.js']);
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
   });
 
   it('injects once when the entry is already there', async () => {
-    const { projectDir, packagesDir } = await readyProject();
+    const projectDir = await readyProject();
     const tracingConfig = config();
     tracingConfig.instrumentationInject = [INJECT_ENTRY];
 
-    await inject(projectDir, packagesDir, tracingConfig);
+    await inject(projectDir, tracingConfig);
+
+    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
+  });
+
+  it('does not add a second entry when called again', async () => {
+    const projectDir = await readyProject();
+    const tracingConfig = await inject(projectDir);
+    await inject(projectDir, tracingConfig);
 
     expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
   });
@@ -648,20 +378,20 @@ describe('injectDefaultTracing', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
     try {
-      const { projectDir, packagesDir } = await readyProject();
+      const projectDir = await readyProject();
       await fs.writeFile(
         path.join(projectDir, 'instrumentation.ts'),
         'export function register() {}\n'
       );
 
       vi.stubEnv('VERCEL_BUILDER_DEBUG', undefined);
-      await inject(projectDir, packagesDir);
+      await inject(projectDir);
       expect([...log.mock.calls, ...info.mock.calls].flat()).not.toContain(
         'Skipping Vercel tracing inject: project has an instrumentation file'
       );
 
       vi.stubEnv('VERCEL_BUILDER_DEBUG', '1');
-      await inject(projectDir, packagesDir);
+      await inject(projectDir);
       expect(log).toHaveBeenCalledWith(
         'Skipping Vercel tracing inject: project has an instrumentation file'
       );
@@ -669,37 +399,6 @@ describe('injectDefaultTracing', () => {
       log.mockRestore();
       info.mockRestore();
     }
-  });
-
-  it('does not inject outside the production build', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-
-    const tracingConfig = await modifyConfig(
-      projectDir,
-      { enabled: '1', packagesDir },
-      'phase-development-server'
-    );
-
-    expect(tracingConfig.instrumentationInject).toBeUndefined();
-    await expect(fs.stat(otelRoot(projectDir))).rejects.toThrow();
-  });
-
-  it('does not throw when the tracing directory cannot be written', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    await fs.mkdir(path.join(projectDir, '.vercel'));
-    await fs.writeFile(path.join(projectDir, '.vercel', 'otel'), 'blocked');
-
-    const tracingConfig = await inject(projectDir, packagesDir);
-
-    expect(tracingConfig.instrumentationInject).toBeUndefined();
-  });
-
-  it('does not add a second entry when called again', async () => {
-    const { projectDir, packagesDir } = await readyProject();
-    const tracingConfig = await inject(projectDir, packagesDir);
-    await inject(projectDir, packagesDir, tracingConfig);
-
-    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
   });
 });
 
