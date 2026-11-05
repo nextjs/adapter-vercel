@@ -9,9 +9,55 @@ import {
 } from '@vercel/build-utils';
 import minimatch from 'minimatch';
 import type { NextAdapter } from 'next';
+import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { modifyConfig } from './config';
 import { encodeNativeRequest, encodeOutputMaps } from './native-wire';
 import { getImagesConfig } from './utils';
+
+type PrefetchStage = 'config' | 'complete';
+const prefetches = new Map<
+  string,
+  {
+    stage: PrefetchStage;
+    promise: Promise<{ durationMs: number; bytes: number }>;
+  }
+>();
+
+function prefetchBinary(stage: PrefetchStage) {
+  const binary =
+    process.env.NEXT_ADAPTER_GO_BINARY ||
+    path.join(
+      __dirname,
+      'bin',
+      `adapter-vercel-${process.platform}-${process.arch}`
+    );
+  if (process.env.NEXT_ADAPTER_GO_PREFETCH === '0')
+    return {
+      binary,
+      stage,
+      promise: Promise.resolve({ durationMs: 0, bytes: 0 }),
+    };
+  let prefetch = prefetches.get(binary);
+  if (!prefetch) {
+    const started = performance.now();
+    const promise = readFile(binary).then(
+      (data) => ({
+        durationMs: performance.now() - started,
+        bytes: data.byteLength,
+      }),
+      () => ({ durationMs: performance.now() - started, bytes: 0 })
+    );
+    prefetch = { stage, promise };
+    prefetches.set(binary, prefetch);
+    if (process.env.NEXT_NATIVE_BUILD_TIMINGS === '1')
+      void promise.then((result) => {
+        console.log(
+          `[adapter-go-prefetch] ${JSON.stringify({ stage, pid: process.pid, ...result })}`
+        );
+      });
+  }
+  return { binary, ...prefetch };
+}
 
 function cpuCounters() {
   for (const file of [
@@ -34,34 +80,22 @@ function cpuCounters() {
 // All output traversal, routing, hashing and filesystem generation runs in the binary.
 const adapter: NextAdapter = {
   name: 'Vercel (Go)',
-  modifyConfig,
+  async modifyConfig(config, ctx) {
+    // Start the read without blocking configuration or compilation. The full
+    // builder timer includes it; onBuildComplete waits only for any remainder.
+    if (
+      ctx.phase === PHASE_PRODUCTION_BUILD &&
+      process.env.NEXT_ADAPTER_GO_PREFETCH_STAGE !== 'complete'
+    )
+      prefetchBinary('config');
+    return modifyConfig(config, ctx);
+  },
   async onBuildComplete(ctx) {
     const started = performance.now();
     const timings = process.env.NEXT_NATIVE_BUILD_TIMINGS === '1';
     const cpuBefore = timings ? cpuCounters() : undefined;
-    const binary =
-      process.env.NEXT_ADAPTER_GO_BINARY ||
-      path.join(
-        __dirname,
-        'bin',
-        `adapter-vercel-${process.platform}-${process.arch}`
-      );
-    // Sequential reads warm executable pages while module/policy preparation
-    // runs. Avoid serial demand-paging waits during native process startup.
-    const prefetchStarted = performance.now();
-    const binaryPrefetch =
-      process.env.NEXT_ADAPTER_GO_PREFETCH === '0'
-        ? Promise.resolve({ durationMs: 0, bytes: 0 })
-        : readFile(binary).then(
-            (data) => ({
-              durationMs: performance.now() - prefetchStarted,
-              bytes: data.byteLength,
-            }),
-            () => ({
-              durationMs: performance.now() - prefetchStarted,
-              bytes: 0,
-            })
-          );
+    const { binary, promise: binaryPrefetch, stage: prefetchStage } =
+      prefetchBinary('complete');
     const projectRequire = createRequire(
       path.join(ctx.projectDir, 'package.json')
     );
@@ -179,7 +213,7 @@ const adapter: NextAdapter = {
     });
     if (timings) {
       console.log(
-        `[adapter-benchmark] ${JSON.stringify({ implementation: 'go', durationMs: performance.now() - started, preparationMs: prepared - started, wireMs, prefetchMs: prefetch.durationMs, prefetchBytes: prefetch.bytes, prefetchWaitMs, serializationMs, requestBytes, spawnedUnixMs, spawnCallMs, childPid, cpuBefore, cpuBeforeSpawn, cpuAfter: cpuCounters(), profiled: process.env.NEXT_ADAPTER_GO_PROFILE === '1' })}`
+        `[adapter-benchmark] ${JSON.stringify({ implementation: 'go', durationMs: performance.now() - started, preparationMs: prepared - started, wireMs, prefetchMs: prefetch.durationMs, prefetchBytes: prefetch.bytes, prefetchStage, prefetchWaitMs, serializationMs, requestBytes, spawnedUnixMs, spawnCallMs, childPid, cpuBefore, cpuBeforeSpawn, cpuAfter: cpuCounters(), profiled: process.env.NEXT_ADAPTER_GO_PROFILE === '1' })}`
       );
     }
   },
