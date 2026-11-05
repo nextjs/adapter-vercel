@@ -122,8 +122,8 @@ const adapter: NextAdapter = {
         `adapter-vercel-${process.platform}-${process.arch}`
       );
     await new Promise<void>((resolve, reject) => {
-      spawnedUnixMs = Date.now();
       cpuBeforeSpawn = timings ? cpuCounters() : undefined;
+      spawnedUnixMs = Date.now();
       const spawnStarted = performance.now();
       const child = spawn(binary, [], {
         stdio: ['pipe', 'inherit', 'inherit'],
