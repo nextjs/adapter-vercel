@@ -22,6 +22,7 @@ type adapter struct {
 	encodedBindings                                              []encodedBinding
 	encodedMapSizes                                              [][2]int
 	sourceFiles                                                  sync.Map
+	workers                                                      *outputWorkers
 	sourceRoot                                                   string
 	sourceTypes                                                  []string
 	hasApp, hasPages, hasMiddleware, has404, has500, hasNotFound bool
@@ -38,6 +39,8 @@ func build(req request) {
 		}
 	}
 	a.encodeBindings()
+	a.workers = newOutputWorkers(outputConcurrency())
+	defer a.workers.close()
 	a.sourceRoot = a.ProjectDir
 	if exists(filepath.Join(a.ProjectDir, "src/pages")) || exists(filepath.Join(a.ProjectDir, "src/app")) {
 		a.sourceRoot = filepath.Join(a.ProjectDir, "src")
@@ -70,8 +73,6 @@ func build(req request) {
 	a.hasApp = len(arr(req.Outputs["appPages"]))+len(arr(req.Outputs["appRoutes"])) > 0
 	a.hasPages = len(arr(req.Outputs["pages"]))+len(arr(req.Outputs["pagesApi"])) > 0
 	a.hasMiddleware = req.Outputs["middleware"] != nil
-	profilePhase("public", func() { a.publicFiles() })
-	profilePhase("static", func() { a.staticFiles() })
 	nodes, edges := []any{}, []any{}
 	for _, key := range []string{"appPages", "appRoutes", "pages", "pagesApi", "staticFiles"} {
 		for _, v := range arr(req.Outputs[key]) {
@@ -111,7 +112,6 @@ func build(req request) {
 			a.has500 = true
 		}
 	}
-	profilePhase("edge", func() { a.edgeOutputs(edges) })
 	base := str(req.Config["basePath"])
 	for _, v := range arr(req.Outputs["prerenders"]) {
 		o := obj(v)
@@ -131,14 +131,6 @@ func build(req request) {
 	middlewareRoutes := []any{}
 	if a.hasMiddleware {
 		middleware := obj(req.Outputs["middleware"])
-		switch middleware["runtime"] {
-		case "nodejs":
-			a.nodeOutputs([]any{middleware}, true)
-		case "edge":
-			a.edgeOutputs([]any{middleware})
-		default:
-			panic("unsupported middleware runtime")
-		}
 		for _, v := range arr(obj(middleware["config"])["matchers"]) {
 			m := obj(v)
 			r := pick(m, "has", "missing")
@@ -154,8 +146,33 @@ func build(req request) {
 			middlewareRoutes = append(middlewareRoutes, r)
 		}
 	}
-	profilePhase("node", func() { a.nodeOutputs(nodes, false) })
-	profilePhase("prerenders", func() { a.prerenders(arr(req.Outputs["prerenders"])) })
+	assets := func() {
+		// Public files precede generated static files to preserve overwrite order.
+		profilePhase("public", func() { a.publicFiles() })
+		profilePhase("static", func() { a.staticFiles() })
+	}
+	functions := func() {
+		profilePhase("edge", func() { a.edgeOutputs(edges) })
+		if a.hasMiddleware {
+			middleware := obj(req.Outputs["middleware"])
+			switch middleware["runtime"] {
+			case "nodejs":
+				a.nodeOutputs([]any{middleware}, true)
+			case "edge":
+				a.edgeOutputs([]any{middleware})
+			default:
+				panic("unsupported middleware runtime")
+			}
+		}
+		profilePhase("node", func() { a.nodeOutputs(nodes, false) })
+		profilePhase("prerenders", func() { a.prerenders(arr(req.Outputs["prerenders"])) })
+	}
+	if os.Getenv("NEXT_ADAPTER_GO_OVERLAP") == "0" {
+		assets()
+		functions()
+	} else {
+		concurrentPhases(assets, functions)
+	}
 	profilePhase("routes", func() {
 		a.vercelConfig["routes"] = a.routes(middlewareRoutes)
 		writeJSON(filepath.Join(a.outputDir, "config.json"), a.vercelConfig)
@@ -343,7 +360,7 @@ func (a *adapter) publicFiles() {
 	for _, e := range entries {
 		items = append(items, object{"name": e.Name()})
 	}
-	parallel(items, func(o object) {
+	a.parallel("public", items, func(o object) {
 		name := str(o["name"])
 		copyFile(filepath.Join(public, name), outputPath(filepath.Join(a.outputDir, "static"), join(str(a.Config["basePath"]), name)))
 	})

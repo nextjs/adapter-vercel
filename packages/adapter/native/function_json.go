@@ -180,7 +180,14 @@ type metadataIdentity struct {
 }
 
 func (m *metadataMap) identity() metadataIdentity {
-	return metadataIdentity{m.id, jsonText(m.extra), jsonText(m.deleted)}
+	identity := metadataIdentity{id: m.id}
+	if len(m.extra) > 0 {
+		identity.extra = jsonText(m.extra)
+	}
+	if len(m.deleted) > 0 {
+		identity.deleted = jsonText(m.deleted)
+	}
+	return identity
 }
 
 func (m *metadataMap) capacity(extra string) int {
@@ -235,11 +242,18 @@ func (c *functionConfigs) writeInDirectory(file string, cfg object, files, hashe
 
 func (c *functionConfigs) writeWith(file string, cfg object, files, hashes *metadataMap, write func(string, []byte) bool) {
 	prefix := configPrefix(cfg, hashes)
+	c.writePrefix(file, prefix, files, hashes, write)
+}
+
+func (c *functionConfigs) writePrefix(file, prefix string, files, hashes *metadataMap, write func(string, []byte) bool) {
 	key := functionConfigIdentity{prefix: prefix, files: files.identity(), hasHashes: hashes != nil}
 	if hashes != nil {
 		key.hashes = hashes.identity()
 	}
-	value, _ := c.entries.LoadOrStore(key, &cachedFunctionConfig{})
+	value, found := c.entries.Load(key)
+	if !found {
+		value, _ = c.entries.LoadOrStore(key, &cachedFunctionConfig{})
+	}
 	entry := value.(*cachedFunctionConfig)
 	var generated []byte
 	entry.once.Do(func() {

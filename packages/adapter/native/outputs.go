@@ -40,7 +40,7 @@ func (a *adapter) staticFiles() {
 			immutable[name] = o["immutableHash"]
 		}
 	}
-	parallel(outputs, func(o object) {
+	a.parallel("static", outputs, func(o object) {
 		suffix := ""
 		if filepath.Ext(str(o["filePath"])) == ".html" {
 			suffix = ".html"
@@ -183,8 +183,13 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 		notFound = pagesError
 	}
 	notFoundHashes := a.hashes(notFound)
+	defaults := nodeFunctionConfig{OperationType: "API", Handler: handlerRel, Runtime: a.NodeRuntime, SupportsMultiPayloads: true, SupportsResponseStreaming: true, ExperimentalAllowBundling: true, DisableFetchInstrumentation: os.Getenv("VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION") == "1", LauncherType: "Nodejs", UseWebAPI: middleware}
+	defaults.Framework.Slug, defaults.Framework.Version = "nextjs", a.NextVersion
+	apiPrefix := jsonText(defaults)
+	defaults.OperationType = "PAGE"
+	pagePrefix := jsonText(defaults)
 	var configs functionConfigs
-	parallel(outputs, func(o object) {
+	a.parallel("node", outputs, func(o object) {
 		functionDir := outputPath(filepath.Join(a.outputDir, "functions"), a.normalized(str(o["pathname"]))+".func")
 		mkdir(functionDir)
 		files := a.metadata(o, true)
@@ -233,7 +238,14 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 		options := a.functionOptions(source, str(o["pathname"]))
 		outputConfig := obj(o["config"])
 		generated := a.generatedOptions(source, str(o["pathname"]))
-		options = merge(options, generated)
+		if len(generated) > 0 {
+			if options == nil {
+				options = make(object, len(generated)+1)
+			}
+			for key, value := range generated {
+				options[key] = value
+			}
+		}
 		duration := options["maxDuration"]
 		if v, ok := outputConfig["maxDuration"]; ok {
 			duration = v
@@ -241,20 +253,21 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 		if v, ok := generated["maxDuration"]; ok {
 			duration = v
 		}
-		cfg := merge(options, object{"operationType": "API", "framework": object{"slug": "nextjs", "version": a.NextVersion}, "handler": handlerRel, "runtime": a.NodeRuntime, "supportsMultiPayloads": true, "supportsResponseStreaming": true, "experimentalAllowBundling": true, "shouldDisableAutomaticFetchInstrumentation": os.Getenv("VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION") == "1", "launcherType": "Nodejs"})
 		if duration != nil {
-			cfg["maxDuration"] = duration
+			if options == nil {
+				options = make(object, 1)
+			}
+			options["maxDuration"] = duration
 		}
-		if middleware {
-			cfg["useWebApi"] = true
-		}
+		prefix := apiPrefix
 		if o["type"] == "APP_PAGE" || o["type"] == "PAGES" {
-			cfg["operationType"] = "PAGE"
+			prefix = pagePrefix
 		}
+		prefix = nodeConfigPrefix(prefix, options, middleware, hasHashes)
 		if hasHashes {
-			configs.writeInDirectory(filepath.Join(functionDir, ".vc-config.json"), cfg, &files, &hashes)
+			configs.writePrefix(filepath.Join(functionDir, ".vc-config.json"), prefix, &files, &hashes, writeOnceInDirectory)
 		} else {
-			configs.writeInDirectory(filepath.Join(functionDir, ".vc-config.json"), cfg, &files, nil)
+			configs.writePrefix(filepath.Join(functionDir, ".vc-config.json"), prefix, &files, nil, writeOnceInDirectory)
 		}
 	})
 }
@@ -322,7 +335,7 @@ func (a *adapter) generatedOptions(source, name string) object {
 	step := strings.Contains(name, ".well-known/workflow/v1/step") || strings.Contains(name, "api/generated/steps")
 	workflow := strings.Contains(name, ".well-known/workflow/v1/flow") || strings.Contains(name, "api/generated/workflows")
 	if !step && !workflow {
-		return object{}
+		return nil
 	}
 	parent := filepath.Dir(source)
 	if strings.HasSuffix(source, "/route.js") || strings.HasSuffix(source, "/route.ts") {
@@ -330,7 +343,7 @@ func (a *adapter) generatedOptions(source, name string) object {
 	}
 	p := filepath.Join(a.ProjectDir, parent, "config.json")
 	if !exists(p) {
-		return object{}
+		return nil
 	}
 	cfg := readJSON(p)
 	if step && cfg["steps"] != nil {
@@ -339,7 +352,7 @@ func (a *adapter) generatedOptions(source, name string) object {
 	if workflow {
 		return obj(cfg["workflows"])
 	}
-	return object{}
+	return nil
 }
 
 func (a *adapter) functionOptions(source, name string) object {
@@ -357,7 +370,7 @@ func (a *adapter) functionOptions(source, name string) object {
 		o := clone(rule.Options)
 		return o
 	}
-	return object{}
+	return nil
 }
 func envOr(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
@@ -369,7 +382,7 @@ func envOr(key, fallback string) string {
 func (a *adapter) prerenders(outputs []any) {
 	functions := filepath.Join(a.outputDir, "functions")
 	mkdir(functions)
-	parallel(outputs, func(o object) {
+	a.parallel("prerenders", outputs, func(o object) {
 		name := str(o["pathname"])
 		cfg := obj(o["config"])
 		fallback := obj(o["fallback"])

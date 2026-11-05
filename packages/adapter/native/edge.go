@@ -41,7 +41,7 @@ func orderedKeys(m object, keys []string) []string {
 }
 
 func (a *adapter) edgeOutputs(outputs []any) {
-	parallel(outputs, func(o object) {
+	a.parallel("edge", outputs, func(o object) {
 		functionDir := outputPath(filepath.Join(a.outputDir, "functions"), a.normalized(str(o["pathname"]))+".func")
 		mkdir(functionDir)
 		assets, wasm := a.assets(o), obj(o["wasmAssets"])

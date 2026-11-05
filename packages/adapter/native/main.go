@@ -11,7 +11,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 )
 
 type object = map[string]any
@@ -278,39 +277,4 @@ func copyEntry(src, dst string) {
 	closeErr := out.Close()
 	check(err)
 	check(closeErr)
-}
-
-// Bound filesystem concurrency independently of the number of outputs. Preserve the first failure.
-func parallel(items []any, fn func(object)) {
-	if len(items) == 0 {
-		return
-	}
-	jobs := make(chan any)
-	var wg sync.WaitGroup
-	var once sync.Once
-	var failure any
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for item := range jobs {
-				func() {
-					defer func() {
-						if err := recover(); err != nil {
-							once.Do(func() { failure = err })
-						}
-					}()
-					fn(obj(item))
-				}()
-			}
-		}()
-	}
-	for _, item := range items {
-		jobs <- item
-	}
-	close(jobs)
-	wg.Wait()
-	if failure != nil {
-		panic(failure)
-	}
 }
