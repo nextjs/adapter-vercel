@@ -16,12 +16,33 @@ Edge assembly preserves source bytes while stripping the same inline source-map
 comments as the reference. The existing adapter emits the assembled source, not
 a separate composed source map.
 
-The version-1 input includes the public hook context, unmodified configuration
-JSON, explicit asset ordering and compiled image/function glob patterns. Module
+The version-3 input includes the public hook context, unmodified configuration
+JSON, explicit asset ordering and compiled image/function glob patterns. The
+frame starts with `NXTADP3\n`, a little-endian uint32 JSON byte length, and the
+UTF-8 JSON context. A little-endian uint32 map count follows, then each map's
+uint32 length and uint32 binding references. Empty maps and reference order are
+preserved. Go validates all section lengths before allocating the typed reference
+storage. Internal version-1/2 JSON snapshots remain readable for diagnostics.
+Module
 resolution, JavaScript configuration mutation and shared platform policy remain
 at the JavaScript boundary. Function policy is normalized once per configured
 rule; Go performs matching and all per-output work. Unsupported protocol/runtime
 values fail the build instead of silently falling back.
+
+Config buffers are sized from shared-map lengths instead of retaining oversized
+growth buffers. A 64MiB cap bounds the encoded config cache; output files remain
+independent regular files so postbuild edits cannot affect other functions.
+Source-file lookups are shared across outputs for the same source page. Function
+writes reuse already-created parent directories without redundant probes.
+
+The production `modifyConfig` hook starts executable prefetch asynchronously,
+overlapping compilation. `onBuildComplete` awaits any remaining read and falls
+back to starting it there when the earlier hook ran in a different process.
+`NEXT_ADAPTER_GO_PREFETCH_STAGE=complete` restores the previous start point for
+controls; `NEXT_ADAPTER_GO_PREFETCH=0` disables prefetch. Timing logs include the
+prefetch stage. Its complete read duration can occur outside the adapter timer,
+but remains inside the full builder timer; only residual wait is on the adapter
+critical path. Performance results must include both adapter and builder times.
 
 Set `NEXT_ADAPTER_GO_PROFILE=1` on a diagnostic deployment to collect phase wall
 times, allocation counts, runtime CPU settings and a labeled Go CPU profile.

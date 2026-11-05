@@ -94,8 +94,11 @@ const adapter: NextAdapter = {
     const started = performance.now();
     const timings = process.env.NEXT_NATIVE_BUILD_TIMINGS === '1';
     const cpuBefore = timings ? cpuCounters() : undefined;
-    const { binary, promise: binaryPrefetch, stage: prefetchStage } =
-      prefetchBinary('complete');
+    const {
+      binary,
+      promise: binaryPrefetch,
+      stage: prefetchStage,
+    } = prefetchBinary('complete');
     const projectRequire = createRequire(
       path.join(ctx.projectDir, 'package.json')
     );

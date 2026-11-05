@@ -18,7 +18,9 @@ it.each(['config', 'complete'])(
     vi.stubEnv('NEXT_ADAPTER_GO_PREFETCH', '1');
     vi.stubEnv('NEXT_ADAPTER_GO_PREFETCH_STAGE', stage);
     vi.stubEnv('NEXT_NATIVE_BUILD_TIMINGS', '0');
-    const read = vi.spyOn(fs, 'readFile').mockResolvedValue(Buffer.from('binary'));
+    const read = vi
+      .spyOn(fs, 'readFile')
+      .mockResolvedValue(Buffer.from('binary'));
     const entry = require.resolve('../dist/native-adapter.js');
     delete require.cache[entry];
     const adapter = require(entry);

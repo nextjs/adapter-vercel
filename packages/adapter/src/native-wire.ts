@@ -1,3 +1,4 @@
+import { endianness } from 'node:os';
 import type { NextAdapter } from 'next';
 
 type Context = Parameters<NonNullable<NextAdapter['onBuildComplete']>>[0];
@@ -20,11 +21,30 @@ export function encodeNativeRequest(
   );
   const maps = request.assetMaps;
   const words = 1 + maps.length + maps.reduce((n, refs) => n + refs.length, 0);
-  const payload = Buffer.allocUnsafe(12 + json.length + words * 4);
+  // Align the numeric section so typed-array bulk copies can encode whole maps.
+  // JSON accepts the trailing spaces included in its byte length.
+  const jsonLength = Math.ceil(json.length / 4) * 4;
+  const payload = Buffer.allocUnsafeSlow(12 + jsonLength + words * 4);
   payload.write('NXTADP3\n', 0, 'ascii');
-  payload.writeUInt32LE(json.length, 8);
+  payload.writeUInt32LE(jsonLength, 8);
   json.copy(payload, 12);
-  let offset = 12 + json.length;
+  payload.fill(0x20, 12 + json.length, 12 + jsonLength);
+  if (endianness() === 'LE') {
+    const values = new Uint32Array(
+      payload.buffer,
+      payload.byteOffset + 12 + jsonLength,
+      words
+    );
+    let offset = 0;
+    values[offset++] = maps.length;
+    for (const refs of maps) {
+      values[offset++] = refs.length;
+      values.set(refs, offset);
+      offset += refs.length;
+    }
+    return payload;
+  }
+  let offset = 12 + jsonLength;
   payload.writeUInt32LE(maps.length, offset);
   offset += 4;
   for (const refs of maps) {
