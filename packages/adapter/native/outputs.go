@@ -183,7 +183,6 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 	}
 	notFoundHashes := a.hashes(notFound)
 	var configs functionConfigs
-	var sharedHandler sharedPath
 	parallel(outputs, func(o object) {
 		functionDir := outputPath(filepath.Join(a.outputDir, "functions"), a.normalized(str(o["pathname"]))+".func")
 		mkdir(functionDir)
@@ -221,7 +220,7 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 		if hasHashes {
 			hashes.set(manifestRel, manifestHash)
 		}
-		sharedHandler.write(outputPath(functionDir, handlerRel), func(file string) bool { return writeOnce(file, handler) })
+		writeOnce(outputPath(functionDir, handlerRel), handler)
 		if hasHashes {
 			hashes.set(handlerRel, handlerHash)
 		}

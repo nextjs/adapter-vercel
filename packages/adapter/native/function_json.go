@@ -1,10 +1,9 @@
 package main
 
 import (
-	"io"
-	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 )
 
 // Trace bindings recur in hundreds of functions. Quote each binding once, then
@@ -129,6 +128,11 @@ func writeFunctionConfig(file string, cfg object, files, hashes *metadataMap) bo
 func renderFunctionConfig(file, prefix string, files, hashes *metadataMap) bool {
 	buffer := functionJSONBuffers.Get().([]byte)[:0]
 	defer func() { functionJSONBuffers.Put(buffer[:0]) }()
+	buffer = appendFunctionConfig(buffer, prefix, files, hashes)
+	return writeOnce(file, buffer)
+}
+
+func appendFunctionConfig(buffer []byte, prefix string, files, hashes *metadataMap) []byte {
 	buffer = append(buffer, prefix[:len(prefix)-1]...)
 	if prefix != "{}" {
 		buffer = append(buffer, ',')
@@ -144,45 +148,7 @@ func renderFunctionConfig(file, prefix string, files, hashes *metadataMap) bool 
 		encodedConfigBytes.Add(uint64(len(buffer)))
 		encodedConfigs.Add(1)
 	}
-	return writeOnce(file, buffer)
-}
-
-// Reuse completed content while keeping output files independent for postbuild
-// edits. io.Copy uses the kernel's file-copy path where available.
-type sharedPath struct {
-	once   sync.Once
-	source string
-}
-
-func (s *sharedPath) write(file string, generate func(string) bool) {
-	first := false
-	s.once.Do(func() {
-		first = true
-		if generate(file) {
-			s.source = file
-		}
-	})
-	if first || s.source == file {
-		return
-	}
-	if s.source != "" {
-		mkdir(filepath.Dir(file))
-		input, err := os.Open(s.source)
-		if err == nil {
-			defer input.Close()
-			output, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
-			if os.IsExist(err) {
-				return
-			}
-			check(err)
-			_, copyErr := io.Copy(output, input)
-			closeErr := output.Close()
-			check(copyErr)
-			check(closeErr)
-			return
-		}
-	}
-	generate(file)
+	return buffer
 }
 
 type metadataIdentity struct {
@@ -199,7 +165,28 @@ type functionConfigIdentity struct {
 	files, hashes metadataIdentity
 	hasHashes     bool
 }
-type functionConfigs struct{ entries sync.Map }
+type cachedFunctionConfig struct {
+	once sync.Once
+	data []byte
+}
+type functionConfigs struct {
+	entries sync.Map
+	bytes   atomic.Int64
+}
+
+const functionConfigCacheLimit = 64 << 20
+
+func (c *functionConfigs) reserve(size int) bool {
+	for {
+		used := c.bytes.Load()
+		if int64(size) > functionConfigCacheLimit-used {
+			return false
+		}
+		if c.bytes.CompareAndSwap(used, used+int64(size)) {
+			return true
+		}
+	}
+}
 
 func (c *functionConfigs) write(file string, cfg object, files, hashes *metadataMap) {
 	prefix := configPrefix(cfg, hashes)
@@ -207,6 +194,22 @@ func (c *functionConfigs) write(file string, cfg object, files, hashes *metadata
 	if hashes != nil {
 		key.hashes = hashes.identity()
 	}
-	entry, _ := c.entries.LoadOrStore(key, &sharedPath{})
-	entry.(*sharedPath).write(file, func(file string) bool { return renderFunctionConfig(file, prefix, files, hashes) })
+	value, _ := c.entries.LoadOrStore(key, &cachedFunctionConfig{})
+	entry := value.(*cachedFunctionConfig)
+	var generated []byte
+	entry.once.Do(func() {
+		generated = appendFunctionConfig(make([]byte, 0, 64*1024), prefix, files, hashes)
+		if c.reserve(cap(generated)) {
+			entry.data = generated
+		}
+	})
+	if entry.data != nil {
+		writeOnce(file, entry.data)
+		return
+	}
+	if generated != nil {
+		writeOnce(file, generated)
+		return
+	}
+	renderFunctionConfig(file, prefix, files, hashes)
 }
