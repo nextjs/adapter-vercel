@@ -20,8 +20,6 @@ var profiling = os.Getenv("NEXT_ADAPTER_GO_PROFILE") == "1"
 var adapterTimings = os.Getenv("NEXT_NATIVE_BUILD_TIMINGS") == "1"
 var encodedConfigBytes atomic.Uint64
 var encodedConfigs atomic.Uint64
-var clonedConfigs atomic.Uint64
-var clonedFiles atomic.Uint64
 
 func startProfile() func() {
 	if !profiling && !adapterTimings {
@@ -76,9 +74,8 @@ func profilePhase(name string, fn func()) {
 	if !profiling {
 		if adapterTimings {
 			start := time.Now()
-			beforeClones, beforeFiles := clonedConfigs.Load(), clonedFiles.Load()
 			fn()
-			line, err := json.Marshal(object{"pid": os.Getpid(), "phase": name, "durationMs": float64(time.Since(start).Microseconds()) / 1000, "clonedConfigs": clonedConfigs.Load() - beforeClones, "clonedFiles": clonedFiles.Load() - beforeFiles})
+			line, err := json.Marshal(object{"pid": os.Getpid(), "phase": name, "durationMs": float64(time.Since(start).Microseconds()) / 1000})
 			check(err)
 			fmt.Fprintf(os.Stderr, "[adapter-go-phase] %s\n", line)
 			return
@@ -87,13 +84,13 @@ func profilePhase(name string, fn func()) {
 		return
 	}
 	var before, after runtime.MemStats
-	beforeBytes, beforeConfigs, beforeClones := encodedConfigBytes.Load(), encodedConfigs.Load(), clonedConfigs.Load()
+	beforeBytes, beforeConfigs := encodedConfigBytes.Load(), encodedConfigs.Load()
 	runtime.ReadMemStats(&before)
 	start := time.Now()
 	pprof.Do(context.Background(), pprof.Labels("phase", name), func(context.Context) { fn() })
 	elapsed := time.Since(start)
 	runtime.ReadMemStats(&after)
-	line, err := json.Marshal(object{"pid": os.Getpid(), "phase": name, "durationMs": float64(elapsed.Microseconds()) / 1000, "allocatedBytes": after.TotalAlloc - before.TotalAlloc, "allocations": after.Mallocs - before.Mallocs, "heapBytes": after.HeapAlloc, "gcCycles": after.NumGC - before.NumGC, "encodedConfigBytes": encodedConfigBytes.Load() - beforeBytes, "encodedConfigs": encodedConfigs.Load() - beforeConfigs, "clonedConfigs": clonedConfigs.Load() - beforeClones})
+	line, err := json.Marshal(object{"pid": os.Getpid(), "phase": name, "durationMs": float64(elapsed.Microseconds()) / 1000, "allocatedBytes": after.TotalAlloc - before.TotalAlloc, "allocations": after.Mallocs - before.Mallocs, "heapBytes": after.HeapAlloc, "gcCycles": after.NumGC - before.NumGC, "encodedConfigBytes": encodedConfigBytes.Load() - beforeBytes, "encodedConfigs": encodedConfigs.Load() - beforeConfigs})
 	check(err)
 	fmt.Fprintf(os.Stderr, "[adapter-go-phase] %s\n", line)
 }

@@ -274,16 +274,7 @@ func copyEntry(src, dst string) {
 	defer in.Close()
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
 	check(err)
-	cloned := false
-	if os.Getenv("NEXT_ADAPTER_GO_REFLINK") != "0" {
-		cloned, err = cloneContents(out, in)
-		if cloned {
-			clonedFiles.Add(1)
-		}
-	}
-	if err == nil && !cloned {
-		_, err = io.Copy(out, in)
-	}
+	_, err = io.Copy(out, in)
 	closeErr := out.Close()
 	check(err)
 	check(closeErr)

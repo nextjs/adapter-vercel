@@ -184,9 +184,6 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 	}
 	notFoundHashes := a.hashes(notFound)
 	var configs functionConfigs
-	if os.Getenv("NEXT_ADAPTER_GO_REFLINK") != "0" {
-		configs.clone = cloneContents
-	}
 	parallel(outputs, func(o object) {
 		functionDir := outputPath(filepath.Join(a.outputDir, "functions"), a.normalized(str(o["pathname"]))+".func")
 		mkdir(functionDir)
