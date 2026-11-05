@@ -12,6 +12,9 @@ var inlineMapComment = regexp.MustCompile(`(?m)^\s*?/[/*][@#]\s+?sourceMappingUR
 var base64Data = regexp.MustCompile(`^[a-zA-Z0-9+=/]+$`)
 
 func stripInlineMaps(source string) string {
+	if !strings.Contains(source, "sourceMappingURL=data:") {
+		return source
+	}
 	return inlineMapComment.ReplaceAllStringFunc(source, func(comment string) string {
 		m := inlineMapComment.FindStringSubmatch(comment)
 		if len(m) < 4 || m[2] != "base64" {

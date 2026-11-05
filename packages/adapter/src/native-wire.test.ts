@@ -37,3 +37,26 @@ it('shares repeated metadata without changing output-specific values or order', 
   ]);
   expect(JSON.stringify(encoded).length).toBeLessThan(before.length / 2);
 });
+
+it('keeps different ordered maps distinct when their transport hashes collide', () => {
+  const left = [4, 73, 83, 25, 60, 96, 43, 68];
+  const right = [81, 30, 37, 95, 28, 83, 80, 50];
+  const assets = (ids: number[]) =>
+    Object.fromEntries(ids.map((id) => [`asset-${id}`, `/repo/${id}`]));
+  const encoded = encodeOutputMaps({
+    appPages: [
+      { assets: assets(Array.from({ length: 100 }, (_, i) => i)) },
+      { assets: assets(left) },
+      { assets: assets(right) },
+    ],
+    appRoutes: [],
+    pages: [],
+    pagesApi: [],
+    middleware: undefined,
+  } as unknown as Outputs);
+  const a = encoded.outputs.appPages[1].assetMapId;
+  const b = encoded.outputs.appPages[2].assetMapId;
+  expect(a).not.toBe(b);
+  expect(encoded.assetMaps[a]).toEqual(left);
+  expect(encoded.assetMaps[b]).toEqual(right);
+});

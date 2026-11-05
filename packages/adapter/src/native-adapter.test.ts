@@ -98,8 +98,9 @@ describe('native adapter parity with the JavaScript adapter', () => {
           '.next/routes-manifest.json',
           '{"version":3,"headers":[{"x":1}],"deploymentId":"random","dynamicRoutes":[],"staticRoutes":[]}'
         );
-        await write('app/blog/page.tsx');
-        await write('pages/404.tsx');
+        const sourceDir = trailingSlash ? 'src/' : '';
+        await write(`${sourceDir}app/blog/page.tsx`);
+        await write(`${sourceDir}pages/404.tsx`);
         await write('public/robots.txt', 'Allow: /');
         await fs.writeFile(
           path.join(projectDir, 'public/binary.dat'),

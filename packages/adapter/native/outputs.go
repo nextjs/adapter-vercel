@@ -182,46 +182,48 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 		notFound = pagesError
 	}
 	notFoundHashes := a.hashes(notFound)
+	var configs functionConfigs
+	var sharedHandler sharedPath
 	parallel(outputs, func(o object) {
 		functionDir := outputPath(filepath.Join(a.outputDir, "functions"), a.normalized(str(o["pathname"]))+".func")
 		mkdir(functionDir)
-		files := object{}
-		hashes := object{}
+		files := a.metadata(o, true)
+		hashes := a.metadata(o, false)
 		hasHashes := o["assetsHashes"] != nil || o["assetHashMapId"] != nil
-		if hasHashes {
-			hashes = a.hashes(o)
-		}
-		a.eachMap(o, "assets", "assetMapId", func(name, p string) { files[name] = a.relative(p) })
 		p := rel(a.RepoRoot, str(o["filePath"]))
-		files[p] = p
+		files.set(p, p)
 		if len(envFiles) > 0 {
-			files = merge(files, envFiles)
+			for name, value := range envFiles {
+				files.set(name, str(value))
+			}
 			if hasHashes {
-				hashes = merge(hashes, envHashes)
+				for name, value := range envHashes {
+					hashes.set(name, str(value))
+				}
 			}
 		}
 		if o["type"] == "PAGES" {
 			if notFound != nil {
 				a.eachMap(notFound, "assets", "assetMapId", func(name, source string) {
-					files[name] = a.relative(source)
+					files.set(name, a.relative(source))
 					if hasHashes {
-						setFrom(hashes, name, notFoundHashes, name)
+						hashes.setFrom(name, notFoundHashes)
 					}
 				})
 				p := rel(a.RepoRoot, str(notFound["filePath"]))
-				files[p] = p
+				files.set(p, p)
 				if hasHashes {
-					setFrom(hashes, p, notFoundHashes, p)
+					hashes.setFrom(p, notFoundHashes)
 				}
 			}
 		}
-		files[manifestRel] = rel(a.RepoRoot, manifestPath)
+		files.set(manifestRel, rel(a.RepoRoot, manifestPath))
 		if hasHashes {
-			hashes[manifestRel] = manifestHash
+			hashes.set(manifestRel, manifestHash)
 		}
-		writeOnce(outputPath(functionDir, handlerRel), handler)
+		sharedHandler.write(outputPath(functionDir, handlerRel), func(file string) bool { return writeOnce(file, handler) })
 		if hasHashes {
-			hashes[handlerRel] = handlerHash
+			hashes.set(handlerRel, handlerHash)
 		}
 		source := a.sourceFile(str(o["sourcePage"]))
 		options := a.functionOptions(source, str(o["pathname"]))
@@ -235,26 +237,32 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 		if v, ok := generated["maxDuration"]; ok {
 			duration = v
 		}
-		cfg := merge(options, object{"filePathMap": files, "operationType": "API", "framework": object{"slug": "nextjs", "version": a.NextVersion}, "handler": handlerRel, "runtime": a.NodeRuntime, "supportsMultiPayloads": true, "supportsResponseStreaming": true, "experimentalAllowBundling": true, "shouldDisableAutomaticFetchInstrumentation": os.Getenv("VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION") == "1", "launcherType": "Nodejs"})
+		cfg := merge(options, object{"operationType": "API", "framework": object{"slug": "nextjs", "version": a.NextVersion}, "handler": handlerRel, "runtime": a.NodeRuntime, "supportsMultiPayloads": true, "supportsResponseStreaming": true, "experimentalAllowBundling": true, "shouldDisableAutomaticFetchInstrumentation": os.Getenv("VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION") == "1", "launcherType": "Nodejs"})
 		if duration != nil {
 			cfg["maxDuration"] = duration
 		}
 		if middleware {
 			cfg["useWebApi"] = true
 		}
-		if hasHashes {
-			cfg["fileHashes"] = hashes
-		}
 		if o["type"] == "APP_PAGE" || o["type"] == "PAGES" {
 			cfg["operationType"] = "PAGE"
 		}
-		writeJSONOnce(filepath.Join(functionDir, ".vc-config.json"), cfg)
+		if hasHashes {
+			configs.write(filepath.Join(functionDir, ".vc-config.json"), cfg, &files, &hashes)
+		} else {
+			configs.write(filepath.Join(functionDir, ".vc-config.json"), cfg, &files, nil)
+		}
 	})
 }
 
 func (a *adapter) sourceFile(page string) string {
-	usesSrc := exists(filepath.Join(a.ProjectDir, "src/pages")) || exists(filepath.Join(a.ProjectDir, "src/app"))
-	types := []string{"pages", "app"}
+	root, types := a.sourceRoot, a.sourceTypes
+	if root == "" {
+		root, types = a.ProjectDir, []string{"pages", "app"}
+		if exists(filepath.Join(a.ProjectDir, "src/pages")) || exists(filepath.Join(a.ProjectDir, "src/app")) {
+			root = filepath.Join(a.ProjectDir, "src")
+		}
+	}
 	if page == "middleware" {
 		types = []string{""}
 	}
@@ -263,10 +271,6 @@ func (a *adapter) sourceFile(page string) string {
 		extensions = []any{"js", "jsx", "ts", "tsx"}
 	}
 	for _, typ := range types {
-		root := a.ProjectDir
-		if usesSrc {
-			root = filepath.Join(root, "src")
-		}
 		extensionless := filepath.Join(root, typ, strings.TrimPrefix(page, "/"))
 		if exists(extensionless) {
 			return rel(a.ProjectDir, extensionless)

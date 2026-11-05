@@ -14,34 +14,63 @@ type FunctionOutput =
 export function encodeOutputMaps(outputs: Outputs) {
   const bindings: Array<[string, string]> = [];
   const maps: number[][] = [];
-  const valuesByKey = new Map<string, Map<string, number>>();
+  const valuesByKey = new Map<
+    string,
+    {
+      value: string;
+      index: number;
+      second?: { value: string; index: number };
+      others?: Map<string, number>;
+    }
+  >();
   const mapByIdentity = new WeakMap<Record<string, string>, number>();
-  const mapByEntries = new Map<string, number>();
+  const mapByHash = new Map<number, number[]>();
   const intern = (values: Record<string, string>) => {
     const previous = mapByIdentity.get(values);
     if (previous !== undefined) return previous;
     const refs: number[] = [];
+    let fingerprint = 2166136261;
     for (const key of Object.keys(values)) {
       const value = values[key];
-      let byValue = valuesByKey.get(key);
-      if (!byValue) {
-        byValue = new Map();
-        valuesByKey.set(key, byValue);
-      }
-      let index = byValue.get(value);
-      if (index === undefined) {
+      const binding = valuesByKey.get(key);
+      let index: number;
+      if (!binding) {
         index = bindings.length;
         bindings.push([key, value]);
-        byValue.set(value, index);
+        valuesByKey.set(key, { value, index });
+      } else if (binding.value === value) {
+        index = binding.index;
+      } else if (!binding.second) {
+        index = bindings.length;
+        bindings.push([key, value]);
+        binding.second = { value, index };
+      } else if (binding.second.value === value) {
+        index = binding.second.index;
+      } else {
+        let alternate = binding.others?.get(value);
+        if (alternate === undefined) {
+          alternate = bindings.length;
+          bindings.push([key, value]);
+          binding.others ||= new Map();
+          binding.others.set(value, alternate);
+        }
+        index = alternate;
       }
       refs.push(index);
+      fingerprint = Math.imul(fingerprint ^ index, 16777619);
     }
-    const fingerprint = refs.join(',');
-    let index = mapByEntries.get(fingerprint);
+    const candidates = mapByHash.get(fingerprint);
+    // A hash only selects a bucket. Equality still checks every reference.
+    let index = candidates?.find(
+      (id) =>
+        maps[id].length === refs.length &&
+        maps[id].every((entry, i) => entry === refs[i])
+    );
     if (index === undefined) {
       index = maps.length;
       maps.push(refs);
-      mapByEntries.set(fingerprint, index);
+      if (candidates) candidates.push(index);
+      else mapByHash.set(fingerprint, [index]);
     }
     mapByIdentity.set(values, index);
     return index;

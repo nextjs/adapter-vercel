@@ -18,6 +18,9 @@ type adapter struct {
 	fallbackOrder                                                []string
 	functionMatchers                                             []*regexp2.Regexp
 	relativePaths                                                map[string]string
+	encodedBindings                                              []encodedBinding
+	sourceRoot                                                   string
+	sourceTypes                                                  []string
 	hasApp, hasPages, hasMiddleware, has404, has500, hasNotFound bool
 }
 
@@ -29,6 +32,16 @@ func build(req request) {
 			if _, exists := a.relativePaths[entry[1]]; !exists {
 				a.relativePaths[entry[1]] = rel(req.RepoRoot, entry[1])
 			}
+		}
+	}
+	a.encodeBindings()
+	a.sourceRoot = a.ProjectDir
+	if exists(filepath.Join(a.ProjectDir, "src/pages")) || exists(filepath.Join(a.ProjectDir, "src/app")) {
+		a.sourceRoot = filepath.Join(a.ProjectDir, "src")
+	}
+	for _, typ := range []string{"pages", "app"} {
+		if exists(filepath.Join(a.sourceRoot, typ)) {
+			a.sourceTypes = append(a.sourceTypes, typ)
 		}
 	}
 	mkdir(a.outputDir)

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import {
@@ -11,6 +12,23 @@ import { modifyConfig } from './config';
 import { encodeOutputMaps } from './native-wire';
 import { getImagesConfig } from './utils';
 
+function cpuCounters() {
+  for (const file of [
+    '/sys/fs/cgroup/cpu.stat',
+    '/sys/fs/cgroup/cpu/cpu.stat',
+  ]) {
+    try {
+      const counters: Record<string, number> = {};
+      for (const line of readFileSync(file, 'utf8').trim().split('\n')) {
+        const [key, value] = line.trim().split(/\s+/);
+        if (key && Number.isFinite(Number(value)))
+          counters[key] = Number(value);
+      }
+      return { file, counters };
+    } catch {}
+  }
+}
+
 // Keep JavaScript-specific configuration and module resolution at the hook boundary.
 // All output traversal, routing, hashing and filesystem generation runs in the binary.
 const adapter: NextAdapter = {
@@ -18,6 +36,8 @@ const adapter: NextAdapter = {
   modifyConfig,
   async onBuildComplete(ctx) {
     const started = performance.now();
+    const timings = process.env.NEXT_NATIVE_BUILD_TIMINGS === '1';
+    const cpuBefore = timings ? cpuCounters() : undefined;
     const projectRequire = createRequire(
       path.join(ctx.projectDir, 'package.json')
     );
@@ -56,10 +76,13 @@ const adapter: NextAdapter = {
       ...ctx.outputs.pagesApi,
       ...(ctx.outputs.middleware ? [ctx.outputs.middleware] : []),
     ];
+    const wireStarted = performance.now();
+    const encodedOutputs = encodeOutputMaps(ctx.outputs);
+    const wireMs = performance.now() - wireStarted;
     const request = {
       version: 2,
       ...ctx,
-      ...encodeOutputMaps(ctx.outputs),
+      ...encodedOutputs,
       configJSON: JSON.stringify(ctx.config),
       edgeConfigJSON: JSON.stringify({
         basePath: ctx.config.basePath,
@@ -88,7 +111,9 @@ const adapter: NextAdapter = {
     let serializationMs = 0;
     let requestBytes: number | undefined;
     let spawnedUnixMs = 0;
+    let spawnCallMs = 0;
     let childPid: number | undefined;
+    let cpuBeforeSpawn: ReturnType<typeof cpuCounters>;
     const binary =
       process.env.NEXT_ADAPTER_GO_BINARY ||
       path.join(
@@ -98,9 +123,12 @@ const adapter: NextAdapter = {
       );
     await new Promise<void>((resolve, reject) => {
       spawnedUnixMs = Date.now();
+      cpuBeforeSpawn = timings ? cpuCounters() : undefined;
+      const spawnStarted = performance.now();
       const child = spawn(binary, [], {
         stdio: ['pipe', 'inherit', 'inherit'],
       });
+      spawnCallMs = performance.now() - spawnStarted;
       childPid = child.pid;
       const cancel = () => child.kill('SIGTERM');
       process.once('SIGTERM', cancel);
@@ -129,9 +157,9 @@ const adapter: NextAdapter = {
         requestBytes = Buffer.byteLength(payload);
       child.stdin.end(payload);
     });
-    if (process.env.NEXT_NATIVE_BUILD_TIMINGS === '1') {
+    if (timings) {
       console.log(
-        `[adapter-benchmark] ${JSON.stringify({ implementation: 'go', durationMs: performance.now() - started, preparationMs: prepared - started, serializationMs, requestBytes, spawnedUnixMs, childPid, profiled: process.env.NEXT_ADAPTER_GO_PROFILE === '1' })}`
+        `[adapter-benchmark] ${JSON.stringify({ implementation: 'go', durationMs: performance.now() - started, preparationMs: prepared - started, wireMs, serializationMs, requestBytes, spawnedUnixMs, spawnCallMs, childPid, cpuBefore, cpuBeforeSpawn, cpuAfter: cpuCounters(), profiled: process.env.NEXT_ADAPTER_GO_PROFILE === '1' })}`
       );
     }
   },

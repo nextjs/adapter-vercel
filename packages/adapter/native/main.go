@@ -188,17 +188,18 @@ func writeJSONFile(p string, v any, flags int) {
 	check(encodeErr)
 	check(closeErr)
 }
-func writeOnce(p string, b []byte) {
+func writeOnce(p string, b []byte) bool {
 	mkdir(filepath.Dir(p))
 	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if os.IsExist(err) {
-		return
+		return false
 	}
 	check(err)
 	_, err = f.Write(b)
 	closeErr := f.Close()
 	check(err)
 	check(closeErr)
+	return true
 }
 func rel(root, p string) string {
 	r, err := filepath.Rel(root, p)
