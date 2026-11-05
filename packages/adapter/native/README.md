@@ -35,6 +35,15 @@ independent regular files so postbuild edits cannot affect other functions.
 Source-file lookups are shared across outputs for the same source page. Function
 writes reuse already-created parent directories without redundant probes.
 
+Public/static output overlaps function generation. A single bounded worker pool
+covers both paths, with `min(128, max(4, GOMAXPROCS * 4))` workers (16 on the
+four-core benchmark container). `NEXT_ADAPTER_GO_WORKERS=1..128` overrides the
+limit; `NEXT_ADAPTER_GO_OVERLAP=0` is a sequential control. Public precedes static,
+and prerenders follow their parent functions. Constant function configuration
+is encoded once and per-function options preserve the original merge order.
+Output stays compatible with the current Build Output API; each function retains
+its own regular config file for independent postbuild edits.
+
 The production `modifyConfig` hook starts executable prefetch asynchronously,
 overlapping compilation. `onBuildComplete` awaits any remaining read and falls
 back to starting it there when the earlier hook ran in a different process.
