@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import {
@@ -38,6 +39,29 @@ const adapter: NextAdapter = {
     const started = performance.now();
     const timings = process.env.NEXT_NATIVE_BUILD_TIMINGS === '1';
     const cpuBefore = timings ? cpuCounters() : undefined;
+    const binary =
+      process.env.NEXT_ADAPTER_GO_BINARY ||
+      path.join(
+        __dirname,
+        'bin',
+        `adapter-vercel-${process.platform}-${process.arch}`
+      );
+    // Sequential reads warm executable pages while module/policy preparation
+    // runs. Avoid serial demand-paging waits during native process startup.
+    const prefetchStarted = performance.now();
+    const binaryPrefetch =
+      process.env.NEXT_ADAPTER_GO_PREFETCH === '0'
+        ? Promise.resolve({ durationMs: 0, bytes: 0 })
+        : readFile(binary).then(
+            (data) => ({
+              durationMs: performance.now() - prefetchStarted,
+              bytes: data.byteLength,
+            }),
+            () => ({
+              durationMs: performance.now() - prefetchStarted,
+              bytes: 0,
+            })
+          );
     const projectRequire = createRequire(
       path.join(ctx.projectDir, 'package.json')
     );
@@ -108,19 +132,15 @@ const adapter: NextAdapter = {
       functionRules,
     };
     const prepared = performance.now();
+    const prefetchWaitStarted = performance.now();
+    const prefetch = await binaryPrefetch;
+    const prefetchWaitMs = performance.now() - prefetchWaitStarted;
     let serializationMs = 0;
     let requestBytes: number | undefined;
     let spawnedUnixMs = 0;
     let spawnCallMs = 0;
     let childPid: number | undefined;
     let cpuBeforeSpawn: ReturnType<typeof cpuCounters>;
-    const binary =
-      process.env.NEXT_ADAPTER_GO_BINARY ||
-      path.join(
-        __dirname,
-        'bin',
-        `adapter-vercel-${process.platform}-${process.arch}`
-      );
     await new Promise<void>((resolve, reject) => {
       cpuBeforeSpawn = timings ? cpuCounters() : undefined;
       spawnedUnixMs = Date.now();
@@ -159,7 +179,7 @@ const adapter: NextAdapter = {
     });
     if (timings) {
       console.log(
-        `[adapter-benchmark] ${JSON.stringify({ implementation: 'go', durationMs: performance.now() - started, preparationMs: prepared - started, wireMs, serializationMs, requestBytes, spawnedUnixMs, spawnCallMs, childPid, cpuBefore, cpuBeforeSpawn, cpuAfter: cpuCounters(), profiled: process.env.NEXT_ADAPTER_GO_PROFILE === '1' })}`
+        `[adapter-benchmark] ${JSON.stringify({ implementation: 'go', durationMs: performance.now() - started, preparationMs: prepared - started, wireMs, prefetchMs: prefetch.durationMs, prefetchBytes: prefetch.bytes, prefetchWaitMs, serializationMs, requestBytes, spawnedUnixMs, spawnCallMs, childPid, cpuBefore, cpuBeforeSpawn, cpuAfter: cpuCounters(), profiled: process.env.NEXT_ADAPTER_GO_PROFILE === '1' })}`
       );
     }
   },
