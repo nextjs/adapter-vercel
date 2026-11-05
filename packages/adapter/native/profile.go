@@ -9,7 +9,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"strconv"
+	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -22,7 +25,22 @@ func startProfile() func() {
 	if !profiling && !adapterTimings {
 		return func() {}
 	}
-	fmt.Fprintf(os.Stderr, "[adapter-go-ready] %s\n", jsonText(object{"pid": os.Getpid(), "unixMs": float64(time.Now().UnixMicro()) / 1000, "gomaxprocs": runtime.GOMAXPROCS(0), "numCPU": runtime.NumCPU(), "goVersion": runtime.Version()}))
+	ready := object{"pid": os.Getpid(), "unixMs": float64(time.Now().UnixMicro()) / 1000, "gomaxprocs": runtime.GOMAXPROCS(0), "numCPU": runtime.NumCPU(), "goVersion": runtime.Version()}
+	var usage syscall.Rusage
+	if syscall.Getrusage(syscall.RUSAGE_SELF, &usage) == nil {
+		ready["startupResources"] = object{"userMs": float64(usage.Utime.Sec)*1000 + float64(usage.Utime.Usec)/1000, "systemMs": float64(usage.Stime.Sec)*1000 + float64(usage.Stime.Usec)/1000, "majorFaults": usage.Majflt, "minorFaults": usage.Minflt, "inputBlocks": usage.Inblock, "voluntarySwitches": usage.Nvcsw, "involuntarySwitches": usage.Nivcsw}
+	}
+	if data, err := os.ReadFile("/proc/self/schedstat"); err == nil {
+		fields := strings.Fields(string(data))
+		if len(fields) >= 3 {
+			run, e1 := strconv.ParseUint(fields[0], 10, 64)
+			wait, e2 := strconv.ParseUint(fields[1], 10, 64)
+			if e1 == nil && e2 == nil {
+				ready["startupSchedule"] = object{"runningMs": float64(run) / 1e6, "waitingMs": float64(wait) / 1e6}
+			}
+		}
+	}
+	fmt.Fprintf(os.Stderr, "[adapter-go-ready] %s\n", jsonText(ready))
 	if !profiling {
 		return func() {}
 	}
