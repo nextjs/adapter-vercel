@@ -30,8 +30,16 @@ rule; Go performs matching and all per-output work. Unsupported protocol/runtime
 values fail the build instead of silently falling back.
 
 Config buffers are sized from shared-map lengths instead of retaining oversized
-growth buffers. A 64MiB cap bounds the encoded config cache; output files remain
-independent regular files so postbuild edits cannot affect other functions.
+growth buffers. On Linux, repeated configs of at least 32KiB reuse a completed
+output through `FICLONE` copy-on-write cloning. Each output has an independent
+inode, so postbuild edits cannot affect other functions. Encoded buffers can be
+released after the first file is written. Small configs and unsupported
+filesystems use a 64MiB-bounded buffer cache and independent direct writes.
+Static/public/fallback file copies also attempt cloning before ordinary copying;
+symlink targets and executable modes retain their existing behavior. Set
+`NEXT_ADAPTER_GO_REFLINK=0` to force ordinary writes/copies for controls. Unexpected
+I/O errors fail the build; unsupported clone operations fall back. Existing
+outputs are preserved and are never adopted as canonical clone sources.
 Source-file lookups are shared across outputs for the same source page. Function
 writes reuse already-created parent directories without redundant probes.
 
