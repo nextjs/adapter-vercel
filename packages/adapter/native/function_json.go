@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -203,12 +204,15 @@ type functionConfigIdentity struct {
 	hasHashes     bool
 }
 type cachedFunctionConfig struct {
-	once sync.Once
-	data []byte
+	once   sync.Once
+	data   []byte
+	source string
 }
 type functionConfigs struct {
-	entries sync.Map
-	bytes   atomic.Int64
+	entries       sync.Map
+	bytes         atomic.Int64
+	clone         func(*os.File, *os.File) (bool, error)
+	cloneDisabled atomic.Bool
 }
 
 const functionConfigCacheLimit = 64 << 20
@@ -226,7 +230,8 @@ func (c *functionConfigs) reserve(size int) bool {
 }
 
 func (c *functionConfigs) write(file string, cfg object, files, hashes *metadataMap) {
-	c.writeWith(file, cfg, files, hashes, writeOnce)
+	mkdir(filepath.Dir(file))
+	c.writeWith(file, cfg, files, hashes, writeOnceInDirectory)
 }
 
 func (c *functionConfigs) writeInDirectory(file string, cfg object, files, hashes *metadataMap) {
@@ -242,6 +247,7 @@ func (c *functionConfigs) writeWith(file string, cfg object, files, hashes *meta
 	value, _ := c.entries.LoadOrStore(key, &cachedFunctionConfig{})
 	entry := value.(*cachedFunctionConfig)
 	var generated []byte
+	wroteFirst := false
 	entry.once.Do(func() {
 		capacity := len(prefix) + len(`,"filePathMap":`) + files.capacity(key.files.extra)
 		if hashes != nil {
@@ -251,7 +257,27 @@ func (c *functionConfigs) writeWith(file string, cfg object, files, hashes *meta
 		if c.reserve(cap(generated)) {
 			entry.data = generated
 		}
+		if c.clone != nil && !c.cloneDisabled.Load() && len(generated) >= 32*1024 {
+			if write(file, generated) {
+				entry.source = file
+			}
+			wroteFirst = true
+		}
 	})
+	if wroteFirst {
+		return
+	}
+	if entry.source != "" && !c.cloneDisabled.Load() {
+		result, err := cloneConfigFile(entry.source, file, c.clone)
+		check(err)
+		if result != cloneUnsupported {
+			if result == cloneWritten {
+				clonedConfigs.Add(1)
+			}
+			return
+		}
+		c.cloneDisabled.Store(true)
+	}
 	if entry.data != nil {
 		write(file, entry.data)
 		return
