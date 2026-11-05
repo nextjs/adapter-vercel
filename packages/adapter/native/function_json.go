@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -146,8 +147,8 @@ func renderFunctionConfig(file, prefix string, files, hashes *metadataMap) bool 
 	return writeOnce(file, buffer)
 }
 
-// Completed build artifacts are immutable. Link identical artifacts after the
-// first write completes; fall back to a normal write if linking is unavailable.
+// Reuse completed content while keeping output files independent for postbuild
+// edits. io.Copy uses the kernel's file-copy path where available.
 type sharedPath struct {
 	once   sync.Once
 	source string
@@ -166,8 +167,18 @@ func (s *sharedPath) write(file string, generate func(string) bool) {
 	}
 	if s.source != "" {
 		mkdir(filepath.Dir(file))
-		err := os.Link(s.source, file)
-		if err == nil || os.IsExist(err) {
+		input, err := os.Open(s.source)
+		if err == nil {
+			defer input.Close()
+			output, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+			if os.IsExist(err) {
+				return
+			}
+			check(err)
+			_, copyErr := io.Copy(output, input)
+			closeErr := output.Close()
+			check(copyErr)
+			check(closeErr)
 			return
 		}
 	}

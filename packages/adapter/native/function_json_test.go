@@ -35,7 +35,7 @@ func TestFunctionMetadataOverridesAndMissingHashes(t *testing.T) {
 	}
 }
 
-func TestConcurrentFunctionConfigsShareCompletedFiles(t *testing.T) {
+func TestConcurrentFunctionConfigsReuseContentWithIndependentFiles(t *testing.T) {
 	a := &adapter{request: request{RepoRoot: "/repo", AssetBindings: [][2]string{{"shared", "/repo/shared.js"}, {"shared", "hash"}}, AssetMaps: [][]uint32{{0}, {1}}}}
 	a.encodeBindings()
 	o := object{"assetMapId": float64(0), "assetHashMapId": float64(1)}
@@ -58,11 +58,17 @@ func TestConcurrentFunctionConfigsShareCompletedFiles(t *testing.T) {
 	for _, file := range paths {
 		info, err := os.Stat(file)
 		check(err)
-		if !os.SameFile(first, info) {
-			t.Fatal("identical configs were not shared")
+		if file != paths[0] && os.SameFile(first, info) {
+			t.Fatal("separate outputs must have independent files")
 		}
 		if obj(readJSON(file)["fileHashes"])["shared"] != "hash" {
 			t.Fatal("incomplete shared config")
+		}
+	}
+	write(paths[0], []byte("postbuild edit"))
+	for _, file := range paths[1:] {
+		if obj(readJSON(file)["fileHashes"])["shared"] != "hash" {
+			t.Fatal("editing one output changed another")
 		}
 	}
 }
