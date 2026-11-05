@@ -56,8 +56,12 @@ func main() {
 	stopProfile := startProfile()
 	defer stopProfile()
 	var req request
-	profilePhase("decode", func() { check(json.NewDecoder(os.Stdin).Decode(&req)) })
-	if req.Version != 1 && req.Version != 2 {
+	profilePhase("decode", func() {
+		var err error
+		req, err = decodeRequest(os.Stdin)
+		check(err)
+	})
+	if req.Version != 1 && req.Version != 2 && req.Version != 3 {
 		panic(fmt.Errorf("unsupported adapter protocol %d", req.Version))
 	}
 	if req.DistDir == "" || req.ProjectDir == "" || req.RepoRoot == "" {

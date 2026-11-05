@@ -10,7 +10,7 @@ import {
 import minimatch from 'minimatch';
 import type { NextAdapter } from 'next';
 import { modifyConfig } from './config';
-import { encodeOutputMaps } from './native-wire';
+import { encodeNativeRequest, encodeOutputMaps } from './native-wire';
 import { getImagesConfig } from './utils';
 
 function cpuCounters() {
@@ -171,10 +171,10 @@ const adapter: NextAdapter = {
         if ((err as NodeJS.ErrnoException).code !== 'EPIPE') reject(err);
       });
       const serializationStarted = performance.now();
-      const payload = JSON.stringify(request);
+      const payload = encodeNativeRequest(request);
       serializationMs = performance.now() - serializationStarted;
       if (process.env.NEXT_ADAPTER_GO_PROFILE === '1')
-        requestBytes = Buffer.byteLength(payload);
+        requestBytes = payload.byteLength;
       child.stdin.end(payload);
     });
     if (timings) {

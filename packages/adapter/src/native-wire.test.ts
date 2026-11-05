@@ -1,7 +1,40 @@
 import { expect, it } from 'vitest';
-import { encodeOutputMaps } from './native-wire';
+import { encodeNativeRequest, encodeOutputMaps } from './native-wire';
 
 type Outputs = Parameters<typeof encodeOutputMaps>[0];
+
+it('frames Unicode context and ordered binary map references without mutating them', () => {
+  const request = {
+    version: 2,
+    projectDir: '/repo/Doppelgänger\u2028',
+    assetMaps: [[0, 1, 65536], [], [1, 0]],
+  };
+  const before = JSON.stringify(request);
+  const payload = encodeNativeRequest(request);
+  expect(payload.subarray(0, 8).toString()).toBe('NXTADP3\n');
+  const jsonEnd = 12 + payload.readUInt32LE(8);
+  expect(JSON.parse(payload.subarray(12, jsonEnd).toString())).toEqual({
+    version: 3,
+    projectDir: request.projectDir,
+  });
+  let offset = jsonEnd;
+  expect(payload.readUInt32LE(offset)).toBe(request.assetMaps.length);
+  offset += 4;
+  const maps: number[][] = [];
+  for (let i = 0; i < request.assetMaps.length; i++) {
+    const count = payload.readUInt32LE(offset);
+    offset += 4;
+    const refs: number[] = [];
+    for (let j = 0; j < count; j++) {
+      refs.push(payload.readUInt32LE(offset));
+      offset += 4;
+    }
+    maps.push(refs);
+  }
+  expect(offset).toBe(payload.length);
+  expect(maps).toEqual(request.assetMaps);
+  expect(JSON.stringify(request)).toBe(before);
+});
 
 it('shares repeated metadata without changing output-specific values or order', () => {
   const assets = { a: '/repo/a', b: '/repo/b' };

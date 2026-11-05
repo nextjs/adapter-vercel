@@ -9,6 +9,35 @@ type FunctionOutput =
   | Outputs['pagesApi'][number]
   | NonNullable<Outputs['middleware']>;
 
+// JSON retains the small extensible hook context. Numeric trace references use
+// a framed little-endian section instead of decimal JSON arrays. No application
+// or runtime code crosses this protocol.
+export function encodeNativeRequest(
+  request: Record<string, unknown> & { assetMaps: number[][] }
+) {
+  const json = Buffer.from(
+    JSON.stringify({ ...request, version: 3, assetMaps: undefined })
+  );
+  const maps = request.assetMaps;
+  const words = 1 + maps.length + maps.reduce((n, refs) => n + refs.length, 0);
+  const payload = Buffer.allocUnsafe(12 + json.length + words * 4);
+  payload.write('NXTADP3\n', 0, 'ascii');
+  payload.writeUInt32LE(json.length, 8);
+  json.copy(payload, 12);
+  let offset = 12 + json.length;
+  payload.writeUInt32LE(maps.length, offset);
+  offset += 4;
+  for (const refs of maps) {
+    payload.writeUInt32LE(refs.length, offset);
+    offset += 4;
+    for (const id of refs) {
+      payload.writeUInt32LE(id, offset);
+      offset += 4;
+    }
+  }
+  return payload;
+}
+
 // Transport dictionaries only: output-generation policy stays in Go. Preserve
 // map order and distinct values for the same key in different function outputs.
 export function encodeOutputMaps(outputs: Outputs) {
