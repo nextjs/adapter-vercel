@@ -286,43 +286,6 @@ describe('native adapter parity with the JavaScript adapter', () => {
         await fs.rm(path.join(distDir, 'output'), { recursive: true });
         await require('../dist/native-adapter.js').onBuildComplete(goCtx);
         expect(await tree(path.join(distDir, 'output'))).toEqual(expected);
-        const previousShared = process.env.NEXT_ADAPTER_GO_SHARED_TRACES;
-        const previousCapability = process.env.NEXT_ADAPTER_GO_SHARED_TRACE_CAPABILITY;
-        try {
-          process.env.NEXT_ADAPTER_GO_SHARED_TRACES = '1';
-          process.env.NEXT_ADAPTER_GO_SHARED_TRACE_CAPABILITY = '1';
-          await fs.rm(path.join(distDir, 'output'), { recursive: true });
-          await require('../dist/native-adapter.js').onBuildComplete(JSON.parse(JSON.stringify(goCtx)));
-          const compact = await tree(path.join(distDir, 'output'));
-          const tableName = Object.keys(compact).find(name => /functions\/\.vc-traces-[a-f0-9]{64}\.json$/.test(name))!;
-          const table = compact[tableName] as { bindings: [string, string | null, string][]; maps: number[][] };
-          expect(tableName).toBeTruthy();
-          delete compact[tableName];
-          for (const [name, value] of Object.entries(compact)) {
-            if (!name.endsWith('/.vc-config.json')) continue;
-            const cfg = value as Record<string, any>;
-            const refs = cfg.experimentalTraceReferences;
-            if (!refs) continue;
-            const expand = (ref: { id: number; deleted?: string[]; overrides?: Record<string, string> }, paths: boolean) => {
-              const map: Record<string, string> = Object.create(null);
-              for (const id of ref.id < 0 ? [] : table.maps[ref.id]) {
-                const binding = table.bindings[id];
-                map[binding[0]] = binding[paths ? 1 : 2]!;
-              }
-              for (const key of ref.deleted ?? []) delete map[key];
-              return Object.assign(map, ref.overrides);
-            };
-            cfg.filePathMap = expand(refs.paths, true);
-            if (refs.hashes) cfg.fileHashes = expand(refs.hashes, false);
-            delete cfg.experimentalTraceReferences;
-          }
-          expect(compact).toEqual(expected);
-        } finally {
-          if (previousShared === undefined) delete process.env.NEXT_ADAPTER_GO_SHARED_TRACES;
-          else process.env.NEXT_ADAPTER_GO_SHARED_TRACES = previousShared;
-          if (previousCapability === undefined) delete process.env.NEXT_ADAPTER_GO_SHARED_TRACE_CAPABILITY;
-          else process.env.NEXT_ADAPTER_GO_SHARED_TRACE_CAPABILITY = previousCapability;
-        }
       } finally {
         if (previous === undefined)
           delete process.env.NEXT_ADAPTER_VERCEL_CONFIG;

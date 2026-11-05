@@ -35,23 +35,6 @@ independent regular files so postbuild edits cannot affect other functions.
 Source-file lookups are shared across outputs for the same source page. Function
 writes reuse already-created parent directories without redundant probes.
 
-Public/static output overlaps function generation. A single bounded worker pool
-covers both paths, with `min(128, max(4, GOMAXPROCS * 4))` workers (16 on the
-four-core benchmark container). `NEXT_ADAPTER_GO_WORKERS=1..128` overrides the
-limit; `NEXT_ADAPTER_GO_OVERLAP=0` is a sequential control. Public precedes static,
-and prerenders follow their parent functions. Constant function configuration
-is encoded once and per-function options preserve the original merge order.
-
-`NEXT_ADAPTER_GO_SHARED_TRACES=1` emits an experimental content-addressed
-`.vc-traces-<sha256>.json` table in `output/functions` and small per-function
-`experimentalTraceReferences` fields. Version 1 preserves ordered binding maps,
-literal hashes, and independent overrides/deletions. It requires the
-`NEXT_ADAPTER_GO_SHARED_TRACE_CAPABILITY=1` handshake from a supporting Vercel
-build container; standard Build Output API configs remain the default. This
-mode is for source builds in the matching experiment image, not standalone
-prebuilt uploads. The reader verifies the digest and expands independent maps
-before existing function hydration, grouping and upload.
-
 The production `modifyConfig` hook starts executable prefetch asynchronously,
 overlapping compilation. `onBuildComplete` awaits any remaining read and falls
 back to starting it there when the earlier hook ran in a different process.
