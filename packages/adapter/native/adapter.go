@@ -23,6 +23,8 @@ type adapter struct {
 	encodedMapSizes                                              [][2]int
 	sourceFiles                                                  sync.Map
 	workers                                                      *outputWorkers
+	sharedTraces                                                 bool
+	traceTable                                                   string
 	sourceRoot                                                   string
 	sourceTypes                                                  []string
 	hasApp, hasPages, hasMiddleware, has404, has500, hasNotFound bool
@@ -38,7 +40,13 @@ func build(req request) {
 			}
 		}
 	}
-	a.encodeBindings()
+	a.sharedTraces = os.Getenv("NEXT_ADAPTER_GO_SHARED_TRACES") == "1"
+	if a.sharedTraces && os.Getenv("NEXT_ADAPTER_GO_SHARED_TRACE_CAPABILITY") != "1" {
+		panic("shared traces require a supporting Vercel build-container consumer")
+	}
+	if !a.sharedTraces {
+		a.encodeBindings()
+	}
 	a.workers = newOutputWorkers(outputConcurrency())
 	defer a.workers.close()
 	a.sourceRoot = a.ProjectDir
@@ -152,6 +160,9 @@ func build(req request) {
 		profilePhase("static", func() { a.staticFiles() })
 	}
 	functions := func() {
+		if a.sharedTraces {
+			profilePhase("shared-traces", a.writeSharedTraceTable)
+		}
 		profilePhase("edge", func() { a.edgeOutputs(edges) })
 		if a.hasMiddleware {
 			middleware := obj(req.Outputs["middleware"])

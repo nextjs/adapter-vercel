@@ -264,6 +264,14 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 			prefix = pagePrefix
 		}
 		prefix = nodeConfigPrefix(prefix, options, middleware, hasHashes)
+		if a.sharedTraces {
+			var h *metadataMap
+			if hasHashes {
+				h = &hashes
+			}
+			a.writeSharedFunctionConfig(filepath.Join(functionDir, ".vc-config.json"), prefix, &files, h)
+			return
+		}
 		if hasHashes {
 			configs.writePrefix(filepath.Join(functionDir, ".vc-config.json"), prefix, &files, &hashes, writeOnceInDirectory)
 		} else {
