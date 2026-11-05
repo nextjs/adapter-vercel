@@ -190,6 +190,12 @@ func writeJSONFile(p string, v any, flags int) {
 }
 func writeOnce(p string, b []byte) bool {
 	mkdir(filepath.Dir(p))
+	return writeOnceInDirectory(p, b)
+}
+
+// The caller has already created the parent directory. Keep O_EXCL semantics
+// and independent regular files without repeating directory probes per write.
+func writeOnceInDirectory(p string, b []byte) bool {
 	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if os.IsExist(err) {
 		return false

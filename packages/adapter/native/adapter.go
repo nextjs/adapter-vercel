@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,6 +20,8 @@ type adapter struct {
 	functionMatchers                                             []*regexp2.Regexp
 	relativePaths                                                map[string]string
 	encodedBindings                                              []encodedBinding
+	encodedMapSizes                                              [][2]int
+	sourceFiles                                                  sync.Map
 	sourceRoot                                                   string
 	sourceTypes                                                  []string
 	hasApp, hasPages, hasMiddleware, has404, has500, hasNotFound bool

@@ -23,6 +23,25 @@ func (a *adapter) encodeBindings() {
 		}
 		a.encodedBindings[i] = b
 	}
+	// Size each shared map once. Reserving a whole power-of-two buffer per
+	// config otherwise wastes enough cache capacity to evict reusable configs.
+	a.encodedMapSizes = make([][2]int, len(a.AssetMaps))
+	for i, refs := range a.AssetMaps {
+		sizes := [2]int{2, 2}
+		for j, id := range refs {
+			if uint64(id) >= uint64(len(a.encodedBindings)) {
+				panic("invalid asset binding reference")
+			}
+			entry := a.encodedBindings[id]
+			sizes[0] += len(entry.file)
+			sizes[1] += len(entry.hash)
+			if j > 0 {
+				sizes[0]++
+				sizes[1]++
+			}
+		}
+		a.encodedMapSizes[i] = sizes
+	}
 }
 
 type metadataMap struct {
@@ -126,10 +145,14 @@ func writeFunctionConfig(file string, cfg object, files, hashes *metadataMap) bo
 }
 
 func renderFunctionConfig(file, prefix string, files, hashes *metadataMap) bool {
+	return renderFunctionConfigWith(file, prefix, files, hashes, writeOnce)
+}
+
+func renderFunctionConfigWith(file, prefix string, files, hashes *metadataMap, write func(string, []byte) bool) bool {
 	buffer := functionJSONBuffers.Get().([]byte)[:0]
 	defer func() { functionJSONBuffers.Put(buffer[:0]) }()
 	buffer = appendFunctionConfig(buffer, prefix, files, hashes)
-	return writeOnce(file, buffer)
+	return write(file, buffer)
 }
 
 func appendFunctionConfig(buffer []byte, prefix string, files, hashes *metadataMap) []byte {
@@ -158,6 +181,20 @@ type metadataIdentity struct {
 
 func (m *metadataMap) identity() metadataIdentity {
 	return metadataIdentity{m.id, jsonText(m.extra), jsonText(m.deleted)}
+}
+
+func (m *metadataMap) capacity(extra string) int {
+	base := 2
+	if m.id >= 0 {
+		kind := 1
+		if m.paths {
+			kind = 0
+		}
+		base = m.a.encodedMapSizes[m.id][kind]
+	}
+	// Keeping overridden/deleted entries in the estimate gives a cheap upper
+	// bound, with only a few extra bytes for the small per-function overlays.
+	return base + len(extra)
 }
 
 type functionConfigIdentity struct {
@@ -189,6 +226,14 @@ func (c *functionConfigs) reserve(size int) bool {
 }
 
 func (c *functionConfigs) write(file string, cfg object, files, hashes *metadataMap) {
+	c.writeWith(file, cfg, files, hashes, writeOnce)
+}
+
+func (c *functionConfigs) writeInDirectory(file string, cfg object, files, hashes *metadataMap) {
+	c.writeWith(file, cfg, files, hashes, writeOnceInDirectory)
+}
+
+func (c *functionConfigs) writeWith(file string, cfg object, files, hashes *metadataMap, write func(string, []byte) bool) {
 	prefix := configPrefix(cfg, hashes)
 	key := functionConfigIdentity{prefix: prefix, files: files.identity(), hasHashes: hashes != nil}
 	if hashes != nil {
@@ -198,18 +243,22 @@ func (c *functionConfigs) write(file string, cfg object, files, hashes *metadata
 	entry := value.(*cachedFunctionConfig)
 	var generated []byte
 	entry.once.Do(func() {
-		generated = appendFunctionConfig(make([]byte, 0, 64*1024), prefix, files, hashes)
+		capacity := len(prefix) + len(`,"filePathMap":`) + files.capacity(key.files.extra)
+		if hashes != nil {
+			capacity += len(`,"fileHashes":`) + hashes.capacity(key.hashes.extra)
+		}
+		generated = appendFunctionConfig(make([]byte, 0, capacity), prefix, files, hashes)
 		if c.reserve(cap(generated)) {
 			entry.data = generated
 		}
 	})
 	if entry.data != nil {
-		writeOnce(file, entry.data)
+		write(file, entry.data)
 		return
 	}
 	if generated != nil {
-		writeOnce(file, generated)
+		write(file, generated)
 		return
 	}
-	renderFunctionConfig(file, prefix, files, hashes)
+	renderFunctionConfigWith(file, prefix, files, hashes, write)
 }

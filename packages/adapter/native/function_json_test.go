@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -111,5 +112,25 @@ func TestFunctionMetadataAbsentAndEmptyHashes(t *testing.T) {
 		if len(obj(cfg["filePathMap"])) != 0 {
 			t.Fatal(cfg)
 		}
+	}
+}
+
+func TestFunctionConfigCacheReservesCloseToEncodedSize(t *testing.T) {
+	// A config just above 64KiB used to retain a 128KiB buffer. Enough of
+	// those buffers exhaust the cache before repeated outputs can reuse it.
+	large := "/repo/" + strings.Repeat("x", 70*1024)
+	a := &adapter{request: request{RepoRoot: "/repo", AssetBindings: [][2]string{{"large", large}}, AssetMaps: [][]uint32{{0}}}}
+	a.encodeBindings()
+	files := a.metadata(object{"assetMapId": float64(0)}, true)
+	files.set("overlay", "line\u2028.js")
+	var cache functionConfigs
+	file := filepath.Join(t.TempDir(), "config.json")
+	cache.write(file, object{"runtime": "nodejs"}, &files, nil)
+	encoded := read(file)
+	if retained := cache.bytes.Load(); retained < int64(len(encoded)) || retained > int64(len(encoded)+256) {
+		t.Fatalf("retained %d bytes for %d bytes of JSON", retained, len(encoded))
+	}
+	if obj(readJSON(file)["filePathMap"])["overlay"] != "line\u2028.js" {
+		t.Fatal("lost metadata overlay")
 	}
 }

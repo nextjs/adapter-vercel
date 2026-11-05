@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 func hash(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
@@ -220,7 +221,11 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 		if hasHashes {
 			hashes.set(manifestRel, manifestHash)
 		}
-		writeOnce(outputPath(functionDir, handlerRel), handler)
+		handlerPath := outputPath(functionDir, handlerRel)
+		if parent := filepath.Dir(handlerPath); parent != functionDir {
+			mkdir(parent)
+		}
+		writeOnceInDirectory(handlerPath, handler)
 		if hasHashes {
 			hashes.set(handlerRel, handlerHash)
 		}
@@ -247,14 +252,26 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 			cfg["operationType"] = "PAGE"
 		}
 		if hasHashes {
-			configs.write(filepath.Join(functionDir, ".vc-config.json"), cfg, &files, &hashes)
+			configs.writeInDirectory(filepath.Join(functionDir, ".vc-config.json"), cfg, &files, &hashes)
 		} else {
-			configs.write(filepath.Join(functionDir, ".vc-config.json"), cfg, &files, nil)
+			configs.writeInDirectory(filepath.Join(functionDir, ".vc-config.json"), cfg, &files, nil)
 		}
 	})
 }
 
 func (a *adapter) sourceFile(page string) string {
+	value, _ := a.sourceFiles.LoadOrStore(page, &sourceFileResult{})
+	result := value.(*sourceFileResult)
+	result.once.Do(func() { result.path = a.findSourceFile(page) })
+	return result.path
+}
+
+type sourceFileResult struct {
+	once sync.Once
+	path string
+}
+
+func (a *adapter) findSourceFile(page string) string {
 	root, types := a.sourceRoot, a.sourceTypes
 	if root == "" {
 		root, types = a.ProjectDir, []string{"pages", "app"}
