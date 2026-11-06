@@ -428,3 +428,77 @@ describe('handlePrerenderOutputs', () => {
     });
   });
 });
+
+// Uses the real `path`, so on the Windows CI job this covers native paths.
+describe('handleNodeOutputs file paths', () => {
+  let repoRoot: string;
+
+  beforeEach(async () => {
+    repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'adapter-paths-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(repoRoot, { recursive: true, force: true });
+  });
+
+  it('writes `/`-separated paths in a monorepo package', async () => {
+    const projectDir = path.join(repoRoot, 'apps', 'web');
+    const distDir = path.join(projectDir, '.next');
+    await fs.mkdir(path.join(distDir, 'server', 'app'), { recursive: true });
+    await fs.writeFile(
+      path.join(projectDir, 'package.json'),
+      JSON.stringify({ engines: { node: '22.x' } })
+    );
+    await fs.writeFile(path.join(distDir, 'routes-manifest.json'), '{}');
+
+    const assetPath = path.join(repoRoot, 'node_modules', 'dep', 'index.js');
+    // Next.js builds asset keys with native `path.relative`.
+    const assetKey = path.relative(repoRoot, assetPath);
+    const output = {
+      id: '/page',
+      type: AdapterOutputType.APP_PAGE,
+      pathname: '/page',
+      sourcePage: '/page/page',
+      filePath: path.join(distDir, 'server', 'app', 'page.js'),
+      runtime: 'nodejs',
+      assets: { [assetKey]: assetPath },
+      assetsHashes: { [assetKey]: 'hash-dep' },
+      config: {},
+    } satisfies FuncOutputs[number];
+    const vercelOutputDir = path.join(repoRoot, '.vercel', 'output');
+
+    await handleNodeOutputs([output], {
+      config: {},
+      distDir,
+      repoRoot,
+      projectDir,
+      nextVersion: '16.3.0-canary.96',
+      prerenderFallbackFalseMap: {},
+      vercelOutputDir,
+    });
+
+    const funcDir = path.join(vercelOutputDir, 'functions', 'page.func');
+    const config = JSON.parse(
+      await fs.readFile(path.join(funcDir, '.vc-config.json'), 'utf8')
+    );
+    expect(config.handler).toBe('apps/web/___next_launcher.cjs');
+    expect(config.filePathMap).toEqual({
+      'node_modules/dep/index.js': 'node_modules/dep/index.js',
+      'apps/web/.next/server/app/page.js': 'apps/web/.next/server/app/page.js',
+      'apps/web/.next/routes-manifest.json':
+        'apps/web/.next/routes-manifest-deterministic.json',
+    });
+    expect(Object.keys(config.fileHashes).sort()).toEqual([
+      'apps/web/.next/routes-manifest.json',
+      'apps/web/___next_launcher.cjs',
+      'node_modules/dep/index.js',
+    ]);
+    const launcher = await fs.readFile(
+      path.join(funcDir, 'apps', 'web', '___next_launcher.cjs'),
+      'utf8'
+    );
+    // The dist dir is inlined into a string literal, where `\` starts an escape.
+    expect(launcher).toContain('".next"');
+    expect(launcher).not.toContain('__PRIVATE_RELATIVE_DIST_DIR');
+  });
+});
