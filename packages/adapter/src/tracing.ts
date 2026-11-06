@@ -1,25 +1,15 @@
 import fs from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import { debug } from '@vercel/build-utils';
 
-// The Vercel builder copies @vercel/otel, @opentelemetry/api-logs and a pinned
-// @opentelemetry/api 1.9 from the build image to .vercel/otel/ once, before
-// `next build`, and writes this wrapper next to them. It sits in node_modules
-// so ESLint and Prettier skip it by default. .mjs, so webpack parses it as ESM
-// even when the app's package.json sets "type": "commonjs".
+// Before `next build`, the Vercel builder decides whether the deployment gets
+// default tracing, checks the build image and the project's
+// @opentelemetry/api, and only then writes this wrapper next to a copy of
+// @vercel/otel. It clears any older copy first, so the file existing is the
+// signal. It sits in node_modules so ESLint and Prettier skip it by default.
+// .mjs, so webpack parses it as ESM even when the app's package.json sets
+// "type": "commonjs".
 const INJECT_ENTRY = './.vercel/otel/node_modules/instrumentation.mjs';
-const OTEL_API = '@opentelemetry/api';
-const COPIED_PACKAGES = [
-  '@vercel/otel',
-  '@opentelemetry/api-logs',
-  OTEL_API,
-] as const;
-// Every 1.x API copy shares one global slot and accepts a provider registered
-// by the same or a newer minor version, so registering through 1.9 reaches any
-// reader from 1.0 to 1.9. A 1.10+ reader rejects it, a 2.x reader uses another
-// slot, and a prerelease reader only accepts its exact version.
-const OTEL_API_MAX_MINOR = 9;
 
 type TracingConfig = {
   pageExtensions: readonly string[];
@@ -28,9 +18,10 @@ type TracingConfig = {
 };
 
 /**
- * Adds the builder's tracing wrapper to `instrumentationInject`. `modifyConfig`
- * decides whether default tracing is enabled. Any failed check skips the
- * inject without failing the build.
+ * Adds the builder's tracing wrapper to `instrumentationInject` when it exists,
+ * unless the config already has instrumentation of its own. These checks need
+ * the resolved config, so only the adapter can make them. Any failed check
+ * skips the inject without failing the build.
  */
 export async function injectDefaultTracing(
   config: TracingConfig,
@@ -47,24 +38,9 @@ export async function injectDefaultTracing(
       skip('instrumentationInject already has other entries');
       return;
     }
-    if (!(await otelApiIsCompatible(projectDir))) {
-      skip('@opentelemetry/api is outside >=1.0.0 <1.10.0');
-      return;
-    }
-    const wrapper = path.join(projectDir, INJECT_ENTRY);
-    if (!(await isFile(wrapper))) {
+    if (!(await isFile(path.join(projectDir, INJECT_ENTRY)))) {
       skip('the builder did not prepare .vercel/otel');
       return;
-    }
-    // Node resolution falls back to the project's node_modules, so a package
-    // missing from the tree could resolve to the app's own copy.
-    const treeModules = await fs.realpath(path.dirname(wrapper));
-    for (const name of COPIED_PACKAGES) {
-      const resolved = resolveFrom(wrapper, name);
-      if (!resolved || !isInside(treeModules, resolved)) {
-        skip(`.vercel/otel is missing ${name}`);
-        return;
-      }
     }
 
     config.instrumentationInject ??= [];
@@ -123,87 +99,6 @@ async function projectHasInstrumentation(
       return false;
     }
   }
-}
-
-// Checks the copy the app's own code resolves, and the copy Next.js's tracer
-// resolves from its own folder, which pnpm can hide from the project root.
-async function otelApiIsCompatible(projectDir: string): Promise<boolean> {
-  const fromProject = path.join(projectDir, 'package.json');
-  const fromNext = resolveFrom(fromProject, 'next/package.json');
-  for (const from of fromNext ? [fromProject, fromNext] : [fromProject]) {
-    const entry = resolveFrom(from, OTEL_API);
-    if (!entry) continue;
-    const version = await packageVersion(entry, OTEL_API);
-    if (version === undefined || !otelApiVersionOk(version)) return false;
-  }
-  return true;
-}
-
-function resolveFrom(from: string, request: string): string | undefined {
-  try {
-    return createRequire(from).resolve(request);
-  } catch {
-    return undefined;
-  }
-}
-
-// Prereleases fail the pattern: the API only accepts an exact version match
-// when either side has one.
-function otelApiVersionOk(version: string): boolean {
-  const match = /^(\d+)\.(\d+)\.\d+$/.exec(version);
-  return (
-    match !== null &&
-    Number(match[1]) === 1 &&
-    Number(match[2]) <= OTEL_API_MAX_MINOR
-  );
-}
-
-async function packageVersion(
-  entry: string,
-  name: string
-): Promise<string | undefined> {
-  let dir = path.dirname(entry);
-  for (;;) {
-    const version = await readPackageVersion(
-      path.join(dir, 'package.json'),
-      name
-    );
-    if (version) return version;
-    const parent = path.dirname(dir);
-    if (parent === dir) return undefined;
-    dir = parent;
-  }
-}
-
-async function readPackageVersion(
-  pkgPath: string,
-  name: string
-): Promise<string | undefined> {
-  let raw: string;
-  try {
-    raw = await fs.readFile(pkgPath, 'utf8');
-  } catch {
-    return undefined;
-  }
-  return versionOf(raw, name);
-}
-
-function versionOf(raw: string, name: string): string | undefined {
-  let pkg: unknown;
-  try {
-    pkg = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-  if (typeof pkg !== 'object' || pkg === null) return undefined;
-  if (!('name' in pkg) || pkg.name !== name) return undefined;
-  if (!('version' in pkg) || typeof pkg.version !== 'string') return undefined;
-  return pkg.version;
-}
-
-function isInside(dir: string, file: string): boolean {
-  const relative = path.relative(dir, file);
-  return !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
 async function isFile(file: string): Promise<boolean> {

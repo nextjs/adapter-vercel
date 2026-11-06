@@ -94,8 +94,7 @@ const myAdapter: NextAdapter = {
 
     if (
       ctx.phase === PHASE_PRODUCTION_BUILD &&
-      typeof ctx.projectDir !== 'undefined' &&
-      process.env.VERCEL_DEFAULT_TRACING_ENABLED === '1'
+      typeof ctx.projectDir !== 'undefined'
     ) {
       await injectDefaultTracing(config, ctx.projectDir);
     }

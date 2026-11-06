@@ -74,41 +74,8 @@ describe('injectDefaultTracing', () => {
 
   async function readyProject(): Promise<string> {
     const projectDir = await tempDir('adapter-tracing-app-');
-    await writePackage(
-      path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
-      '@opentelemetry/api',
-      '1.9.0'
-    );
     await prepareTree(projectDir);
     return projectDir;
-  }
-
-  // pnpm's isolated layout: `next` is a symlink into node_modules/.pnpm, and a
-  // dependency's @opentelemetry/api is hoisted to node_modules/.pnpm/node_modules,
-  // which Next.js can resolve but the project root can't.
-  async function hiddenOtelApi(
-    projectDir: string,
-    version: string
-  ): Promise<void> {
-    const modules = path.join(projectDir, 'node_modules');
-    await fs.rm(path.join(modules, '@opentelemetry'), {
-      recursive: true,
-      force: true,
-    });
-    const nextReal = path.join(
-      modules,
-      '.pnpm',
-      'next@16.5.0',
-      'node_modules',
-      'next'
-    );
-    await writePackage(nextReal, 'next', '16.5.0');
-    await fs.symlink(nextReal, path.join(modules, 'next'));
-    await writePackage(
-      path.join(modules, '.pnpm', 'node_modules', '@opentelemetry', 'api'),
-      '@opentelemetry/api',
-      version
-    );
   }
 
   function config(): TracingConfig {
@@ -128,13 +95,11 @@ describe('injectDefaultTracing', () => {
     return tracingConfig;
   }
 
-  // Runs the adapter's real modifyConfig, which decides whether to inject.
+  // Runs the adapter's real modifyConfig.
   async function modifyConfig(
     projectDir: string,
-    enabled: string | undefined,
     phase: string = PHASE_PRODUCTION_BUILD
   ): Promise<TracingConfig> {
-    vi.stubEnv('VERCEL_DEFAULT_TRACING_ENABLED', enabled);
     const nextConfig = {
       ...config(),
       outputFileTracingRoot: projectDir,
@@ -182,20 +147,6 @@ describe('injectDefaultTracing', () => {
 
     expect(tracingConfig.instrumentationInject).toBeUndefined();
   });
-
-  it.each(['@vercel/otel', '@opentelemetry/api-logs', '@opentelemetry/api'])(
-    'does not inject when .vercel/otel is missing %s',
-    async (name) => {
-      const projectDir = await readyProject();
-      await fs.rm(path.join(otelRoot(projectDir), 'node_modules', name), {
-        recursive: true,
-      });
-
-      const tracingConfig = await inject(projectDir);
-
-      expect(tracingConfig.instrumentationInject).toBeUndefined();
-    }
-  );
 
   it('does not inject when the project has an instrumentation file', async () => {
     const projectDir = await readyProject();
@@ -256,24 +207,15 @@ describe('injectDefaultTracing', () => {
     expect(tracingConfig.instrumentationInject).toBeUndefined();
   });
 
-  it('injects through modifyConfig when default tracing is enabled', async () => {
+  // The builder only prepares the tree when the deployment enables default
+  // tracing, so the adapter doesn't read the flag itself.
+  it('injects through modifyConfig whenever the builder prepared the tree', async () => {
     const projectDir = await readyProject();
+    vi.stubEnv('VERCEL_DEFAULT_TRACING_ENABLED', undefined);
 
-    const tracingConfig = await modifyConfig(projectDir, '1');
+    const tracingConfig = await modifyConfig(projectDir);
 
     expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
-  });
-
-  it.each([
-    ['unset', undefined],
-    ['0', '0'],
-    ['true', 'true'],
-  ])('does not inject when default tracing is %s', async (_label, enabled) => {
-    const projectDir = await readyProject();
-
-    const tracingConfig = await modifyConfig(projectDir, enabled);
-
-    expect(tracingConfig.instrumentationInject).toBeUndefined();
   });
 
   it('does not inject outside the production build', async () => {
@@ -281,72 +223,10 @@ describe('injectDefaultTracing', () => {
 
     const tracingConfig = await modifyConfig(
       projectDir,
-      '1',
       'phase-development-server'
     );
 
     expect(tracingConfig.instrumentationInject).toBeUndefined();
-  });
-
-  it('injects when the app has no @opentelemetry/api', async () => {
-    const projectDir = await readyProject();
-    await fs.rm(path.join(projectDir, 'node_modules', '@opentelemetry'), {
-      recursive: true,
-    });
-
-    const tracingConfig = await inject(projectDir);
-
-    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
-  });
-
-  it.each(['1.10.0', '2.0.0', '1.9.0-rc.0'])(
-    'does not inject when @opentelemetry/api is %s',
-    async (version) => {
-      const projectDir = await readyProject();
-      await writePackage(
-        path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
-        '@opentelemetry/api',
-        version
-      );
-
-      const tracingConfig = await inject(projectDir);
-
-      expect(tracingConfig.instrumentationInject).toBeUndefined();
-    }
-  );
-
-  it.each(['1.4.1', '1.6.0', '1.9.1'])(
-    'injects when @opentelemetry/api is %s',
-    async (version) => {
-      const projectDir = await readyProject();
-      await writePackage(
-        path.join(projectDir, 'node_modules', '@opentelemetry', 'api'),
-        '@opentelemetry/api',
-        version
-      );
-
-      const tracingConfig = await inject(projectDir);
-
-      expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
-    }
-  );
-
-  it('does not inject when only Next.js resolves @opentelemetry/api 1.10.0', async () => {
-    const projectDir = await readyProject();
-    await hiddenOtelApi(projectDir, '1.10.0');
-
-    const tracingConfig = await inject(projectDir);
-
-    expect(tracingConfig.instrumentationInject).toBeUndefined();
-  });
-
-  it('injects when only Next.js resolves @opentelemetry/api 1.9.0', async () => {
-    const projectDir = await readyProject();
-    await hiddenOtelApi(projectDir, '1.9.0');
-
-    const tracingConfig = await inject(projectDir);
-
-    expect(tracingConfig.instrumentationInject).toEqual([INJECT_ENTRY]);
   });
 
   it('does not inject when instrumentationInject already has other entries', async () => {
