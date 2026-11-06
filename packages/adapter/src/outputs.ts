@@ -51,6 +51,57 @@ function getPostponedStateContentType(
   )}; origin=${JSON.stringify(originContentType)}`;
 }
 
+/** The parts of `node:path` the path helpers use, so tests can pass `path.win32`. */
+export type PathApi = Pick<typeof path, 'relative' | 'isAbsolute' | 'sep'>;
+
+/**
+ * Converts a native relative path to the `/`-separated form the Build Output
+ * API expects in `filePathMap`, `fileHashes` and handler paths. Next.js builds
+ * its `assets` keys with native `path.relative`, so on Windows they arrive as
+ * `.next\server\app\page.js`.
+ */
+export function toPosixPath(
+  relativePath: string,
+  pathApi: PathApi = path
+): string {
+  return pathApi.sep === '/'
+    ? relativePath
+    : relativePath.split(pathApi.sep).join('/');
+}
+
+/**
+ * `path.relative` with `/` separators. `path.posix.relative` can't take native
+ * paths: on Windows it reads `C:\repo` as one relative segment and returns
+ * `../C:\repo\.next\...`.
+ */
+export function toPosixRelative(
+  from: string,
+  to: string,
+  pathApi: PathApi = path
+): string {
+  const relativePath = pathApi.relative(from, to);
+  // On Windows, a path on another drive has no relative form and
+  // `path.relative` returns it unchanged.
+  if (pathApi.isAbsolute(relativePath)) {
+    throw new Error(
+      `Cannot reference "${to}" from "${from}" in the build output because they are on different drives. Move the project and its dependencies onto the same drive.`
+    );
+  }
+  return toPosixPath(relativePath, pathApi);
+}
+
+function toPosixKeys(
+  record: Readonly<Record<string, string>>,
+  pathApi: PathApi
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [
+      toPosixPath(key, pathApi),
+      value,
+    ])
+  );
+}
+
 const copy = async (src: string, dest: string) => {
   await fse.remove(dest);
   await fse.copy(src, dest);
@@ -402,6 +453,67 @@ function resolveNextEnvLoaderPath(projectDir: string): string {
   return requireFromNext.resolve('@next/env');
 }
 
+/**
+ * The `filePathMap` and `fileHashes` of one Node.js function. Keys are paths
+ * inside the function and values are paths from the repo root, both with `/`.
+ */
+export function getNodeFunctionFiles(
+  output: FuncOutputs[number],
+  {
+    notFoundOutput,
+    sharedFiles,
+    sharedFileHashes,
+    relativeToRepoRoot,
+    pathApi = path,
+  }: {
+    /** Pages Router functions render not-found themselves, so they ship it. */
+    notFoundOutput?: FuncOutputs[number];
+    /** Files every function gets: env files and the routes manifest. */
+    sharedFiles: Readonly<Record<string, string>>;
+    sharedFileHashes: Readonly<Record<string, string>>;
+    relativeToRepoRoot: (fsPath: string) => string;
+    pathApi?: PathApi;
+  }
+): { files: Record<string, string>; fileHashes?: Record<string, string> } {
+  const files: Record<string, string> = {};
+  const fileHashes =
+    output.assetsHashes && toPosixKeys(output.assetsHashes, pathApi);
+
+  // Adds an output's assets and entry file, returning the keys it added.
+  const addOutputFiles = (fnOutput: FuncOutputs[number]) => {
+    const keys: string[] = [];
+    for (const [relPath, fsPath] of Object.entries(fnOutput.assets)) {
+      const key = toPosixPath(relPath, pathApi);
+      files[key] = relativeToRepoRoot(fsPath);
+      keys.push(key);
+    }
+    const entryPath = relativeToRepoRoot(fnOutput.filePath);
+    files[entryPath] = entryPath;
+    keys.push(entryPath);
+    return keys;
+  };
+
+  addOutputFiles(output);
+
+  if (output.type === AdapterOutputType.PAGES && notFoundOutput) {
+    const notFoundHashes = toPosixKeys(
+      notFoundOutput.assetsHashes ?? {},
+      pathApi
+    );
+    for (const key of addOutputFiles(notFoundOutput)) {
+      if (fileHashes) {
+        fileHashes[key] = notFoundHashes[key];
+      }
+    }
+  }
+
+  Object.assign(files, sharedFiles);
+  if (fileHashes) {
+    Object.assign(fileHashes, sharedFileHashes);
+  }
+  return { files, fileHashes };
+}
+
 export async function handleNodeOutputs(
   nodeOutputs: FuncOutputs,
   {
@@ -436,7 +548,7 @@ export async function handleNodeOutputs(
 
   const fsSema = new Sema(16, { capacity: nodeOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
-  const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
+  const handlerRelativeDir = toPosixRelative(repoRoot, projectDir);
 
   let pages404Output: undefined | FuncOutputs[0];
   let pagesErrorOutput: undefined | FuncOutputs[0];
@@ -460,7 +572,7 @@ export async function handleNodeOutputs(
     await writeDeterministicRoutesManifest(distDir);
 
   const routesManifestRelativePath = path.posix.join(
-    path.posix.relative(repoRoot, distDir),
+    toPosixRelative(repoRoot, distDir),
     'routes-manifest.json'
   );
   const envFiles = await getProjectEnvFiles(projectDir);
@@ -473,7 +585,7 @@ export async function handleNodeOutputs(
     // The hash must be keyed like the file map, or the file has no hash
     // whenever the project is not at the repo root.
     const envFileKey = path.posix.join(handlerRelativeDir, envFile);
-    envFilePathMap[envFileKey] = path.posix.relative(
+    envFilePathMap[envFileKey] = toPosixRelative(
       repoRoot,
       path.join(projectDir, envFile)
     );
@@ -491,12 +603,15 @@ export async function handleNodeOutputs(
     }
 
     const nextEnvLoaderPath = resolveNextEnvLoaderPath(projectDir);
-    envFilePathMap[path.posix.relative(repoRoot, nextEnvLoaderPath)] =
-      path.posix.relative(repoRoot, nextEnvLoaderPath);
-    envFileHashes[path.posix.relative(repoRoot, nextEnvLoaderPath)] = sha256(
+    const nextEnvLoaderRelativePath = toPosixRelative(
+      repoRoot,
+      nextEnvLoaderPath
+    );
+    envFilePathMap[nextEnvLoaderRelativePath] = nextEnvLoaderRelativePath;
+    envFileHashes[nextEnvLoaderRelativePath] = sha256(
       await fs.readFile(nextEnvLoaderPath)
     );
-    nextEnvLoaderPathRelativeToProjectDir = path.posix.relative(
+    nextEnvLoaderPathRelativeToProjectDir = toPosixRelative(
       projectDir,
       nextEnvLoaderPath
     );
@@ -506,7 +621,7 @@ export async function handleNodeOutputs(
 
   // the launcher is the same for every function so only generate it once
   const handlerSource = getHandlerSource({
-    projectRelativeDistDir: path.posix.relative(projectDir, distDir),
+    projectRelativeDistDir: toPosixRelative(projectDir, distDir),
     prerenderFallbackFalseMap,
     isMiddleware,
     nextConfig: config,
@@ -523,10 +638,22 @@ export async function handleNodeOutputs(
   const relativeToRepoRoot = (fsPath: string) => {
     let relPath = relativeToRepoRootCache.get(fsPath);
     if (relPath === undefined) {
-      relPath = path.posix.relative(repoRoot, fsPath);
+      relPath = toPosixRelative(repoRoot, fsPath);
       relativeToRepoRootCache.set(fsPath, relPath);
     }
     return relPath;
+  };
+
+  // the same for every function: env files, the routes manifest and the
+  // launcher (written into each function dir, so it only has a hash)
+  const sharedFiles: Record<string, string> = {
+    ...envFilePathMap,
+    [routesManifestRelativePath]: relativeToRepoRoot(routesManifestPath),
+  };
+  const sharedFileHashes: Record<string, string> = {
+    ...envFileHashes,
+    [routesManifestRelativePath]: routesManifestHash,
+    [handlerRelativePath]: handlerSourceHash,
   };
 
   await Promise.all(
@@ -539,61 +666,16 @@ export async function handleNodeOutputs(
       );
       await fs.mkdir(functionDir, { recursive: true });
 
-      const files: Record<string, string> = {};
-      const filesHashes: Record<string, string> | undefined =
-        output.assetsHashes;
-
-      for (const [relPath, fsPath] of Object.entries(output.assets)) {
-        files[relPath] = relativeToRepoRoot(fsPath);
-      }
-      files[path.posix.relative(repoRoot, output.filePath)] =
-        path.posix.relative(repoRoot, output.filePath);
-      if (hasProjectEnvFiles) {
-        Object.assign(files, envFilePathMap);
-        if (filesHashes) {
-          Object.assign(filesHashes, envFileHashes);
-        }
-      }
-
-      // ensure 404 handler is included in function for rendering
-      // not-found in pages router
-      if (output.type === AdapterOutputType.PAGES) {
-        const notFoundOutput = pages404Output || pagesErrorOutput;
-
-        if (notFoundOutput) {
-          for (const [relPath, fsPath] of Object.entries(
-            notFoundOutput.assets
-          )) {
-            files[relPath] = relativeToRepoRoot(fsPath);
-            if (filesHashes) {
-              filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
-            }
-          }
-          const relPath = path.posix.relative(
-            repoRoot,
-            notFoundOutput.filePath
-          );
-          files[relPath] = relPath;
-          if (filesHashes) {
-            filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
-          }
-        }
-      }
-
-      files[routesManifestRelativePath] = path.posix.relative(
-        repoRoot,
-        routesManifestPath
-      );
-      if (filesHashes) {
-        filesHashes[routesManifestRelativePath] = routesManifestHash;
-      }
+      const { files, fileHashes } = getNodeFunctionFiles(output, {
+        notFoundOutput: pages404Output || pagesErrorOutput,
+        sharedFiles,
+        sharedFileHashes,
+        relativeToRepoRoot,
+      });
 
       const handlerAbsolutePath = path.join(functionDir, handlerRelativePath);
       await fs.mkdir(path.dirname(handlerAbsolutePath), { recursive: true });
       await writeIfNotExists(handlerAbsolutePath, handlerSource);
-      if (filesHashes) {
-        filesHashes[handlerRelativePath] = handlerSourceHash;
-      }
 
       const operationType =
         output.type === AdapterOutputType.APP_PAGE ||
@@ -646,7 +728,7 @@ export async function handleNodeOutputs(
         // middleware handler always expects Request/Response interface
         useWebApi: isMiddleware,
         launcherType: 'Nodejs',
-        fileHashes: filesHashes,
+        fileHashes,
       };
 
       await writeIfNotExists(
@@ -743,6 +825,8 @@ export async function handlePrerenderOutputs(
           await fs.mkdir(path.dirname(prerenderFunctionDir), {
             recursive: true,
           });
+          // Windows only allows symlinks with Developer Mode or admin rights,
+          // the same requirement as the CLI's own `.func` symlinks.
           await fs
             .symlink(
               path.relative(
@@ -855,7 +939,7 @@ export async function handlePrerenderOutputs(
               initialStatus: output.fallback?.initialStatus,
 
               fallback: prerenderFallbackPath
-                ? path.posix.relative(
+                ? toPosixRelative(
                     path.dirname(prerenderConfigPath),
                     prerenderFallbackPath
                   )
@@ -909,6 +993,45 @@ type EdgeFunctionConfig = {
   framework?: { slug: string; version: string };
 };
 
+const EDGE_JS_FILE_REGEX = /\.(m|c)?js$/;
+
+/**
+ * The `filePathMap` and `assets` of one edge function, and the JS files its
+ * source is concatenated from (relative to the project). All use `/`.
+ */
+export function getEdgeFunctionFiles(
+  output: FuncOutputs[number],
+  {
+    repoRoot,
+    projectDir,
+    pathApi = path,
+  }: { repoRoot: string; projectDir: string; pathApi?: PathApi }
+) {
+  const files: Record<string, string> = {};
+  const nonJsAssetFiles: Array<{ name: string; path: string }> = [];
+  const sourceFilePaths: string[] = [];
+
+  for (const [nativeRelPath, fsPath] of Object.entries(output.assets)) {
+    const relPath = toPosixPath(nativeRelPath, pathApi);
+    const repoPath = toPosixRelative(repoRoot, fsPath, pathApi);
+    if (EDGE_JS_FILE_REGEX.test(fsPath)) {
+      files[relPath] = repoPath;
+      sourceFilePaths.push(toPosixRelative(projectDir, fsPath, pathApi));
+    } else {
+      files[`assets/${relPath}`] = repoPath;
+      nonJsAssetFiles.push({ name: relPath, path: `assets/${relPath}` });
+    }
+  }
+  for (const [name, fsPath] of Object.entries(output.wasmAssets || {})) {
+    files[`wasm/${name}.wasm`] = toPosixRelative(repoRoot, fsPath, pathApi);
+  }
+  const entryPath = toPosixRelative(projectDir, output.filePath, pathApi);
+  files[entryPath] = toPosixRelative(repoRoot, output.filePath, pathApi);
+  sourceFilePaths.push(entryPath);
+
+  return { files, nonJsAssetFiles, sourceFilePaths };
+}
+
 export async function handleEdgeOutputs(
   edgeOutputs: FuncOutputs,
   {
@@ -927,7 +1050,7 @@ export async function handleEdgeOutputs(
 ) {
   const fsSema = new Sema(16, { capacity: edgeOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
-  const handlerRelativeDir = path.posix.relative(repoRoot, projectDir);
+  const handlerRelativeDir = toPosixRelative(repoRoot, projectDir);
 
   await Promise.all(
     edgeOutputs.map(async (output) => {
@@ -939,36 +1062,10 @@ export async function handleEdgeOutputs(
       );
       await fs.mkdir(functionDir, { recursive: true });
 
-      const files: Record<string, string> = {};
-      const jsRegex = /\.(m|c)?js$/;
-
-      const nonJsAssetFiles: Array<{ name: string; path: string }> = [];
-
-      for (const [relPath, fsPath] of Object.entries(output.assets)) {
-        if (jsRegex.test(fsPath)) {
-          files[relPath] = path.posix.relative(repoRoot, fsPath);
-        } else {
-          files[`assets/${relPath}`] = path.posix.relative(repoRoot, fsPath);
-          nonJsAssetFiles.push({
-            name: relPath,
-            path: `assets/${relPath}`,
-          });
-        }
-      }
-      for (const [name, fsPath] of Object.entries(output.wasmAssets || {})) {
-        files[`wasm/${name}.wasm`] = path.posix.relative(repoRoot, fsPath);
-      }
-      files[path.posix.relative(projectDir, output.filePath)] =
-        path.posix.relative(repoRoot, output.filePath);
-
-      // Get file paths for the edge function source generation
-
-      const filePaths = [
-        ...Object.values(output.assets)
-          .map((item) => path.posix.relative(projectDir, item))
-          .filter((item) => jsRegex.test(item)),
-        path.posix.relative(projectDir, output.filePath),
-      ];
+      const { files, nonJsAssetFiles, sourceFilePaths } = getEdgeFunctionFiles(
+        output,
+        { repoRoot, projectDir }
+      );
 
       // Create Next.js parameters for the edge function
       const params = {
@@ -987,7 +1084,7 @@ export async function handleEdgeOutputs(
 
       // Generate the edge function source using Next.js logic
       const edgeSourceObj = await getNextjsEdgeFunctionSource(
-        filePaths,
+        sourceFilePaths,
         params,
         projectDir,
         output.wasmAssets
@@ -1122,7 +1219,7 @@ export async function getSourceFilePathFromPage({
     }
 
     if (allowExtensionless && fse.existsSync(fsPath)) {
-      return path.relative(workPath, fsPath);
+      return toPosixRelative(workPath, fsPath);
     }
     const extensionless = fsPath;
 
@@ -1137,7 +1234,7 @@ export async function getSourceFilePathFromPage({
         fsPath = `${extensionless.replace(/index$/, 'page')}.${ext}`;
       }
       if (fse.existsSync(fsPath)) {
-        return path.relative(workPath, fsPath);
+        return toPosixRelative(workPath, fsPath);
       }
     }
 
@@ -1146,7 +1243,7 @@ export async function getSourceFilePathFromPage({
         for (const ext of extensionsToTry) {
           fsPath = path.join(extensionless, `index.${ext}`);
           if (fse.existsSync(fsPath)) {
-            return path.relative(workPath, fsPath);
+            return toPosixRelative(workPath, fsPath);
           }
         }
         // appDir
@@ -1155,12 +1252,12 @@ export async function getSourceFilePathFromPage({
           // RSC
           fsPath = path.join(extensionless, `page.${ext}`);
           if (fse.existsSync(fsPath)) {
-            return path.relative(workPath, fsPath);
+            return toPosixRelative(workPath, fsPath);
           }
           // Route Handlers
           fsPath = path.join(extensionless, `route.${ext}`);
           if (fse.existsSync(fsPath)) {
-            return path.relative(workPath, fsPath);
+            return toPosixRelative(workPath, fsPath);
           }
         }
       }
