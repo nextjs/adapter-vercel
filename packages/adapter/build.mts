@@ -85,11 +85,18 @@ await fs.writeFile(
 );
 await fs.mkdir('dist/bin', { recursive: true });
 const targets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'];
-const regexpModule = execFileSync(
-  'go',
-  ['list', '-m', '-f', '{{.Dir}}', 'github.com/dlclark/regexp2'],
-  { cwd: path.join(process.cwd(), 'native'), encoding: 'utf8' }
-).trim();
+// `go list -m` leaves Dir empty when a fresh runner has not downloaded the
+// module. Resolve and download the pinned dependency before copying its license.
+const { Dir: regexpModule } = JSON.parse(
+  execFileSync(
+    'go',
+    ['mod', 'download', '-json', 'github.com/dlclark/regexp2'],
+    { cwd: path.join(process.cwd(), 'native'), encoding: 'utf8' }
+  )
+);
+if (typeof regexpModule !== 'string' || !regexpModule) {
+  throw new Error('Could not resolve the regexp2 module for license packaging');
+}
 await fs.mkdir('dist/licenses', { recursive: true });
 await fs.copyFile(
   path.join(regexpModule, 'LICENSE'),
