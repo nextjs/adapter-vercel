@@ -5,9 +5,10 @@ import { debug } from '@vercel/build-utils';
 
 // The Vercel builder copies @vercel/otel, @opentelemetry/api-logs and a pinned
 // @opentelemetry/api 1.9 from the build image to .vercel/otel/ once, before
-// `next build`, and writes this wrapper next to them. .mjs, so webpack parses
-// it as ESM even when the app's package.json sets "type": "commonjs".
-const INJECT_ENTRY = './.vercel/otel/instrumentation.mjs';
+// `next build`, and writes this wrapper next to them. It sits in node_modules
+// so ESLint and Prettier skip it by default. .mjs, so webpack parses it as ESM
+// even when the app's package.json sets "type": "commonjs".
+const INJECT_ENTRY = './.vercel/otel/node_modules/instrumentation.mjs';
 const OTEL_API = '@opentelemetry/api';
 const COPIED_PACKAGES = [
   '@vercel/otel',
@@ -57,9 +58,7 @@ export async function injectDefaultTracing(
     }
     // Node resolution falls back to the project's node_modules, so a package
     // missing from the tree could resolve to the app's own copy.
-    const treeModules = await fs.realpath(
-      path.join(path.dirname(wrapper), 'node_modules')
-    );
+    const treeModules = await fs.realpath(path.dirname(wrapper));
     for (const name of COPIED_PACKAGES) {
       const resolved = resolveFrom(wrapper, name);
       if (!resolved || !isInside(treeModules, resolved)) {
