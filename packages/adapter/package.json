@@ -1,6 +1,6 @@
 {
   "name": "@next-community/adapter-vercel",
-  "version": "0.0.1-beta.35",
+  "version": "0.0.1-beta.36",
   "type": "commonjs",
   "main": "dist/index.js",
   "bin": {
@@ -35,7 +35,7 @@
     "esbuild": "0.25.10",
     "fs-extra": "11.2.0",
     "minimatch": "3.1.2",
-    "next": "16.4.0-canary.38",
+    "next": "16.5.0-canary.40",
     "picomatch": "4.0.1",
     "react": "19.1.1",
     "react-dom": "19.1.1",

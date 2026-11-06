@@ -54,7 +54,12 @@ for (const isMiddleware of [false, true]) {
       isMiddleware,
       projectRelativeDistDir: '__GO_DIST_DIR__',
       prerenderFallbackFalseMap: '__GO_FALLBACKS__',
-      nextConfig: '__GO_CONFIG__',
+      // The runtime derives a separate basePath constant before serializing
+      // the full config. Keep both values replaceable in the Go template.
+      nextConfig: {
+        basePath: '__GO_BASE_PATH__',
+        toJSON: () => '__GO_CONFIG__',
+      },
       nextEnvLoaderPathRelativeToProjectDir: '__GO_ENV_LOADER__',
     })
   );

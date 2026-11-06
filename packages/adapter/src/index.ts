@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
 import { modifyConfig } from './config';
+import { collectGoRouteOutputs, handleGoOutputs } from './go-outputs';
 import {
   type FuncOutputs,
   handleEdgeOutputs,
@@ -20,6 +21,7 @@ import {
   modifyWithRewriteHeaders,
   normalizeNextDataRoutes,
   normalizeRewrites,
+  removeGoRouteParams,
 } from './routing';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
@@ -38,6 +40,7 @@ const myAdapter: NextAdapter = {
     nextVersion,
   }) {
     const benchmarkStart = performance.now();
+    const goOutputs = collectGoRouteOutputs(outputs);
     const vercelOutputDir = path.join(distDir, 'output');
     await fs.mkdir(vercelOutputDir, { recursive: true });
 
@@ -196,6 +199,13 @@ const myAdapter: NextAdapter = {
       prerenderFallbackFalseMap,
     });
 
+    await handleGoOutputs(goOutputs, {
+      config,
+      projectDir,
+      nextVersion,
+      vercelOutputDir,
+    });
+
     // handle prerenders (must come after handle node outputs)
     await handlePrerenderOutputs(outputs.prerenders, {
       config,
@@ -231,6 +241,10 @@ const myAdapter: NextAdapter = {
     const onMatchRoutes = extractOnMatchRoutes(routing);
 
     const dynamicRoutes: RouteWithSrc[] = [];
+    const goPathnames = new Set(goOutputs.map((output) => output.pathname));
+    const otherPathnames = new Set(
+      [...nodeOutputs, ...edgeOutputs].map((output) => output.pathname)
+    );
     let addedNextData404Route = false;
 
     for (const route of routing.dynamicRoutes) {
@@ -251,9 +265,21 @@ const myAdapter: NextAdapter = {
         }
       }
 
+      const sourcePath = route.source
+        ? path.posix.join('/', config.basePath || '', route.source)
+        : undefined;
+      // The producer also emits an RSC-suffixed rule for each App Router route.
+      const isGoRoute =
+        sourcePath &&
+        (goPathnames.has(sourcePath) ||
+          (!otherPathnames.has(sourcePath) &&
+            sourcePath.endsWith('.rsc') &&
+            goPathnames.has(sourcePath.slice(0, -4))));
       dynamicRoutes.push({
         src: route.sourceRegex,
-        dest: route.destination,
+        dest: isGoRoute
+          ? removeGoRouteParams(route.destination)
+          : route.destination,
         check: true,
         has: route.has,
         missing: route.missing,

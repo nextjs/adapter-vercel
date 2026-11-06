@@ -132,6 +132,7 @@ func (a *adapter) handler(middleware bool, envLoader string) []byte {
 		config = jsonText(a.Config)
 	}
 	source = strings.ReplaceAll(source, jsonText("__GO_CONFIG__"), config)
+	source = strings.ReplaceAll(source, jsonText("__GO_BASE_PATH__"), jsonText(str(a.Config["basePath"])))
 	source = strings.ReplaceAll(source, jsonText("__GO_ENV_LOADER__"), jsonText(envLoader))
 	return []byte(source)
 }

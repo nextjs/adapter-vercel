@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { AdapterOutput } from 'next';
-import { AdapterOutputType } from 'next/dist/shared/lib/constants';
+import { AdapterOutputType } from 'next/constants';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type FuncOutputs,
