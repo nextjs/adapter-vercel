@@ -129,6 +129,93 @@ describe('handleNodeOutputs automatic fetch instrumentation', () => {
   });
 });
 
+describe('handleNodeOutputs project env files', () => {
+  let repoRoot: string;
+
+  beforeEach(async () => {
+    // Resolve symlinks (macOS /var -> /private/var) so paths returned by
+    // require.resolve share the repo root's prefix.
+    repoRoot = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), 'adapter-monorepo-'))
+    );
+  });
+
+  afterEach(async () => {
+    await fs.rm(repoRoot, { recursive: true, force: true });
+  });
+
+  it('hashes every env file under the key it has in the file map', async () => {
+    const projectDir = path.join(repoRoot, 'apps/web');
+    const distDir = path.join(projectDir, '.next');
+    await fs.mkdir(distDir, { recursive: true });
+    await fs.writeFile(
+      path.join(projectDir, 'package.json'),
+      JSON.stringify({ engines: { node: '22.x' } })
+    );
+    await fs.writeFile(path.join(projectDir, '.env'), 'FOO=bar\n');
+    await fs.writeFile(path.join(distDir, 'routes-manifest.json'), '{}');
+
+    // Hoisted `next` and `@next/env`, as a pnpm or npm workspace installs them.
+    const nodeModules = path.join(repoRoot, 'node_modules');
+    await fs.mkdir(path.join(nodeModules, 'next'), { recursive: true });
+    await fs.writeFile(
+      path.join(nodeModules, 'next/package.json'),
+      JSON.stringify({ name: 'next', version: '16.3.0' })
+    );
+    await fs.mkdir(path.join(nodeModules, '@next/env'), { recursive: true });
+    await fs.writeFile(
+      path.join(nodeModules, '@next/env/package.json'),
+      JSON.stringify({ name: '@next/env', main: 'index.js' })
+    );
+    await fs.writeFile(path.join(nodeModules, '@next/env/index.js'), '');
+
+    const output = {
+      id: 'node-output',
+      type: AdapterOutputType.APP_ROUTE,
+      pathname: '/example',
+      sourcePage: '/example',
+      filePath: path.join(distDir, 'example.js'),
+      runtime: 'nodejs',
+      assets: {},
+      // Next.js hashes the entrypoint itself, keyed relative to the repo root.
+      assetsHashes: { 'apps/web/.next/example.js': 'entrypoint-hash' },
+      config: {},
+    } satisfies FuncOutputs[number];
+    const vercelOutputDir = path.join(repoRoot, '.vercel/output');
+
+    await handleNodeOutputs([output], {
+      config: {},
+      distDir,
+      repoRoot,
+      projectDir,
+      nextVersion: '16.3.0-canary.96',
+      isMiddleware: false,
+      prerenderFallbackFalseMap: {},
+      vercelOutputDir,
+    });
+
+    const functionDir = path.join(vercelOutputDir, 'functions/example.func');
+    const config = JSON.parse(
+      await fs.readFile(path.join(functionDir, '.vc-config.json'), 'utf8')
+    );
+    expect(config.filePathMap['apps/web/.env']).toBe('apps/web/.env');
+    // Every mapped file has a hash...
+    expect(
+      Object.keys(config.filePathMap).filter((key) => !config.fileHashes[key])
+    ).toEqual([]);
+    // ...and every hash belongs to a mapped file or one written into the
+    // function directory (the launcher), never to a bare `.env`.
+    expect(config.fileHashes['.env']).toBeUndefined();
+    for (const key of Object.keys(config.fileHashes)) {
+      if (!(key in config.filePathMap)) {
+        await expect(
+          fs.stat(path.join(functionDir, key))
+        ).resolves.toBeTruthy();
+      }
+    }
+  });
+});
+
 const RSC_CONTENT_TYPE = 'text/x-component';
 const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';
 
