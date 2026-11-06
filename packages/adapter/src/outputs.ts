@@ -413,6 +413,7 @@ export async function handleNodeOutputs(
     isMiddleware,
     prerenderFallbackFalseMap,
     vercelOutputDir,
+    disableAutomaticFetchInstrumentation = false,
   }: {
     config: NextConfig;
     distDir: string;
@@ -422,6 +423,8 @@ export async function handleNodeOutputs(
     isMiddleware?: boolean;
     prerenderFallbackFalseMap: Record<string, string[]>;
     vercelOutputDir: string;
+    /** Set when the default tracing inject was compiled into the build. */
+    disableAutomaticFetchInstrumentation?: boolean;
   }
 ) {
   const nodeVersion = await getNodeVersion(
@@ -632,8 +635,9 @@ export async function handleNodeOutputs(
         supportsResponseStreaming: true,
         experimentalAllowBundling: true,
         shouldDisableAutomaticFetchInstrumentation:
+          disableAutomaticFetchInstrumentation ||
           process.env.VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION ===
-          '1',
+            '1',
         // middleware handler always expects Request/Response interface
         useWebApi: isMiddleware,
         launcherType: 'Nodejs',
@@ -1031,6 +1035,7 @@ export async function handleMiddleware(
     projectDir: string;
     vercelOutputDir: string;
     prerenderFallbackFalseMap: Record<string, string[]>;
+    disableAutomaticFetchInstrumentation?: boolean;
   }
 ): Promise<RouteWithSrc[]> {
   if (output.runtime === 'nodejs') {

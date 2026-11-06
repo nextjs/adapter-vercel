@@ -24,6 +24,7 @@ import {
   removeGoRouteParams,
 } from './routing';
 import { generateToolbarScript } from './toolbar';
+import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
@@ -91,6 +92,13 @@ const myAdapter: NextAdapter = {
       );
     }
 
+    if (
+      ctx.phase === PHASE_PRODUCTION_BUILD &&
+      typeof ctx.projectDir !== 'undefined'
+    ) {
+      await injectDefaultTracing(config, ctx.projectDir);
+    }
+
     return config;
   },
   async onBuildComplete({
@@ -106,6 +114,10 @@ const myAdapter: NextAdapter = {
     const goOutputs = collectGoRouteOutputs(outputs);
     const vercelOutputDir = path.join(distDir, 'output');
     await fs.mkdir(vercelOutputDir, { recursive: true });
+    // The injected @vercel/otel instruments fetch, so turn off the runtime's
+    // own fetch spans for this build's Node.js functions to avoid duplicates.
+    const disableAutomaticFetchInstrumentation =
+      await defaultTracingWasInjected(config, distDir);
 
     const escapedBuildId = escapeStringRegexp(buildId);
 
@@ -248,6 +260,7 @@ const myAdapter: NextAdapter = {
         vercelOutputDir,
         nextVersion,
         prerenderFallbackFalseMap,
+        disableAutomaticFetchInstrumentation,
       });
     }
 
@@ -260,6 +273,7 @@ const myAdapter: NextAdapter = {
       nextVersion,
       vercelOutputDir,
       prerenderFallbackFalseMap,
+      disableAutomaticFetchInstrumentation,
     });
 
     await handleGoOutputs(goOutputs, {
