@@ -5,10 +5,11 @@ import { debug } from '@vercel/build-utils';
 // Before `next build`, the Vercel builder decides whether the deployment gets
 // default tracing, checks the build image and the project's
 // @opentelemetry/api, and only then writes this wrapper next to a copy of
-// @vercel/otel. It clears any older copy first, so the file existing is the
-// signal. It sits in node_modules so ESLint and Prettier skip it by default.
-// .mjs, so webpack parses it as ESM even when the app's package.json sets
-// "type": "commonjs".
+// @vercel/otel. It names the entry in VERCEL_DEFAULT_TRACING_ENTRY only when
+// it prepared the wrapper in this build, so a file the build command writes
+// or restores later isn't injected. It sits in node_modules so ESLint and
+// Prettier skip it by default. .mjs, so webpack parses it as ESM even when the
+// app's package.json sets "type": "commonjs".
 const INJECT_ENTRY = './.vercel/otel/node_modules/instrumentation.mjs';
 
 type TracingConfig = {
@@ -18,16 +19,21 @@ type TracingConfig = {
 };
 
 /**
- * Adds the builder's tracing wrapper to `instrumentationInject` when it exists,
- * unless the config already has instrumentation of its own. These checks need
- * the resolved config, so only the adapter can make them. Any failed check
- * skips the inject without failing the build.
+ * Adds the builder's tracing wrapper to `instrumentationInject` when the
+ * builder prepared it in this build, unless the config already has
+ * instrumentation of its own. These checks need the resolved config, so only
+ * the adapter can make them. Any failed check skips the inject without failing
+ * the build.
  */
 export async function injectDefaultTracing(
   config: TracingConfig,
   projectDir: string
 ): Promise<void> {
   try {
+    if (process.env.VERCEL_DEFAULT_TRACING_ENTRY !== INJECT_ENTRY) {
+      skip('the builder did not prepare .vercel/otel');
+      return;
+    }
     if (await projectHasInstrumentation(projectDir, config)) {
       skip('project has an instrumentation file');
       return;
@@ -39,7 +45,7 @@ export async function injectDefaultTracing(
       return;
     }
     if (!(await isFile(path.join(projectDir, INJECT_ENTRY)))) {
-      skip('the builder did not prepare .vercel/otel');
+      skip('the prepared wrapper is missing');
       return;
     }
 

@@ -47,9 +47,10 @@ describe('injectDefaultTracing', () => {
     return path.join(projectDir, '.vercel', 'otel');
   }
 
-  // Lays out .vercel/otel/ the way the Vercel builder prepares it before
-  // `next build`.
+  // Lays out .vercel/otel/ and names the entry the way the Vercel builder
+  // prepares them before `next build`.
   async function prepareTree(projectDir: string): Promise<void> {
+    vi.stubEnv('VERCEL_DEFAULT_TRACING_ENTRY', INJECT_ENTRY);
     const modules = path.join(otelRoot(projectDir), 'node_modules');
     await writePackage(
       path.join(modules, '@vercel', 'otel'),
@@ -139,7 +140,7 @@ describe('injectDefaultTracing', () => {
     ]);
   });
 
-  it('does not inject when the builder did not prepare .vercel/otel', async () => {
+  it('does not inject when the prepared wrapper is gone', async () => {
     const projectDir = await readyProject();
     await fs.rm(otelRoot(projectDir), { recursive: true });
 
@@ -147,6 +148,26 @@ describe('injectDefaultTracing', () => {
 
     expect(tracingConfig.instrumentationInject).toBeUndefined();
   });
+
+  // A build command can write or restore the wrapper after the builder's
+  // cleanup, for example from a monorepo task cache.
+  it.each([
+    ['unset', undefined],
+    ['empty', ''],
+    ['another entry', './.vercel/otel/instrumentation.mjs'],
+  ])(
+    'does not inject a wrapper the builder did not name when the entry is %s',
+    async (_label, entry) => {
+      const projectDir = await readyProject();
+      vi.stubEnv('VERCEL_DEFAULT_TRACING_ENTRY', entry);
+
+      const tracingConfig = await inject(projectDir);
+      const viaModifyConfig = await modifyConfig(projectDir);
+
+      expect(tracingConfig.instrumentationInject).toBeUndefined();
+      expect(viaModifyConfig.instrumentationInject).toBeUndefined();
+    }
+  );
 
   it('does not inject when the project has an instrumentation file', async () => {
     const projectDir = await readyProject();
@@ -207,7 +228,7 @@ describe('injectDefaultTracing', () => {
     expect(tracingConfig.instrumentationInject).toBeUndefined();
   });
 
-  // The builder only prepares the tree when the deployment enables default
+  // The builder only names the entry when the deployment enables default
   // tracing, so the adapter doesn't read the flag itself.
   it('injects through modifyConfig whenever the builder prepared the tree', async () => {
     const projectDir = await readyProject();
