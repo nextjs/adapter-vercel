@@ -91,6 +91,73 @@ describe('handleNodeOutputs automatic fetch instrumentation', () => {
   });
 });
 
+describe('handleNodeOutputs prerender manifest', () => {
+  const MANIFEST_PATH = '.next/prerender-manifest.json';
+  const OTHER_PATH = '.next/BUILD_ID';
+  let projectDir: string;
+  let distDir: string;
+
+  beforeEach(async () => {
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adapter-node-'));
+    distDir = path.join(projectDir, '.next');
+    await fs.mkdir(distDir);
+    await fs.writeFile(
+      path.join(projectDir, 'package.json'),
+      JSON.stringify({ engines: { node: '22.x' } })
+    );
+    await fs.writeFile(path.join(distDir, 'routes-manifest.json'), '{}');
+  });
+
+  afterEach(async () => {
+    await fs.rm(projectDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    [AdapterOutputType.MIDDLEWARE, false],
+    [AdapterOutputType.APP_PAGE, true],
+    [AdapterOutputType.PAGES_API, true],
+  ] as const)('%s function has the manifest: %s', async (type, expected) => {
+    const isMiddleware = type === AdapterOutputType.MIDDLEWARE;
+    const output = {
+      id: 'node-output',
+      type,
+      pathname: '/example',
+      sourcePage: isMiddleware ? 'middleware' : '/example',
+      filePath: path.join(distDir, 'example.js'),
+      runtime: 'nodejs',
+      assets: {
+        [MANIFEST_PATH]: path.join(distDir, 'prerender-manifest.json'),
+        [OTHER_PATH]: path.join(distDir, 'BUILD_ID'),
+      },
+      assetsHashes: { [MANIFEST_PATH]: 'hash', [OTHER_PATH]: 'hash' },
+      config: {},
+    } satisfies FuncOutputs[number];
+
+    await handleNodeOutputs([output], {
+      config: {},
+      distDir,
+      repoRoot: projectDir,
+      projectDir,
+      nextVersion: '16.3.0-canary.96',
+      isMiddleware,
+      prerenderFallbackFalseMap: {},
+      vercelOutputDir: path.join(projectDir, 'output'),
+    });
+
+    const config = JSON.parse(
+      await fs.readFile(
+        path.join(projectDir, 'output/functions/example.func/.vc-config.json'),
+        'utf8'
+      )
+    );
+
+    expect(MANIFEST_PATH in config.filePathMap).toBe(expected);
+    expect(MANIFEST_PATH in config.fileHashes).toBe(expected);
+    expect(config.filePathMap[OTHER_PATH]).toBe(OTHER_PATH);
+    expect(config.fileHashes[OTHER_PATH]).toBe('hash');
+  });
+});
+
 const RSC_CONTENT_TYPE = 'text/x-component';
 const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';
 
