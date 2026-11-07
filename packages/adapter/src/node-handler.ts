@@ -113,22 +113,23 @@ export const getHandlerSource = (ctx: {
             `./${path.posix.join(relativeDistDir, 'routes-manifest.json')}`
           ) as RoutesManifest;
 
-          const matchOperatorsRegex = /[|\\{}()[\]^$+*?.-]/g;
-
-          function escapeStringRegexp(str: string): string {
-            return str.replace(matchOperatorsRegex, '\\$&');
-          }
+          // A static route matches only its own page, so it needs no RegExp.
+          const staticPages = new Set(
+            staticRoutesRaw.map((route) => route.page)
+          );
+          const pages = new Set(staticPages);
 
           const dynamicRoutes = dynamicRoutesRaw.map((item) => {
+            pages.add(item.page);
+
+            let compiled: RegExp | undefined;
             return {
               ...item,
-              namedRegex: new RegExp(item.namedRegex || item.regex),
-            };
-          });
-          const staticRoutes = staticRoutesRaw.map((route) => {
-            return {
-              ...route,
-              namedRegex: new RegExp(`^${escapeStringRegexp(route.page)}$`),
+              // Compiled when a request first has to test the route.
+              get namedRegex() {
+                compiled ??= new RegExp(item.namedRegex || item.regex);
+                return compiled;
+              },
             };
           });
 
@@ -234,52 +235,60 @@ export const getHandlerSource = (ctx: {
             urlPathname = normalizeResult.pathname;
             urlPathname = urlPathname.replace(/\/$/, '') || '/';
 
-            const combinedRoutes = [...staticRoutes, ...dynamicRoutes];
+            // if this matches a route that uses fallback: false but the
+            // path isn't included we don't consider it a match and continue
+            // matching
+            const isMissingFallbackFalsePath = (page: string) => {
+              const fallbackFalseMap = prerenderFallbackFalseMap[page];
 
-            // attempt matching literal page first
-            for (const route of combinedRoutes) {
-              if (route.page === urlPathname) {
-                return {
-                  matchedPathname:
-                    inversedAppRoutesManifest[route.page] || route.page,
-                  locale: normalizeResult.locale,
-                };
-              }
-            }
+              return (
+                fallbackFalseMap &&
+                !(
+                  fallbackFalseMap.includes(urlPathname) ||
+                  fallbackFalseMap.includes(urlPathnameWithLocale)
+                )
+              );
+            };
 
-            // check all routes considering fallback false entries
-            for (const route of [...staticRoutes, ...dynamicRoutes]) {
-              const matches = urlPathname.match(route.namedRegex);
+            // a literal page needs no matching
+            if (!pages.has(urlPathname)) {
+              // /index is the page /, the one path that matches a static route
+              // without being its page
               if (
-                matches ||
-                (urlPathname === '/index' && route.namedRegex.test('/'))
+                urlPathname === '/index' &&
+                staticPages.has('/') &&
+                !isMissingFallbackFalsePath('/')
               ) {
-                const fallbackFalseMap = prerenderFallbackFalseMap[route.page];
-
-                // if this matches a dynamic route that uses fallback: false
-                // but the route isn't included we don't consider it match
-                // and continue matching
-                if (
-                  fallbackFalseMap &&
-                  !(
-                    fallbackFalseMap.includes(urlPathname) ||
-                    fallbackFalseMap.includes(urlPathnameWithLocale)
-                  )
-                ) {
-                  continue;
-                }
-
                 return {
-                  matchedPathname:
-                    inversedAppRoutesManifest[route.page] || route.page,
+                  matchedPathname: inversedAppRoutesManifest['/'] || '/',
                   locale: normalizeResult.locale,
-                  matches,
-                  matchedRoute: route,
                 };
+              }
+
+              // check dynamic routes considering fallback false entries
+              for (const route of dynamicRoutes) {
+                const matches = urlPathname.match(route.namedRegex);
+                if (
+                  matches ||
+                  (urlPathname === '/index' && route.namedRegex.test('/'))
+                ) {
+                  if (isMissingFallbackFalsePath(route.page)) {
+                    continue;
+                  }
+
+                  return {
+                    matchedPathname:
+                      inversedAppRoutesManifest[route.page] || route.page,
+                    locale: normalizeResult.locale,
+                    matches,
+                    matchedRoute: route,
+                  };
+                }
               }
             }
 
-            // we should have matched above but if not return back
+            // a literal page, or we should have matched above but if not
+            // return back
             return {
               matchedPathname:
                 inversedAppRoutesManifest[urlPathname] || urlPathname,
