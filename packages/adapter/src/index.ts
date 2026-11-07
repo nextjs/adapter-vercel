@@ -12,6 +12,7 @@ import {
   handlePrerenderOutputs,
   handlePublicFiles,
   handleStaticOutputs,
+  writeFunctionPrerenderManifest,
 } from './outputs';
 import {
   denormalizeNextDataRoutes,
@@ -251,6 +252,10 @@ const myAdapter: NextAdapter = {
       });
     }
 
+    // the function of every route gets the same copy, so write it once
+    const functionPrerenderManifest =
+      await writeFunctionPrerenderManifest(distDir);
+
     // handle node functions
     await handleNodeOutputs(nodeOutputs, {
       config,
@@ -260,6 +265,7 @@ const myAdapter: NextAdapter = {
       nextVersion,
       vercelOutputDir,
       prerenderFallbackFalseMap,
+      functionPrerenderManifest,
     });
 
     await handleGoOutputs(goOutputs, {
