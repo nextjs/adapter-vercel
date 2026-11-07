@@ -10,7 +10,7 @@ import { Sema } from 'async-sema';
 import fse from 'fs-extra';
 import type { AdapterOutput, NextConfig } from 'next';
 import { AdapterOutputType } from 'next/constants';
-import type { RoutesManifest } from 'next/dist/build';
+import type { PrerenderManifest, RoutesManifest } from 'next/dist/build';
 import type { NextjsParams } from './get-edge-function-source';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { getHandlerSource } from './node-handler';
@@ -364,6 +364,64 @@ async function writeDeterministicRoutesManifest(distDir: string) {
   };
 }
 
+/**
+ * Fields of a prerender-manifest.json entry that only describe how the CDN
+ * serves the prerender. The adapter passes them on with the prerender outputs,
+ * and Next.js does not read them when it runs in a function.
+ */
+const CDN_PRERENDER_FIELDS = [
+  'initialHeaders',
+  'initialStatus',
+  'experimentalBypassFor',
+  'allowHeader',
+  'fallbackHeaders',
+  'fallbackStatus',
+];
+
+/**
+ * Write the prerender-manifest.json that functions load: without the fields
+ * above and without indentation. A function parses the whole manifest on its
+ * first request, so every cold start pays for its size.
+ */
+export async function writeFunctionPrerenderManifest(distDir: string) {
+  const source = await fs
+    .readFile(path.join(distDir, 'prerender-manifest.json'), 'utf8')
+    .catch(() => undefined);
+
+  if (source === undefined) {
+    return;
+  }
+  const manifest: PrerenderManifest = JSON.parse(source);
+
+  // Functions keep the file of any other manifest version as Next.js wrote it.
+  if (manifest.version !== 4) {
+    return;
+  }
+
+  for (const routes of [manifest.routes, manifest.dynamicRoutes]) {
+    for (const route of Object.values<object>(routes)) {
+      for (const field of CDN_PRERENDER_FIELDS) {
+        delete (route as Record<string, unknown>)[field];
+      }
+    }
+  }
+
+  const outputManifestPath = path.join(
+    distDir,
+    'prerender-manifest-functions.json'
+  );
+  const manifestJson = JSON.stringify(manifest);
+  await fs.writeFile(outputManifestPath, manifestJson);
+  return {
+    prerenderManifestPath: outputManifestPath,
+    prerenderManifestHash: sha256(manifestJson),
+  };
+}
+
+type FunctionPrerenderManifest = Awaited<
+  ReturnType<typeof writeFunctionPrerenderManifest>
+>;
+
 async function getProjectEnvFiles(projectDir: string): Promise<string[]> {
   const envFiles: string[] = [];
   const projectFiles = (await fs.readdir(projectDir).catch(() => [])).sort();
@@ -412,6 +470,7 @@ export async function handleNodeOutputs(
     nextVersion,
     isMiddleware,
     prerenderFallbackFalseMap,
+    functionPrerenderManifest,
     vercelOutputDir,
   }: {
     config: NextConfig;
@@ -421,6 +480,7 @@ export async function handleNodeOutputs(
     nextVersion: string;
     isMiddleware?: boolean;
     prerenderFallbackFalseMap: Record<string, string[]>;
+    functionPrerenderManifest?: FunctionPrerenderManifest;
     vercelOutputDir: string;
   }
 ) {
@@ -459,6 +519,10 @@ export async function handleNodeOutputs(
   const routesManifestRelativePath = path.posix.join(
     path.posix.relative(repoRoot, distDir),
     'routes-manifest.json'
+  );
+  const prerenderManifestRelativePath = path.posix.join(
+    path.posix.relative(repoRoot, distDir),
+    'prerender-manifest.json'
   );
   const envFiles = await getProjectEnvFiles(projectDir);
   const hasProjectEnvFiles = envFiles.length > 0;
@@ -578,6 +642,16 @@ export async function handleNodeOutputs(
       );
       if (filesHashes) {
         filesHashes[routesManifestRelativePath] = routesManifestHash;
+      }
+      if (functionPrerenderManifest && files[prerenderManifestRelativePath]) {
+        files[prerenderManifestRelativePath] = path.posix.relative(
+          repoRoot,
+          functionPrerenderManifest.prerenderManifestPath
+        );
+        if (filesHashes) {
+          filesHashes[prerenderManifestRelativePath] =
+            functionPrerenderManifest.prerenderManifestHash;
+        }
       }
 
       const handlerAbsolutePath = path.join(functionDir, handlerRelativePath);
@@ -1031,6 +1105,7 @@ export async function handleMiddleware(
     projectDir: string;
     vercelOutputDir: string;
     prerenderFallbackFalseMap: Record<string, string[]>;
+    functionPrerenderManifest?: FunctionPrerenderManifest;
   }
 ): Promise<RouteWithSrc[]> {
   if (output.runtime === 'nodejs') {

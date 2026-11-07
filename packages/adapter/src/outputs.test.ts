@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import {
   type FuncOutputs,
   handleNodeOutputs,
   handlePrerenderOutputs,
+  writeFunctionPrerenderManifest,
 } from './outputs';
 
 describe('handleNodeOutputs automatic fetch instrumentation', () => {
@@ -88,6 +90,179 @@ describe('handleNodeOutputs automatic fetch instrumentation', () => {
       expect(config.launcherType).toBe('Nodejs');
       expect(config.useWebApi).toBe(isMiddleware);
     }
+  });
+});
+
+describe('handleNodeOutputs prerender manifest', () => {
+  const MANIFEST_PATH = '.next/prerender-manifest.json';
+  const ROUTE = {
+    initialStatus: 404,
+    initialHeaders: { 'x-next-cache-tags': '_N_T_/layout,_N_T_/blog/a' },
+    renderingMode: 'STATIC',
+    experimentalBypassFor: [{ type: 'header', key: 'next-action' }],
+    initialRevalidateSeconds: 60,
+    initialExpireSeconds: 3600,
+    srcRoute: '/blog/[slug]',
+    dataRoute: '/blog/a.rsc',
+    prefetchDataRoute: null,
+    allowHeader: ['host', 'x-matched-path'],
+    futureField: { kept: true },
+  };
+  const DYNAMIC_ROUTE = {
+    experimentalBypassFor: [{ type: 'header', key: 'next-action' }],
+    routeRegex: '^/blog/([^/]+?)(?:/)?$',
+    dataRoute: '/blog/[slug].rsc',
+    fallback: '/blog/[slug].html',
+    fallbackRevalidate: 60,
+    fallbackExpire: 3600,
+    fallbackStatus: 200,
+    fallbackHeaders: { 'x-nextjs-postponed': '1' },
+    fallbackRootParams: [],
+    fallbackSourceRoute: '/blog/[slug]',
+    dataRouteRegex: '^/blog/([^/]+?)\\.rsc$',
+    allowHeader: ['host', 'x-matched-path'],
+  };
+  const MANIFEST = {
+    version: 4,
+    routes: { '/blog/b': ROUTE, '/blog/a': ROUTE },
+    dynamicRoutes: { '/blog/[slug]': DYNAMIC_ROUTE },
+    notFoundRoutes: ['/blog/gone'],
+    preview: { previewModeId: 'id' },
+  };
+
+  let projectDir: string;
+  let distDir: string;
+
+  beforeEach(async () => {
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adapter-node-'));
+    distDir = path.join(projectDir, '.next');
+    await fs.mkdir(distDir);
+    await fs.writeFile(
+      path.join(projectDir, 'package.json'),
+      JSON.stringify({ engines: { node: '22.x' } })
+    );
+    await fs.writeFile(path.join(distDir, 'routes-manifest.json'), '{}');
+  });
+
+  afterEach(async () => {
+    await fs.rm(projectDir, { recursive: true, force: true });
+  });
+
+  async function buildFunction(
+    manifest: object | undefined,
+    type:
+      | typeof AdapterOutputType.APP_PAGE
+      | typeof AdapterOutputType.MIDDLEWARE = AdapterOutputType.APP_PAGE
+  ) {
+    const isMiddleware = type === AdapterOutputType.MIDDLEWARE;
+    const hasManifest = manifest !== undefined;
+
+    if (hasManifest) {
+      await fs.writeFile(
+        path.join(distDir, 'prerender-manifest.json'),
+        JSON.stringify(manifest, null, 2)
+      );
+    }
+    const output = {
+      id: 'node-output',
+      type,
+      pathname: '/example',
+      sourcePage: isMiddleware ? 'middleware' : '/example',
+      filePath: path.join(distDir, 'example.js'),
+      runtime: 'nodejs',
+      assets: hasManifest
+        ? { [MANIFEST_PATH]: path.join(distDir, 'prerender-manifest.json') }
+        : {},
+      assetsHashes: hasManifest ? { [MANIFEST_PATH]: 'hash-of-original' } : {},
+      config: {},
+    } satisfies FuncOutputs[number];
+
+    await handleNodeOutputs([output], {
+      config: {},
+      distDir,
+      repoRoot: projectDir,
+      projectDir,
+      nextVersion: '16.3.0-canary.96',
+      isMiddleware,
+      prerenderFallbackFalseMap: {},
+      functionPrerenderManifest: await writeFunctionPrerenderManifest(distDir),
+      vercelOutputDir: path.join(projectDir, 'output'),
+    });
+
+    const config = JSON.parse(
+      await fs.readFile(
+        path.join(projectDir, 'output/functions/example.func/.vc-config.json'),
+        'utf8'
+      )
+    );
+    const source: string | undefined = config.filePathMap[MANIFEST_PATH];
+
+    return {
+      source,
+      hash: config.fileHashes[MANIFEST_PATH] as string | undefined,
+      content:
+        source === undefined
+          ? undefined
+          : await fs.readFile(path.join(projectDir, source), 'utf8'),
+    };
+  }
+
+  it('gives a function the manifest without the fields that configure the CDN', async () => {
+    const { source, hash, content } = await buildFunction(MANIFEST);
+
+    const {
+      initialStatus: _initialStatus,
+      initialHeaders: _initialHeaders,
+      experimentalBypassFor: _routeBypassFor,
+      allowHeader: _routeAllowHeader,
+      ...route
+    } = ROUTE;
+    const {
+      experimentalBypassFor: _dynamicBypassFor,
+      allowHeader: _dynamicAllowHeader,
+      fallbackStatus: _fallbackStatus,
+      fallbackHeaders: _fallbackHeaders,
+      ...dynamicRoute
+    } = DYNAMIC_ROUTE;
+    const expected = {
+      ...MANIFEST,
+      routes: { '/blog/b': route, '/blog/a': route },
+      dynamicRoutes: { '/blog/[slug]': dynamicRoute },
+    };
+
+    // Same content otherwise, in the same order, and no indentation.
+    const expectedContent = JSON.stringify(expected);
+
+    expect(source).toBe('.next/prerender-manifest-functions.json');
+    expect(content).toBe(expectedContent);
+    expect(hash).toBe(
+      createHash('sha256').update(expectedContent).digest('hex')
+    );
+  });
+
+  it('keeps the manifest of a version it does not know as Next.js wrote it', async () => {
+    const manifest = { ...MANIFEST, version: 5 };
+    const { source, hash, content } = await buildFunction(manifest);
+
+    expect(source).toBe(MANIFEST_PATH);
+    expect(hash).toBe('hash-of-original');
+    expect(content).toBe(JSON.stringify(manifest, null, 2));
+  });
+
+  it('gives the proxy function the same manifest', async () => {
+    const { source } = await buildFunction(
+      MANIFEST,
+      AdapterOutputType.MIDDLEWARE
+    );
+
+    expect(source).toBe('.next/prerender-manifest-functions.json');
+  });
+
+  it('does not add the manifest to a function that has none', async () => {
+    const { source, hash } = await buildFunction(undefined);
+
+    expect(source).toBeUndefined();
+    expect(hash).toBeUndefined();
   });
 });
 

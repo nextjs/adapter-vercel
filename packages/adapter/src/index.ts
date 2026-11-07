@@ -12,6 +12,7 @@ import {
   handlePrerenderOutputs,
   handlePublicFiles,
   handleStaticOutputs,
+  writeFunctionPrerenderManifest,
 } from './outputs';
 import {
   denormalizeNextDataRoutes,
@@ -236,6 +237,10 @@ const myAdapter: NextAdapter = {
       }
     }
 
+    // every Node.js function gets the same copy, so write it once
+    const functionPrerenderManifest =
+      await writeFunctionPrerenderManifest(distDir);
+
     // handle middleware function
     let middlewareRoutes: RouteWithSrc[] = [];
 
@@ -248,6 +253,7 @@ const myAdapter: NextAdapter = {
         vercelOutputDir,
         nextVersion,
         prerenderFallbackFalseMap,
+        functionPrerenderManifest,
       });
     }
 
@@ -260,6 +266,7 @@ const myAdapter: NextAdapter = {
       nextVersion,
       vercelOutputDir,
       prerenderFallbackFalseMap,
+      functionPrerenderManifest,
     });
 
     await handleGoOutputs(goOutputs, {
