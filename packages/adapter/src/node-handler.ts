@@ -114,14 +114,15 @@ export const getHandlerSource = (ctx: {
           ) as RoutesManifest;
 
           // A static route matches only its own page, so it needs no RegExp.
-          const staticPages = new Set(
-            staticRoutesRaw.map((route) => route.page)
-          );
-          const pages = new Set(staticPages);
+          const pages = new Set(staticRoutesRaw.map((route) => route.page));
+          // Read before the pages of dynamic routes join the set.
+          const hasStaticIndexPage = pages.has('/');
+
+          for (const route of dynamicRoutesRaw) {
+            pages.add(route.page);
+          }
 
           const dynamicRoutes = dynamicRoutesRaw.map((item) => {
-            pages.add(item.page);
-
             let compiled: RegExp | undefined;
             return {
               ...item,
@@ -256,7 +257,7 @@ export const getHandlerSource = (ctx: {
               // without being its page
               if (
                 urlPathname === '/index' &&
-                staticPages.has('/') &&
+                hasStaticIndexPage &&
                 !isMissingFallbackFalsePath('/')
               ) {
                 return {

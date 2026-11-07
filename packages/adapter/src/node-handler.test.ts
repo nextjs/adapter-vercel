@@ -605,13 +605,19 @@ describe('node handler page lookup', () => {
     );
   });
 
-  const BLOG = {
+  type DynamicRoute = {
+    page: string;
+    regex: string;
+    namedRegex: string;
+    routeKeys: Record<string, string>;
+  };
+  const BLOG: DynamicRoute = {
     page: '/blog/[slug]',
     regex: '^/blog/([^/]+?)(?:/)?$',
     namedRegex: '^/blog/(?<nxtPslug>[^/]+?)(?:/)?$',
     routeKeys: { nxtPslug: 'nxtPslug' },
   };
-  const CATCH_ALL = {
+  const CATCH_ALL: DynamicRoute = {
     page: '/[...all]',
     regex: '^/(.+?)(?:/)?$',
     namedRegex: '^/(?<nxtPall>.+?)(?:/)?$',
@@ -627,7 +633,7 @@ describe('node handler page lookup', () => {
     prerenderFallbackFalseMap = {},
   }: {
     entries: Record<string, string>;
-    dynamicRoutes?: Array<typeof BLOG>;
+    dynamicRoutes?: DynamicRoute[];
     i18n?: { locales: string[]; defaultLocale: string };
     prerenderFallbackFalseMap?: Record<string, string[]>;
   }) {
