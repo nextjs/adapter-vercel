@@ -1,15 +1,14 @@
 # Native adapter
 
-`dist/native-adapter.js` is the Next.js adapter hook for this experiment;
-`dist/index.js` remains the JavaScript reference implementation. The hook calls
+`dist/index.js` is the only Next.js adapter hook. The hook calls
 the packaged `adapter-vercel-<platform>-<arch>` executable and awaits completion
 inside `onBuildComplete`, while Next.js's temporary traced assets still exist.
 
-Linux and macOS amd64/arm64 executables are declared in the package's `bin`
+Linux, macOS and Windows x64/arm64 executables are declared in the package's `bin`
 metadata so npm and pnpm preserve execute permission when packing and installing.
 
 The native process handles public/static copying, ordered routing generation,
-Node/Edge function metadata, prerender aliases and fallback bodies, file hashes,
+Node/Edge/Go function metadata, prerender aliases and fallback bodies, file hashes,
 and runtime-template assembly. Handler templates are produced from the existing
 runtime source during package build. The deployed runtime code is unchanged.
 Edge assembly preserves source bytes while stripping the same inline source-map
@@ -60,9 +59,7 @@ can be recovered from remote build logs. Profiling runs include sampling and
 profile-flush overhead and must be kept out of performance comparisons.
 
 ```sh
-pnpm --filter @next-community/adapter-vercel build
-pnpm --filter @next-community/adapter-vercel exec vitest run
-cd packages/adapter/native && go test -race ./...
+pnpm --filter @next-community/adapter-vercel test
 ```
 
 Use Node.js 24 and a Go toolchain supporting `go.mod`. If the global Node version
@@ -83,3 +80,9 @@ It writes `.next/native-parity.json` on success. When a builder supplies
 `NEXT_ADAPTER_PATH`, the fixture uses that entrypoint instead, enabling the full
 native-builder-to-native-adapter integration check. Local results establish
 correctness only; performance conclusions require matched remote Vercel builds.
+
+The former JavaScript output generator is an immutable, test-only package
+dependency. Behavioral tests invoke Go helpers through a test executable built
+with `go test -c`; those operations are absent from the production binary.
+Full-output comparisons load the frozen reference afresh for each configuration.
+There is no JavaScript adapter output fallback in the shipped package.

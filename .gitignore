@@ -31,3 +31,6 @@ packages/adapter/*.tgz
 /packages/benchmark/app/**/generated/
 /packages/benchmark/pages/**/generated/
 /packages/benchmark/traced/
+
+# Go-only test bridge executable (never published).
+.native-tests/

@@ -25,10 +25,11 @@ type adapter struct {
 	workers                                                      *outputWorkers
 	sourceRoot                                                   string
 	sourceTypes                                                  []string
+	goPathnames, otherPathnames                                  map[string]bool
 	hasApp, hasPages, hasMiddleware, has404, has500, hasNotFound bool
 }
 
-func build(req request) {
+func newAdapter(req request) *adapter {
 	a := &adapter{request: req, outputDir: filepath.Join(req.DistDir, "output"), vercelConfig: object{"version": 3, "overrides": object{}, "images": req.Images}, parents: map[string]object{}, fallbacks: object{}}
 	a.relativePaths = make(map[string]string)
 	for _, entry := range req.AssetBindings {
@@ -40,7 +41,6 @@ func build(req request) {
 	}
 	a.encodeBindings()
 	a.workers = newOutputWorkers(outputConcurrency())
-	defer a.workers.close()
 	a.sourceRoot = a.ProjectDir
 	if exists(filepath.Join(a.ProjectDir, "src/pages")) || exists(filepath.Join(a.ProjectDir, "src/app")) {
 		a.sourceRoot = filepath.Join(a.ProjectDir, "src")
@@ -50,13 +50,24 @@ func build(req request) {
 			a.sourceTypes = append(a.sourceTypes, typ)
 		}
 	}
-	mkdir(a.outputDir)
 	for _, rule := range a.FunctionRules {
 		re, err := regexp2.Compile(rule.Regexp, regexp2.ECMAScript)
 		check(err)
 		re.MatchTimeout = time.Second
 		a.functionMatchers = append(a.functionMatchers, re)
 	}
+	return a
+}
+
+func build(req request) {
+	goOutputs := collectGoRouteOutputs(req.Outputs)
+	a := newAdapter(req)
+	defer a.workers.close()
+	a.goPathnames, a.otherPathnames = map[string]bool{}, map[string]bool{}
+	for _, output := range goOutputs {
+		a.goPathnames[str(obj(output)["pathname"])] = true
+	}
+	mkdir(a.outputDir)
 	i18n := obj(req.Config["i18n"])
 	if i18n["domains"] != nil {
 		domains := []any{}
@@ -90,10 +101,13 @@ func build(req request) {
 			}
 			switch o["runtime"] {
 			case "nodejs":
+				a.otherPathnames[name] = true
 				a.parents[str(o["id"])] = o
 				nodes = append(nodes, o)
 			case "edge":
+				a.otherPathnames[name] = true
 				edges = append(edges, o)
+			case "go":
 			case nil:
 			default:
 				panic(fmt.Errorf("unsupported output runtime %v", o["runtime"]))
@@ -165,6 +179,7 @@ func build(req request) {
 			}
 		}
 		profilePhase("node", func() { a.nodeOutputs(nodes, false) })
+		profilePhase("go", func() { a.goOutputs(goOutputs) })
 		profilePhase("prerenders", func() { a.prerenders(arr(req.Outputs["prerenders"])) })
 	}
 	if os.Getenv("NEXT_ADAPTER_GO_OVERLAP") == "0" {
@@ -308,6 +323,12 @@ func (a *adapter) routes(middleware []any) []any {
 		n := pick(r, "has", "missing")
 		n["src"] = r["sourceRegex"]
 		setFrom(n, "dest", r, "destination")
+		source := join("/", base, str(r["source"]))
+		if a.goPathnames[source] || (!a.otherPathnames[source] && strings.HasSuffix(source, ".rsc") && a.goPathnames[strings.TrimSuffix(source, ".rsc")]) {
+			if destination, ok := n["dest"].(string); ok {
+				n["dest"] = removeGoRouteParams(destination)
+			}
+		}
 		n["check"] = true
 		add(n)
 	}

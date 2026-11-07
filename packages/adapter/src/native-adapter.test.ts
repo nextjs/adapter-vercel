@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { loadReferenceAdapter } from '../test/reference-adapter';
 
 const require = createRequire(import.meta.url);
 const packageDir = path.resolve(__dirname, '..');
@@ -279,12 +280,10 @@ describe('native adapter parity with the JavaScript adapter', () => {
           },
         };
         const goCtx = JSON.parse(JSON.stringify(ctx));
-        const jsPath = require.resolve('../dist/index.js');
-        delete require.cache[jsPath];
-        await require(jsPath).onBuildComplete(ctx);
+        await loadReferenceAdapter().onBuildComplete!(ctx);
         const expected = await tree(path.join(distDir, 'output'));
         await fs.rm(path.join(distDir, 'output'), { recursive: true });
-        await require('../dist/native-adapter.js').onBuildComplete(goCtx);
+        await require('../dist/index.js').onBuildComplete(goCtx);
         expect(await tree(path.join(distDir, 'output'))).toEqual(expected);
       } finally {
         if (previous === undefined)

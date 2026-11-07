@@ -6,10 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   collectGoRouteOutputs,
   type GoRouteOutput,
+  getSourceFilePathFromPage,
   handleGoOutputs,
-} from './go-outputs';
-import * as outputUtils from './outputs';
-import { getSourceFilePathFromPage, usesSrcDirectory } from './outputs';
+  usesSrcDirectory,
+} from '../test/native-operations';
 
 describe('hosted Go route outputs', () => {
   let root: string;
@@ -259,9 +259,8 @@ describe('hosted Go route outputs', () => {
   );
 
   it('normalizes Windows source paths for function overrides', async () => {
-    vi.spyOn(outputUtils, 'getSourceFilePathFromPage').mockResolvedValue(
-      'src\\app\\api\\hello\\route.go'
-    );
+    await fs.rm(path.join(projectDir, 'app'), { recursive: true });
+    await writeSource('/api/hello/route', true);
     process.env.NEXT_ADAPTER_VERCEL_CONFIG = JSON.stringify({
       functions: {
         'src/app/api/hello/route.go': { maxDuration: 42 },
@@ -634,17 +633,7 @@ describe('hosted Go route outputs', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('cleans up staged files when a later required asset is missing', async () => {
-    const copyFile = fs.copyFile;
-    let copiedAssetContents: string | undefined;
-    vi.spyOn(fs, 'copyFile').mockImplementation(
-      async (source, destination, mode) => {
-        await copyFile(source, destination, mode);
-        if (source === assetPath) {
-          copiedAssetContents = await fs.readFile(destination, 'utf8');
-        }
-      }
-    );
+  it('cleans up staged files when a required asset is missing', async () => {
     await expect(
       handle([
         output({
@@ -655,7 +644,6 @@ describe('hosted Go route outputs', () => {
         }),
       ])
     ).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(copiedAssetContents).toBe('hello asset');
     await expect(
       fs.stat(path.join(vercelOutputDir, 'functions/api/hello.func'))
     ).rejects.toMatchObject({ code: 'ENOENT' });

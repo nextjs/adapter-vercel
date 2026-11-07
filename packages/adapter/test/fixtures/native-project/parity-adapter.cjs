@@ -1,8 +1,13 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const javascript = require('../../../dist/index.js');
-const go = require('../../../dist/native-adapter.js');
+const packageDir =
+  process.env.NEXT_ADAPTER_VERIFICATION_PACKAGE_DIR ||
+  path.resolve(__dirname, '../../..');
+const { loadReferenceAdapter } = require(
+  path.join(packageDir, 'test/reference-adapter.cjs')
+);
+const go = require(path.join(packageDir, 'dist/index.js'));
 
 async function tree(root) {
   const result = {};
@@ -27,10 +32,10 @@ async function tree(root) {
 
 module.exports = {
   name: 'JavaScript/Go differential adapter',
-  modifyConfig: javascript.modifyConfig,
+  modifyConfig: go.modifyConfig,
   async onBuildComplete(ctx) {
     const snapshot = JSON.parse(JSON.stringify(ctx));
-    await javascript.onBuildComplete(ctx);
+    await loadReferenceAdapter().onBuildComplete(ctx);
     const output = path.join(ctx.distDir, 'output');
     const expected = await tree(output);
     await fs.rm(output, { recursive: true });

@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -28,9 +27,8 @@ func startProfile() func() {
 	ready := object{"pid": os.Getpid(), "unixMs": float64(time.Now().UnixMicro()) / 1000, "gomaxprocs": runtime.GOMAXPROCS(0), "numCPU": runtime.NumCPU(), "goVersion": runtime.Version()}
 	ready["outputWorkers"] = outputConcurrency()
 	ready["overlap"] = os.Getenv("NEXT_ADAPTER_GO_OVERLAP") != "0"
-	var usage syscall.Rusage
-	if syscall.Getrusage(syscall.RUSAGE_SELF, &usage) == nil {
-		ready["startupResources"] = object{"userMs": float64(usage.Utime.Sec)*1000 + float64(usage.Utime.Usec)/1000, "systemMs": float64(usage.Stime.Sec)*1000 + float64(usage.Stime.Usec)/1000, "majorFaults": usage.Majflt, "minorFaults": usage.Minflt, "inputBlocks": usage.Inblock, "voluntarySwitches": usage.Nvcsw, "involuntarySwitches": usage.Nivcsw}
+	if resources := startupResources(); resources != nil {
+		ready["startupResources"] = resources
 	}
 	if data, err := os.ReadFile("/proc/self/schedstat"); err == nil {
 		fields := strings.Fields(string(data))

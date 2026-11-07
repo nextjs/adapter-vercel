@@ -286,50 +286,7 @@ type sourceFileResult struct {
 }
 
 func (a *adapter) findSourceFile(page string) string {
-	root, types := a.sourceRoot, a.sourceTypes
-	if root == "" {
-		root, types = a.ProjectDir, []string{"pages", "app"}
-		if exists(filepath.Join(a.ProjectDir, "src/pages")) || exists(filepath.Join(a.ProjectDir, "src/app")) {
-			root = filepath.Join(a.ProjectDir, "src")
-		}
-	}
-	if page == "middleware" {
-		types = []string{""}
-	}
-	extensions := arr(a.Config["pageExtensions"])
-	if a.Config["pageExtensions"] == nil {
-		extensions = []any{"js", "jsx", "ts", "tsx"}
-	}
-	for _, typ := range types {
-		extensionless := filepath.Join(root, typ, strings.TrimPrefix(page, "/"))
-		if exists(extensionless) {
-			return rel(a.ProjectDir, extensionless)
-		}
-		for _, ext := range extensions {
-			candidate := extensionless + "." + str(ext)
-			if typ == "app" && extensionless == filepath.Join(root, "app/index") {
-				candidate = filepath.Join(root, "app/page") + "." + str(ext)
-			}
-			if exists(candidate) {
-				return rel(a.ProjectDir, candidate)
-			}
-		}
-		if info, err := os.Lstat(extensionless); err == nil && info.IsDir() {
-			names := []string{"index"}
-			if typ == "app" {
-				names = []string{"page", "route"}
-			}
-			for _, ext := range extensions {
-				for _, name := range names {
-					candidate := filepath.Join(extensionless, name+"."+str(ext))
-					if exists(candidate) {
-						return rel(a.ProjectDir, candidate)
-					}
-				}
-			}
-		}
-	}
-	return ""
+	return sourceFile(a.ProjectDir, page, stringsFrom(a.Config["pageExtensions"]), a.sourceTypes, a.sourceRoot == filepath.Join(a.ProjectDir, "src"), true, true)
 }
 
 func (a *adapter) generatedOptions(source, name string) object {

@@ -21,7 +21,7 @@ it.each(['config', 'complete'])(
     const read = vi
       .spyOn(fs, 'readFile')
       .mockResolvedValue(Buffer.from('binary'));
-    const entry = require.resolve('../dist/native-adapter.js');
+    const entry = require.resolve('../dist/index.js');
     delete require.cache[entry];
     const adapter = require(entry);
     const config = () => ({

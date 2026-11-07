@@ -4,13 +4,12 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { build } from 'esbuild';
 
+await fs.rm(path.join(process.cwd(), 'dist'), { recursive: true, force: true });
+
 await build({
   bundle: true,
   platform: 'node',
-  entryPoints: [
-    path.join(process.cwd(), 'src/index.ts'),
-    path.join(process.cwd(), 'src/native-adapter.ts'),
-  ],
+  entryPoints: [path.join(process.cwd(), 'src/index.ts')],
   // TODO: re-enable after debugging
   minify: false,
   write: true,
@@ -28,13 +27,6 @@ await build({
   format: 'cjs',
   outdir: path.join(process.cwd(), 'dist'),
 });
-
-await fs.copyFile(
-  createRequire(path.join(process.cwd(), 'packages/adapter')).resolve(
-    'source-map/lib/mappings.wasm'
-  ),
-  path.join(process.cwd(), 'dist', 'mappings.wasm')
-);
 
 // Derive build-time templates from the existing runtime code instead of keeping
 // a second handler implementation in Go. No JavaScript is evaluated by Go.
@@ -84,7 +76,14 @@ await fs.writeFile(
   templateModule.exports.template
 );
 await fs.mkdir('dist/bin', { recursive: true });
-const targets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'];
+const targets = [
+  'linux-x64',
+  'linux-arm64',
+  'darwin-x64',
+  'darwin-arm64',
+  'win32-x64',
+  'win32-arm64',
+];
 // `go list -m` leaves Dir empty when a fresh runner has not downloaded the
 // module. Resolve and download the pinned dependency before copying its license.
 const { Dir: regexpModule } = JSON.parse(
@@ -111,7 +110,11 @@ for (const target of targets) {
       '-trimpath',
       '-ldflags=-s -w',
       '-o',
-      path.join(process.cwd(), 'dist/bin', `adapter-vercel-${target}`),
+      path.join(
+        process.cwd(),
+        'dist/bin',
+        `adapter-vercel-${target}${platform === 'win32' ? '.exe' : ''}`
+      ),
       '.',
     ],
     {
@@ -119,7 +122,7 @@ for (const target of targets) {
       env: {
         ...process.env,
         CGO_ENABLED: '0',
-        GOOS: platform,
+        GOOS: platform === 'win32' ? 'windows' : platform,
         GOARCH: arch === 'x64' ? 'amd64' : arch,
       },
       stdio: 'inherit',

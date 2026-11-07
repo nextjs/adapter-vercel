@@ -1,11 +1,14 @@
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { normalizeRoutes, type RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { GoRouteOutput } from './go-outputs';
-import adapter from './index';
+import type { GoRouteOutput } from '../test/native-operations';
+
+const require = createRequire(import.meta.url);
+const adapter = require('../dist/index.js') as NextAdapter;
 
 type BuildContext = Parameters<NonNullable<NextAdapter['onBuildComplete']>>[0];
 type DynamicRoute = BuildContext['routing']['dynamicRoutes'][number];
@@ -201,6 +204,11 @@ describe('adapter-generated mixed Go and Node routing', () => {
     async (form, hasNodeRscOutput) => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), 'go-routing-'));
       roots.push(root);
+      await fs.symlink(
+        path.resolve(__dirname, '../node_modules'),
+        path.join(root, 'node_modules'),
+        'junction'
+      );
       const distDir = path.join(root, '.next');
       const binaryPath = path.join(root, 'user-server');
       const packagerPath = path.join(root, 'packager.cjs');

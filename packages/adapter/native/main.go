@@ -37,6 +37,7 @@ type request struct {
 	EdgeConfigJSON    string              `json:"edgeConfigJSON"`
 	AssetBindings     [][2]string         `json:"assetBindings"`
 	AssetMaps         [][]uint32          `json:"assetMaps"`
+	GoFunctions       map[string]any      `json:"goFunctions,omitempty"`
 }
 
 type functionRule struct {

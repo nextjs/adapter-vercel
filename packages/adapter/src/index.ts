@@ -1,977 +1,242 @@
-import fs from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
-import type { Route, RouteWithSrc } from '@vercel/routing-utils';
+import {
+  getLambdaOptionsFromFunction,
+  getNodeVersion,
+} from '@vercel/build-utils';
+import minimatch from 'minimatch';
 import type { NextAdapter } from 'next';
+import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { modifyConfig } from './config';
-import { collectGoRouteOutputs, handleGoOutputs } from './go-outputs';
-import {
-  type FuncOutputs,
-  handleEdgeOutputs,
-  handleMiddleware,
-  handleNodeOutputs,
-  handlePrerenderOutputs,
-  handlePublicFiles,
-  handleStaticOutputs,
-} from './outputs';
-import {
-  denormalizeNextDataRoutes,
-  extractHeaders,
-  extractOnMatchRoutes,
-  extractRedirects,
-  modifyWithRewriteHeaders,
-  normalizeNextDataRoutes,
-  normalizeRewrites,
-  removeGoRouteParams,
-} from './routing';
-import type { VercelConfig } from './types';
-import { escapeStringRegexp, getImagesConfig } from './utils';
+import { prepareGoFunctions } from './hosted-go';
+import { encodeNativeRequest, encodeOutputMaps } from './native-wire';
+import { getImagesConfig } from './utils';
 
-const myAdapter: NextAdapter = {
-  name: 'Vercel',
-  modifyConfig,
-  async onBuildComplete({
-    routing,
-    config,
-    buildId,
-    outputs,
-    distDir,
-    repoRoot,
-    projectDir,
-    nextVersion,
-  }) {
-    const benchmarkStart = performance.now();
-    const goOutputs = collectGoRouteOutputs(outputs);
-    const vercelOutputDir = path.join(distDir, 'output');
-    await fs.mkdir(vercelOutputDir, { recursive: true });
+type PrefetchStage = 'config' | 'complete';
+const prefetches = new Map<
+  string,
+  {
+    stage: PrefetchStage;
+    promise: Promise<{ durationMs: number; bytes: number }>;
+  }
+>();
 
-    const escapedBuildId = escapeStringRegexp(buildId);
-
-    const hasMiddleware = Boolean(outputs.middleware);
-    const hasAppDir =
-      outputs.appPages.length > 0 || outputs.appRoutes.length > 0;
-
-    const hasPagesDir = outputs.pages.length > 0 || outputs.pagesApi.length > 0;
-    const shouldHandleMiddlewareDataResolving = routing.shouldNormalizeNextData;
-
-    const i18nConfig = config.i18n;
-    const vercelConfig: VercelConfig = {
-      version: 3,
-      overrides: {},
-      wildcard: i18nConfig?.domains
-        ? i18nConfig.domains.map((item) => {
-            return {
-              domain: item.domain,
-              value:
-                item.defaultLocale === i18nConfig.defaultLocale
-                  ? ''
-                  : `/${item.defaultLocale}`,
-            };
-          })
-        : undefined,
-      images: getImagesConfig(config),
+function prefetchBinary(stage: PrefetchStage) {
+  const binary =
+    process.env.NEXT_ADAPTER_GO_BINARY ||
+    path.join(
+      __dirname,
+      'bin',
+      `adapter-vercel-${process.platform}-${process.arch}${process.platform === 'win32' ? '.exe' : ''}`
+    );
+  if (process.env.NEXT_ADAPTER_GO_PREFETCH === '0')
+    return {
+      binary,
+      stage,
+      promise: Promise.resolve({ durationMs: 0, bytes: 0 }),
     };
-
-    await handlePublicFiles(
-      path.join(projectDir, 'public'),
-      vercelOutputDir,
-      config
+  let prefetch = prefetches.get(binary);
+  if (!prefetch) {
+    const started = performance.now();
+    const promise = readFile(binary).then(
+      (data) => ({
+        durationMs: performance.now() - started,
+        bytes: data.byteLength,
+      }),
+      () => ({ durationMs: performance.now() - started, bytes: 0 })
     );
-    await handleStaticOutputs(outputs.staticFiles, {
-      config,
-      vercelConfig,
-      vercelOutputDir,
-    });
-
-    const nodeOutputsParentMap = new Map<string, FuncOutputs[0]>();
-    const edgeOutputs: FuncOutputs = [];
-    const nodeOutputs: FuncOutputs = [];
-
-    let hasNotFoundOutput = false;
-    let has404Output = false;
-    let has500Output = false;
-
-    for (const output of [
-      ...outputs.appPages,
-      ...outputs.appRoutes,
-      ...outputs.pages,
-      ...outputs.pagesApi,
-      ...outputs.staticFiles,
-    ]) {
-      if (output.pathname.endsWith('/404')) {
-        hasNotFoundOutput = false;
-        has404Output = true;
-      }
-      if (!has404Output && output.pathname.endsWith('/_not-found')) {
-        hasNotFoundOutput = true;
-      }
-      if (output.pathname.endsWith('/500')) {
-        has500Output = true;
-      }
-
-      if ('runtime' in output) {
-        if (output.runtime === 'nodejs') {
-          nodeOutputsParentMap.set(output.id, output);
-          nodeOutputs.push(output);
-        } else if (output.runtime === 'edge') {
-          edgeOutputs.push(output);
-        }
-      }
-    }
-
-    for (const output of outputs.staticFiles) {
-      if (output.pathname.endsWith('/_not-found')) {
-        hasNotFoundOutput = true;
-      }
-      if (output.pathname.endsWith('/404')) {
-        has404Output = true;
-      }
-      if (output.pathname.endsWith('/500')) {
-        has500Output = true;
-      }
-    }
-    const notFoundPath = hasNotFoundOutput
-      ? '/_not-found'
-      : has404Output
-        ? '/404'
-        : '/_error';
-
-    // handle edge functions
-    await handleEdgeOutputs(edgeOutputs, {
-      repoRoot,
-      projectDir,
-      vercelOutputDir,
-      nextVersion,
-      config,
-    });
-
-    const prerenderFallbackFalseMap: Record<string, string[]> = {};
-
-    for (const prerender of outputs.prerenders) {
-      if (
-        prerender.parentFallbackMode === false &&
-        !prerender.pathname.includes('_next/data') &&
-        !prerender.pathname.endsWith('.rsc')
-      ) {
-        const parentOutput = nodeOutputsParentMap.get(prerender.parentOutputId);
-
-        if (!parentOutput) {
-          throw new Error(
-            `Invariant: missing parent output ${
-              prerender.parentOutputId
-            } for prerender ${JSON.stringify(prerender)}`
-          );
-        }
-        const parentPage = parentOutput.pathname.substring(
-          config.basePath.length
+    prefetch = { stage, promise };
+    prefetches.set(binary, prefetch);
+    if (process.env.NEXT_NATIVE_BUILD_TIMINGS === '1')
+      void promise.then((result) => {
+        console.log(
+          `[adapter-go-prefetch] ${JSON.stringify({ stage, pid: process.pid, ...result })}`
         );
-        let currentMap = prerenderFallbackFalseMap[parentPage];
+      });
+  }
+  return { binary, ...prefetch };
+}
 
-        if (!currentMap) {
-          currentMap = prerenderFallbackFalseMap[parentPage] = [];
-        }
-        currentMap.push(prerender.pathname.substring(config.basePath.length));
+function cpuCounters() {
+  for (const file of [
+    '/sys/fs/cgroup/cpu.stat',
+    '/sys/fs/cgroup/cpu/cpu.stat',
+  ]) {
+    try {
+      const counters: Record<string, number> = {};
+      for (const line of readFileSync(file, 'utf8').trim().split('\n')) {
+        const [key, value] = line.trim().split(/\s+/);
+        if (key && Number.isFinite(Number(value)))
+          counters[key] = Number(value);
       }
-    }
+      return { file, counters };
+    } catch {}
+  }
+}
 
-    // handle middleware function
-    let middlewareRoutes: RouteWithSrc[] = [];
-
-    if (outputs.middleware) {
-      middlewareRoutes = await handleMiddleware(outputs.middleware, {
-        config,
-        distDir,
-        repoRoot,
-        projectDir,
-        vercelOutputDir,
-        nextVersion,
-        prerenderFallbackFalseMap,
-      });
-    }
-
-    // handle node functions
-    await handleNodeOutputs(nodeOutputs, {
-      config,
-      distDir,
-      repoRoot,
-      projectDir,
-      nextVersion,
-      vercelOutputDir,
-      prerenderFallbackFalseMap,
-    });
-
-    await handleGoOutputs(goOutputs, {
-      config,
-      projectDir,
-      nextVersion,
-      vercelOutputDir,
-    });
-
-    // handle prerenders (must come after handle node outputs)
-    await handlePrerenderOutputs(outputs.prerenders, {
-      config,
-      hasAppEntries: outputs.appPages.length > 0,
-      varyHeader: routing.rsc.varyHeader,
-      vercelOutputDir,
-      nodeOutputsParentMap,
-      rscContentType: routing.rsc.contentTypeHeader,
-    });
-    const shouldHandleSegmentPrefetches = outputs.appPages.length > 0;
-
-    // create routes
-    const convertedRewrites = normalizeRewrites(routing);
-
-    if (shouldHandleSegmentPrefetches) {
-      modifyWithRewriteHeaders(convertedRewrites.beforeFiles, {
-        shouldHandleSegmentPrefetches,
-      });
-
-      modifyWithRewriteHeaders(convertedRewrites.afterFiles, {
-        isAfterFilesRewrite: true,
-        shouldHandleSegmentPrefetches,
-      });
-
-      modifyWithRewriteHeaders(convertedRewrites.fallback, {
-        shouldHandleSegmentPrefetches,
-      });
-    }
-
-    const { priority: priorityRedirects, normal: redirects } =
-      extractRedirects(routing);
-    const headers = extractHeaders(routing);
-    const onMatchRoutes = extractOnMatchRoutes(routing);
-
-    const dynamicRoutes: RouteWithSrc[] = [];
-    const goPathnames = new Set(goOutputs.map((output) => output.pathname));
-    const otherPathnames = new Set(
-      [...nodeOutputs, ...edgeOutputs].map((output) => output.pathname)
+// Keep JavaScript-specific configuration and module resolution at the hook boundary.
+// All output traversal, routing, hashing and filesystem generation runs in the binary.
+const adapter: NextAdapter = {
+  name: 'Vercel',
+  async modifyConfig(config, ctx) {
+    // Start the read without blocking configuration or compilation. The full
+    // builder timer includes it; onBuildComplete waits only for any remainder.
+    if (
+      ctx.phase === PHASE_PRODUCTION_BUILD &&
+      process.env.NEXT_ADAPTER_GO_PREFETCH_STAGE !== 'complete'
+    )
+      prefetchBinary('config');
+    return modifyConfig(config, ctx);
+  },
+  async onBuildComplete(ctx) {
+    const started = performance.now();
+    const timings = process.env.NEXT_NATIVE_BUILD_TIMINGS === '1';
+    const cpuBefore = timings ? cpuCounters() : undefined;
+    const {
+      binary,
+      promise: binaryPrefetch,
+      stage: prefetchStage,
+    } = prefetchBinary('complete');
+    const projectRequire = createRequire(
+      path.join(ctx.projectDir, 'package.json')
     );
-    let addedNextData404Route = false;
-
-    for (const route of routing.dynamicRoutes) {
-      // add route to ensure we 404 for non-existent _next/data
-      // routes before trying page dynamic routes
-      if (hasPagesDir && !hasMiddleware) {
-        if (
-          !route.sourceRegex.includes('_next/data') &&
-          !addedNextData404Route
-        ) {
-          addedNextData404Route = true;
-          dynamicRoutes.push({
-            src: path.posix.join('/', config.basePath || '', '_next/data/(.*)'),
-            dest: path.posix.join('/', config.basePath || '', '404'),
-            status: 404,
-            check: true,
+    const nextRequire = createRequire(
+      projectRequire.resolve('next/package.json')
+    );
+    const vercelConfig = JSON.parse(
+      process.env.NEXT_ADAPTER_VERCEL_CONFIG || '{}'
+    );
+    const nodeVersion = await getNodeVersion(
+      ctx.projectDir,
+      undefined,
+      vercelConfig,
+      {}
+    );
+    const functionRules = await Promise.all(
+      Object.entries(vercelConfig.functions || {}).map(
+        async ([pattern, options]) => {
+          const expression = minimatch.makeRe(pattern);
+          if (!expression)
+            throw new Error(`Invalid function pattern: ${pattern}`);
+          // Resolve shared platform policy once per rule, rather than once per
+          // output. The Go process performs matching and output generation.
+          const normalized = await getLambdaOptionsFromFunction({
+            sourceFile: pattern,
+            config: { ...vercelConfig, functions: { [pattern]: options } },
           });
+          return { pattern, regexp: expression.source, options: normalized };
         }
-      }
-
-      const sourcePath = route.source
-        ? path.posix.join('/', config.basePath || '', route.source)
-        : undefined;
-      // The producer also emits an RSC-suffixed rule for each App Router route.
-      const isGoRoute =
-        sourcePath &&
-        (goPathnames.has(sourcePath) ||
-          (!otherPathnames.has(sourcePath) &&
-            sourcePath.endsWith('.rsc') &&
-            goPathnames.has(sourcePath.slice(0, -4))));
-      dynamicRoutes.push({
-        src: route.sourceRegex,
-        dest: isGoRoute
-          ? removeGoRouteParams(route.destination)
-          : route.destination,
-        check: true,
-        has: route.has,
-        missing: route.missing,
+      )
+    );
+    const goOutputs = ctx.outputs.appRoutes.filter(
+      (output) => output.runtime === 'go'
+    );
+    const goFunctions = await prepareGoFunctions(goOutputs);
+    const functions = [
+      ...ctx.outputs.appPages,
+      ...ctx.outputs.appRoutes,
+      ...ctx.outputs.pages,
+      ...ctx.outputs.pagesApi,
+      ...(ctx.outputs.middleware ? [ctx.outputs.middleware] : []),
+    ];
+    const wireStarted = performance.now();
+    const encodedOutputs = encodeOutputMaps(ctx.outputs);
+    const wireMs = performance.now() - wireStarted;
+    const request = {
+      goFunctions,
+      version: 2,
+      ...ctx,
+      ...encodedOutputs,
+      configJSON: JSON.stringify(ctx.config),
+      edgeConfigJSON: JSON.stringify({
+        basePath: ctx.config.basePath,
+        i18n: ctx.config.i18n,
+      }),
+      images: getImagesConfig(ctx.config),
+      nodeRuntime: nodeVersion.runtime,
+      nextEnvLoaderPath: nextRequire.resolve('@next/env'),
+      templatesDir: path.join(__dirname, 'native-templates'),
+      assetOrder: Object.fromEntries(
+        functions
+          .filter((output) => output.runtime === 'edge')
+          .map((output) => [output.id, Object.keys(output.assets)])
+      ),
+      wasmOrder: Object.fromEntries(
+        functions
+          .filter((output) => output.runtime === 'edge')
+          .map((output) => [
+            output.id,
+            Object.keys('wasmAssets' in output ? output.wasmAssets || {} : {}),
+          ])
+      ),
+      functionRules,
+    };
+    const prepared = performance.now();
+    const prefetchWaitStarted = performance.now();
+    const prefetch = await binaryPrefetch;
+    const prefetchWaitMs = performance.now() - prefetchWaitStarted;
+    let serializationMs = 0;
+    let requestBytes: number | undefined;
+    let spawnedUnixMs = 0;
+    let spawnCallMs = 0;
+    let childPid: number | undefined;
+    let cpuBeforeSpawn: ReturnType<typeof cpuCounters>;
+    await new Promise<void>((resolve, reject) => {
+      cpuBeforeSpawn = timings ? cpuCounters() : undefined;
+      spawnedUnixMs = Date.now();
+      const spawnStarted = performance.now();
+      const child = spawn(binary, [], {
+        stdio: ['pipe', 'inherit', 'pipe'],
       });
-    }
-
-    vercelConfig.routes = [
-      /*
-        Desired routes order
-        - Runtime headers
-        - User headers and redirects
-        - Runtime redirects
-        - Runtime routes
-        - Check filesystem, if nothing found continue
-        - User rewrites
-        - Builder rewrites
-      */
-      ...priorityRedirects,
-
-      // normalize _next/data URL before processing redirects
-      ...normalizeNextDataRoutes(
-        config,
-        buildId,
-        shouldHandleMiddlewareDataResolving,
-        true
-      ),
-
-      ...(config.i18n
-        ? [
-            // Handle auto-adding current default locale to path based on
-            // $wildcard
-            // This is split into two rules to avoid matching the `/index` route as it causes issues with trailing slash redirect
-            {
-              src: `^${path.posix.join(
-                '/',
-                config.basePath,
-                '/'
-              )}(?!(?:_next/.*|${config.i18n.locales
-                .map((locale) => escapeStringRegexp(locale))
-                .join('|')})(?:/.*|$))$`,
-              // we aren't able to ensure trailing slash mode here
-              // so ensure this comes after the trailing slash redirect
-              dest: `${
-                config.basePath && config.basePath !== '/'
-                  ? path.posix.join('/', config.basePath)
-                  : ''
-              }$wildcard${config.trailingSlash ? '/' : ''}`,
-              continue: true,
-            },
-            {
-              src: `^${path.posix.join(
-                '/',
-                config.basePath,
-                '/'
-              )}(?!(?:_next/.*|${config.i18n.locales
-                .map((locale) => escapeStringRegexp(locale))
-                .join('|')})(?:/.*|$))(.*)$`,
-              // we aren't able to ensure trailing slash mode here
-              // so ensure this comes after the trailing slash redirect
-              dest: `${
-                config.basePath && config.basePath !== '/'
-                  ? path.posix.join('/', config.basePath)
-                  : ''
-              }$wildcard/$1`,
-              continue: true,
-            },
-
-            // Handle redirecting to locale specific domains
-            ...(config.i18n.domains &&
-            config.i18n.domains.length > 0 &&
-            config.i18n.localeDetection !== false
-              ? [
-                  {
-                    src: `^${path.posix.join(
-                      '/',
-                      config.basePath
-                    )}/?(?:${config.i18n.locales
-                      .map((locale) => escapeStringRegexp(locale))
-                      .join('|')})?/?$`,
-                    locale: {
-                      redirect: config.i18n.domains.reduce(
-                        (prev: Record<string, string>, item) => {
-                          prev[item.defaultLocale] = `http${
-                            item.http ? '' : 's'
-                          }://${item.domain}/`;
-
-                          if (item.locales) {
-                            item.locales.map((locale) => {
-                              prev[locale] = `http${item.http ? '' : 's'}://${
-                                item.domain
-                              }/${locale}`;
-                            });
-                          }
-                          return prev;
-                        },
-                        {}
-                      ),
-                      cookie: 'NEXT_LOCALE',
-                    },
-                    continue: true,
-                  },
-                ]
-              : []),
-
-            // Handle redirecting to locale paths
-            ...(config.i18n.localeDetection !== false
-              ? [
-                  {
-                    // TODO: if default locale is included in this src it won't
-                    // be visitable by users who prefer another language since a
-                    // cookie isn't set signaling the default locale is
-                    // preferred on redirect currently, investigate adding this
-                    src: '/',
-                    locale: {
-                      redirect: config.i18n.locales.reduce(
-                        (prev: Record<string, string>, locale) => {
-                          prev[locale] =
-                            locale === config.i18n?.defaultLocale
-                              ? `/`
-                              : `/${locale}`;
-                          return prev;
-                        },
-                        {}
-                      ),
-                      cookie: 'NEXT_LOCALE',
-                    },
-                    continue: true,
-                  },
-                ]
-              : []),
-
-            // We only want to add these rewrites before user redirects
-            // when `skipDefaultLocaleRewrite` is not flagged on
-            // and when localeDetection is enabled.
-
-            {
-              src: `^${path.posix.join('/', config.basePath)}$`,
-              dest: `${path.posix.join(
-                '/',
-                config.basePath,
-                config.i18n.defaultLocale
-              )}`,
-              continue: true,
-            },
-            // Auto-prefix non-locale path with default locale
-            // note for prerendered pages this will cause
-            // x-now-route-matches to contain the path minus the locale
-            // e.g. for /de/posts/[slug] x-now-route-matches would have
-            // 1=posts%2Fpost-1
-            {
-              src: `^${path.posix.join(
-                '/',
-                config.basePath,
-                '/'
-              )}(?!(?:_next/.*|${config.i18n.locales
-                .map((locale) => escapeStringRegexp(locale))
-                .join('|')})(?:/.*|$))(.*)$`,
-              dest: `${path.posix.join(
-                '/',
-                config.basePath,
-                config.i18n.defaultLocale
-              )}/$1`,
-              continue: true,
-            },
-          ]
-        : []),
-
-      ...headers,
-
-      ...redirects,
-
-      // server actions name meta routes - placeholder for server actions
-
-      // middleware route - placeholder for middleware configuration
-      ...middlewareRoutes,
-
-      ...convertedRewrites.beforeFiles,
-
-      // add 404 handling if /404 or locale variants are requested literally
-      ...(config.i18n
-        ? [
-            {
-              src: `${path.posix.join(
-                '/',
-                config.basePath,
-                '/'
-              )}(?:${config.i18n.locales
-                .map((locale) => locale.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-                .join('|')})?[/]?404/?`,
-              status: 404,
-              continue: true,
-              missing: [
-                {
-                  type: 'header' as const,
-                  key: 'x-prerender-revalidate',
-                },
-              ],
-            },
-          ]
-        : [
-            {
-              src: path.posix.join('/', config.basePath, '404/?'),
-              status: 404,
-              continue: true,
-              missing: [
-                {
-                  type: 'header' as const,
-                  key: 'x-prerender-revalidate',
-                },
-              ],
-            },
-          ]),
-
-      // add 500 handling if /500 or locale variants are requested literally
-      ...(config.i18n
-        ? [
-            {
-              src: `${path.posix.join(
-                '/',
-                config.basePath,
-                '/'
-              )}(?:${config.i18n.locales
-                .map((locale) => locale.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-                .join('|')})?[/]?500/?`,
-              status: 500,
-              continue: true,
-            },
-          ]
-        : [
-            {
-              src: path.posix.join('/', config.basePath, '500/?'),
-              status: 500,
-              continue: true,
-            },
-          ]),
-
-      // denormalize _next/data if middleware + pages
-      ...denormalizeNextDataRoutes(
-        config,
-        buildId,
-        shouldHandleMiddlewareDataResolving,
-        true
-      ),
-
-      // RSC and prefetch request handling for App Router
-      ...(hasAppDir
-        ? [
-            {
-              src: path.posix.join(
-                '/',
-                config.basePath,
-                '/(?<path>.+?)(?:/)?$'
-              ),
-              dest: path.posix.join(
-                '/',
-                config.basePath,
-                `/$path${routing.rsc.prefetchSegmentDirSuffix}/$segmentPath${routing.rsc.prefetchSegmentSuffix}`
-              ),
-              has: [
-                {
-                  type: 'header' as const,
-                  key: routing.rsc.header,
-                  value: '1',
-                },
-                {
-                  type: 'header' as const,
-                  key: routing.rsc.prefetchHeader,
-                  value: '1',
-                },
-                {
-                  type: 'header' as const,
-                  key: routing.rsc.prefetchSegmentHeader,
-                  value: '/(?<segmentPath>.+)',
-                },
-              ],
-              continue: true,
-              override: true,
-            },
-            {
-              src: path.posix.join('^/', config.basePath, '/?$'),
-              dest: path.posix.join(
-                '/',
-                config.basePath,
-                `/index${routing.rsc.prefetchSegmentDirSuffix}/$segmentPath${routing.rsc.prefetchSegmentSuffix}`
-              ),
-              has: [
-                {
-                  type: 'header' as const,
-                  key: routing.rsc.header,
-                  value: '1',
-                },
-                {
-                  type: 'header' as const,
-                  key: routing.rsc.prefetchHeader,
-                  value: '1',
-                },
-                {
-                  type: 'header' as const,
-                  key: routing.rsc.prefetchSegmentHeader,
-                  value: '/(?<segmentPath>.+)',
-                },
-              ],
-              continue: true,
-              override: true,
-            },
-
-            {
-              src: `^${path.posix.join('/', config.basePath, '/?')}`,
-              has: [
-                {
-                  type: 'header' as const,
-                  key: routing.rsc.header,
-                  value: '1',
-                },
-              ],
-              dest: path.posix.join('/', config.basePath, '/index.rsc'),
-              headers: {
-                vary: routing.rsc.varyHeader,
-              },
-              continue: true,
-              override: true,
-            },
-            {
-              src: `^${path.posix.join(
-                '/',
-                config.basePath,
-                '/((?!.+\\.rsc).+?)(?:/)?$'
-              )}`,
-              has: [
-                {
-                  type: 'header' as const,
-                  key: routing.rsc.header,
-                  value: '1',
-                },
-              ],
-              dest: path.posix.join('/', config.basePath, '/$1.rsc'),
-              headers: {
-                vary: routing.rsc.varyHeader,
-              },
-              continue: true,
-              override: true,
-            },
-          ]
-        : []),
-
-      { handle: 'filesystem' },
-
-      // ensure the basePath prefixed _next/image is rewritten to the root
-      // _next/image path
-      ...(config.basePath
-        ? [
-            {
-              src: path.posix.join('/', config.basePath, '_next/image/?'),
-              dest: '/_next/image',
-              check: true,
-            },
-          ]
-        : []),
-
-      // normalize _next/data if middleware + pages
-      ...normalizeNextDataRoutes(
-        config,
-        buildId,
-        shouldHandleMiddlewareDataResolving,
-        false
-      ),
-
-      ...(!hasMiddleware
-        ? [
-            // No-op _next/data rewrite to trigger handle: 'rewrites' and then 404
-            // if no match to prevent rewriting _next/data unexpectedly
-            {
-              src: path.posix.join('/', config.basePath, '_next/data/(.*)'),
-              dest: path.posix.join('/', config.basePath, '_next/data/$1'),
-              check: true,
-            },
-          ]
-        : []),
-
-      // normalize /index.rsc to just / for App Router
-      ...(hasAppDir
-        ? [
-            {
-              src: path.posix.join(
-                '/',
-                config.basePath,
-                '/index(\\.action|\\.rsc)'
-              ),
-              dest: path.posix.join('/', config.basePath),
-              continue: true,
-            },
-          ]
-        : []),
-
-      ...convertedRewrites.afterFiles,
-
-      // ensure bad rewrites with /.rsc are fixed for App Router
-      ...(hasAppDir
-        ? [
-            {
-              src: path.posix.join('/', config.basePath, '/\\.rsc$'),
-              dest: path.posix.join('/', config.basePath, `/index.rsc`),
-              check: true,
-            },
-            {
-              src: path.posix.join('/', config.basePath, '(.+)/\\.rsc$'),
-              dest: path.posix.join('/', config.basePath, '$1.rsc'),
-              check: true,
-            },
-          ]
-        : []),
-
-      { handle: 'resource' },
-
-      ...convertedRewrites.fallback,
-
-      // make sure 404 page is used when a directory is matched without
-      // an index page
-      { src: path.posix.join('/', config.basePath, '.*'), status: 404 },
-
-      { handle: 'miss' },
-
-      // 404 to plain text file for _next/static
-      {
-        src: path.posix.join('/', config.basePath, '_next/static/.+'),
-        status: 404,
-        check: true,
-        dest: path.posix.join(
-          '/',
-          config.basePath,
-          '_next/static/not-found.txt'
-        ),
-        headers: {
-          'content-type': 'text/plain; charset=utf-8',
-        },
-      },
-
-      // if i18n is enabled attempt removing locale prefix to check public files
-      // remove locale prefixes to check public files and
-      // to allow checking non-prefixed lambda outputs
-      ...(config.i18n
-        ? [
-            // When `skipDefaultLocaleRewrite` is flagged on and localeDetection is disabled,
-            // we only want to add the rewrite as the fallback case once routing is complete.
-            ...(config.i18n?.localeDetection === false
-              ? [
-                  {
-                    src: `^${path.posix.join('/', config.basePath)}$`,
-                    dest: `${path.posix.join(
-                      '/',
-                      config.basePath,
-                      config.i18n.defaultLocale
-                    )}`,
-                    check: true,
-                  },
-                  // Auto-prefix non-locale path with default locale
-                  // note for prerendered pages this will cause
-                  // x-now-route-matches to contain the path minus the locale
-                  // e.g. for /de/posts/[slug] x-now-route-matches would have
-                  // 1=posts%2Fpost-1
-                  {
-                    src: `^${path.posix.join(
-                      '/',
-                      config.basePath,
-                      '/'
-                    )}(?!(?:_next/.*|${config.i18n.locales
-                      .map((locale) => escapeStringRegexp(locale))
-                      .join('|')})(?:/.*|$))(.*)$`,
-                    dest: `${path.posix.join(
-                      '/',
-                      config.basePath,
-                      config.i18n.defaultLocale
-                    )}/$1`,
-                    check: true,
-                  },
-                ]
-              : []),
-            {
-              src: path.posix.join(
-                '/',
-                config.basePath,
-                escapeStringRegexp(config.i18n.defaultLocale)
-              ),
-              dest: '/',
-              check: true,
-            },
-            {
-              src: `^${path.posix.join(
-                '/',
-                config.basePath
-              )}/?(?:${config.i18n.locales
-                .map((locale) => escapeStringRegexp(locale))
-                .join('|')})/(.*)`,
-              dest: `${path.posix.join('/', config.basePath, '/')}$1`,
-              check: true,
-            },
-          ]
-        : []),
-
-      // If it didn't match any of the static routes or dynamic ones, then we
-      // should fallback to either prefetch or normal RSC request
-      ...(shouldHandleSegmentPrefetches
-        ? [
-            {
-              src: '^/(?<path>.+)(?<rscSuffix>\\.segments/.+\\.segment\\.rsc)(?:/)?$',
-              dest: `/$path.rsc`,
-              check: true,
-            },
-          ]
-        : []),
-
-      { handle: 'rewrite' },
-
-      // denormalize _next/data if middleware + pages - placeholder
-      ...denormalizeNextDataRoutes(
-        config,
-        buildId,
-        shouldHandleMiddlewareDataResolving,
-        false
-      ),
-
-      // apply _next/data routes (including static ones if middleware + pages)
-      // This would require the data routes from the Next.js build manifest
-
-      // apply normal dynamic routes
-      ...dynamicRoutes,
-
-      // apply x-nextjs-matched-path header and __next_data_catchall rewrite
-      // if middleware + pages - placeholder for middleware handling
-      ...(hasMiddleware
-        ? [
-            {
-              src: `^${path.posix.join(
-                '/',
-                config.basePath,
-                '/_next/data/',
-                escapedBuildId,
-                '/(.*).json'
-              )}`,
-              headers: {
-                'x-nextjs-matched-path': '/$1',
-              },
-              continue: true,
-              override: true,
-            },
-            // add a catch-all data route so we don't 404 when getting
-            // middleware effects
-            {
-              src: `^${path.posix.join(
-                '/',
-                config.basePath,
-                '/_next/data/',
-                escapedBuildId,
-                '/(.*).json'
-              )}`,
-              dest: '__next_data_catchall',
-            },
-          ]
-        : []),
-
-      { handle: 'hit' },
-
-      ...onMatchRoutes,
-
-      // add internal matched path header for function bundle mapping
-      {
-        src:
-          config.basePath && config.basePath !== '/'
-            ? path.posix.join('/', config.basePath, '/?(?:index)?(?:/)?$')
-            : `/(?:index)?(?:/)?$`,
-        headers: {
-          'x-matched-path': '/',
-        },
-        continue: true,
-        important: true,
-      },
-      {
-        src: path.posix.join(
-          '/',
-          config.basePath || '',
-          `/((?!index$).*?)(?:/)?$`
-        ),
-        headers: {
-          'x-matched-path': '/$1',
-        },
-        continue: true,
-        important: true,
-      },
-
-      { handle: 'error' },
-
-      // Custom Next.js 404 page
-
-      ...(config.i18n
-        ? [
-            {
-              src: `${path.posix.join(
-                '/',
-                config.basePath,
-                '/'
-              )}(?<nextLocale>${config.i18n.locales
-                .map((locale) => escapeStringRegexp(locale))
-                .join('|')})(/.*|$)`,
-              dest: path.posix.join(
-                '/',
-                config.basePath,
-                '/$nextLocale',
-                notFoundPath
-              ),
-              status: 404,
-              caseSensitive: true,
-            },
-            {
-              src: path.posix.join('/', config.basePath, '.*'),
-              dest: path.posix.join(
-                '/',
-                config.basePath,
-                `/${config.i18n.defaultLocale}`,
-                notFoundPath
-              ),
-              status: 404,
-            },
-          ]
-        : [
-            {
-              src: path.posix.join(
-                '/',
-                config.basePath,
-                // if config.basePath is populated we need to
-                // add optional handling for trailing slash so
-                // that the config.basePath (basePath) itself matches
-                `${config.basePath && config.basePath !== '/' ? '?' : ''}.*`
-              ),
-              dest: path.posix.join('/', config.basePath, notFoundPath),
-              status: 404,
-            },
-          ]),
-
-      // custom 500 page if present
-      ...(config.i18n && has500Output
-        ? [
-            {
-              src: `${path.posix.join(
-                '/',
-                config.basePath,
-                '/'
-              )}(?<nextLocale>${config.i18n.locales
-                .map((locale) => escapeStringRegexp(locale))
-                .join('|')})(/.*|$)`,
-              dest: path.posix.join('/', config.basePath, '/$nextLocale/500'),
-              status: 500,
-              caseSensitive: true,
-            },
-            {
-              src: path.posix.join('/', config.basePath, '.*'),
-              dest: path.posix.join(
-                '/',
-                config.basePath,
-                `/${config.i18n.defaultLocale}/500`
-              ),
-              status: 500,
-            },
-          ]
-        : [
-            {
-              src: path.posix.join(
-                '/',
-                config.basePath,
-                // if config.basePath is populated we need to
-                // add optional handling for trailing slash so
-                // that the config.basePath (basePath) itself matches
-                `${config.basePath && config.basePath !== '/' ? '?' : ''}.*`
-              ),
-              dest: path.posix.join(
-                '/',
-                config.basePath,
-                has500Output ? '/500' : '/_error'
-              ),
-              status: 500,
-            },
-          ]),
-    ] satisfies (RouteWithSrc | Route)[];
-
-    const outputConfigPath = path.join(vercelOutputDir, 'config.json');
-    await fs.writeFile(outputConfigPath, JSON.stringify(vercelConfig, null, 2));
-    if (process.env.NEXT_NATIVE_BUILD_TIMINGS === '1') {
+      let diagnostic = '';
+      child.stderr.on('data', (chunk: Buffer) => {
+        process.stderr.write(chunk);
+        diagnostic = (diagnostic + chunk.toString()).slice(-64 * 1024);
+      });
+      spawnCallMs = performance.now() - spawnStarted;
+      childPid = child.pid;
+      const cancel = () => child.kill('SIGTERM');
+      process.once('SIGTERM', cancel);
+      process.once('SIGINT', cancel);
+      const cleanup = () => {
+        process.removeListener('SIGTERM', cancel);
+        process.removeListener('SIGINT', cancel);
+      };
+      child.once('error', (err) => {
+        cleanup();
+        reject(err);
+      });
+      child.once('close', (code, signal) => {
+        cleanup();
+        if (code === 0) resolve();
+        else
+          reject(
+            new Error(
+              diagnostic.trim() || `Go adapter failed (${signal || code})`
+            )
+          );
+      });
+      child.stdin.once('error', (err) => {
+        // The close event reports a binary failure; EPIPE is its consequence.
+        if ((err as NodeJS.ErrnoException).code !== 'EPIPE') reject(err);
+      });
+      const serializationStarted = performance.now();
+      const payload = encodeNativeRequest(request);
+      serializationMs = performance.now() - serializationStarted;
+      if (process.env.NEXT_ADAPTER_GO_PROFILE === '1')
+        requestBytes = payload.byteLength;
+      child.stdin.end(payload);
+    });
+    if (timings) {
       console.log(
-        `[adapter-benchmark] ${JSON.stringify({ implementation: 'javascript', durationMs: performance.now() - benchmarkStart })}`
+        `[adapter-benchmark] ${JSON.stringify({ implementation: 'go', durationMs: performance.now() - started, preparationMs: prepared - started, wireMs, prefetchMs: prefetch.durationMs, prefetchBytes: prefetch.bytes, prefetchStage, prefetchWaitMs, serializationMs, requestBytes, spawnedUnixMs, spawnCallMs, childPid, cpuBefore, cpuBeforeSpawn, cpuAfter: cpuCounters(), profiled: process.env.NEXT_ADAPTER_GO_PROFILE === '1' })}`
       );
     }
   },
 };
 
-// @ts-ignore we have to use this for CJS compat
-export = myAdapter;
+// @ts-ignore the package exposes the CommonJS adapter interface.
+export = adapter;

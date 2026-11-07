@@ -124,16 +124,19 @@ export function encodeOutputMaps(outputs: Outputs) {
     mapByIdentity.set(values, index);
     return index;
   };
-  const pack = (output: FunctionOutput) => ({
-    ...output,
-    assets: undefined,
-    assetsHashes: undefined,
-    assetMapId: intern(output.assets),
-    assetHashMapId:
-      'assetsHashes' in output && output.assetsHashes
-        ? intern(output.assetsHashes)
-        : undefined,
-  });
+  const pack = (output: FunctionOutput): Record<string, unknown> =>
+    output.runtime === 'go'
+      ? { ...output }
+      : {
+          ...output,
+          assets: undefined,
+          assetsHashes: undefined,
+          assetMapId: intern(output.assets),
+          assetHashMapId:
+            'assetsHashes' in output && output.assetsHashes
+              ? intern(output.assetsHashes)
+              : undefined,
+        };
   return {
     assetBindings: bindings,
     assetMaps: maps,
