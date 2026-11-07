@@ -237,10 +237,6 @@ const myAdapter: NextAdapter = {
       }
     }
 
-    // every Node.js function gets the same copy, so write it once
-    const functionPrerenderManifest =
-      await writeFunctionPrerenderManifest(distDir);
-
     // handle middleware function
     let middlewareRoutes: RouteWithSrc[] = [];
 
@@ -253,9 +249,12 @@ const myAdapter: NextAdapter = {
         vercelOutputDir,
         nextVersion,
         prerenderFallbackFalseMap,
-        functionPrerenderManifest,
       });
     }
+
+    // the function of every route gets the same copy, so write it once
+    const functionPrerenderManifest =
+      await writeFunctionPrerenderManifest(distDir);
 
     // handle node functions
     await handleNodeOutputs(nodeOutputs, {

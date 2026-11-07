@@ -384,6 +384,13 @@ const CDN_PRERENDER_FIELDS = [
  * first request, so every cold start pays for its size.
  */
 export async function writeFunctionPrerenderManifest(distDir: string) {
+  // Opt-out: functions keep the manifest as Next.js wrote it.
+  if (
+    process.env.NEXT_ADAPTER_VERCEL_DISABLE_FUNCTION_PRERENDER_MANIFEST === '1'
+  ) {
+    return;
+  }
+
   const source = await fs
     .readFile(path.join(distDir, 'prerender-manifest.json'), 'utf8')
     .catch(() => undefined);
@@ -418,8 +425,8 @@ export async function writeFunctionPrerenderManifest(distDir: string) {
   };
 }
 
-type FunctionPrerenderManifest = Awaited<
-  ReturnType<typeof writeFunctionPrerenderManifest>
+type FunctionPrerenderManifest = NonNullable<
+  Awaited<ReturnType<typeof writeFunctionPrerenderManifest>>
 >;
 
 async function getProjectEnvFiles(projectDir: string): Promise<string[]> {
@@ -1105,7 +1112,6 @@ export async function handleMiddleware(
     projectDir: string;
     vercelOutputDir: string;
     prerenderFallbackFalseMap: Record<string, string[]>;
-    functionPrerenderManifest?: FunctionPrerenderManifest;
   }
 ): Promise<RouteWithSrc[]> {
   if (output.runtime === 'nodejs') {
