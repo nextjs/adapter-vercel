@@ -160,13 +160,13 @@ func existingGoFunction(name string) bool {
 }
 
 func ensureGoFunctionParent(root, name string) {
-	check(os.MkdirAll(root, 0755))
+	check(os.MkdirAll(root, 0777))
 	current := root
 	parts := strings.Split(rel(root, filepath.Dir(name)), "/")
 	for _, part := range append([]string{""}, parts...) {
 		if part != "" && part != "." {
 			current = filepath.Join(current, part)
-			err := os.Mkdir(current, 0755)
+			err := os.Mkdir(current, 0777)
 			if !os.IsExist(err) {
 				check(err)
 			}
@@ -233,7 +233,7 @@ func copyRegularFile(source, destination string, mode os.FileMode) {
 	if !info.Mode().IsRegular() {
 		panic("Go asset is not a regular file: " + source)
 	}
-	check(os.MkdirAll(filepath.Dir(destination), 0755))
+	check(os.MkdirAll(filepath.Dir(destination), 0777))
 	in, err := os.Open(source)
 	check(err)
 	defer in.Close()

@@ -94,9 +94,13 @@ async function fixture(
     } as unknown as Context;
     const snapshot = async () => {
       const files: Record<string, unknown> = {};
+      const modes: Record<string, number> = {};
       const walk = async (dir: string) => {
         for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
           const file = path.join(dir, entry.name);
+          if (process.platform !== 'win32')
+            modes[path.relative(ctx.distDir, file)] =
+              (await fs.lstat(file)).mode & 0o7777;
           if (entry.isDirectory()) await walk(file);
           else {
             const bytes = await fs.readFile(file);
@@ -110,7 +114,7 @@ async function fixture(
         }
       };
       await walk(path.join(ctx.distDir, 'output'));
-      return files;
+      return { files, modes };
     };
     await check({
       ctx,
@@ -127,7 +131,7 @@ async function fixture(
         await require('../dist/index.js').onBuildComplete(goCtx);
         const actual = await snapshot();
         expect(actual).toEqual(expected);
-        return actual;
+        return actual.files;
       },
     });
   } finally {
@@ -136,6 +140,20 @@ async function fixture(
     await fs.rm(root, { recursive: true, force: true });
   }
 }
+
+it.skipIf(process.platform === 'win32')(
+  'preserves copied file and directory permissions',
+  async () => {
+    await fixture(async ({ write, compare }) => {
+      await fs.chmod(await write('public/shared/data.txt', 'data'), 0o666);
+      await fs.chmod(
+        path.dirname(await write('public/shared/other.txt', 'other')),
+        0o1770
+      );
+      await compare();
+    });
+  }
+);
 
 it('keeps route-handler-only rewrites unchanged without segment fallback', async () => {
   await fixture(async ({ ctx, compare }) => {

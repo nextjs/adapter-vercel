@@ -181,13 +181,13 @@ func jsonText(v any) string {
 func readJSON(p string) object      { var m object; check(json.Unmarshal(read(p), &m)); return m }
 func read(p string) []byte          { b, err := os.ReadFile(p); check(err); return b }
 func exists(p string) bool          { _, err := os.Stat(p); return err == nil }
-func mkdir(p string)                { check(os.MkdirAll(p, 0755)) }
-func write(p string, b []byte)      { mkdir(filepath.Dir(p)); check(os.WriteFile(p, b, 0644)) }
+func mkdir(p string)                { check(os.MkdirAll(p, 0777)) }
+func write(p string, b []byte)      { mkdir(filepath.Dir(p)); check(os.WriteFile(p, b, 0666)) }
 func writeJSON(p string, v any)     { writeJSONFile(p, v, os.O_WRONLY|os.O_CREATE|os.O_TRUNC) }
 func writeJSONOnce(p string, v any) { writeJSONFile(p, v, os.O_WRONLY|os.O_CREATE|os.O_EXCL) }
 func writeJSONFile(p string, v any, flags int) {
 	mkdir(filepath.Dir(p))
-	f, err := os.OpenFile(p, flags, 0644)
+	f, err := os.OpenFile(p, flags, 0666)
 	if flags&os.O_EXCL != 0 && os.IsExist(err) {
 		return
 	}
@@ -207,7 +207,7 @@ func writeOnce(p string, b []byte) bool {
 // The caller has already created the parent directory. Keep O_EXCL semantics
 // and independent regular files without repeating directory probes per write.
 func writeOnceInDirectory(p string, b []byte) bool {
-	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
 	if os.IsExist(err) {
 		return false
 	}
@@ -272,7 +272,7 @@ func copyEntry(src, dst string) {
 		for _, e := range entries {
 			copyEntry(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name()))
 		}
-		check(os.Chmod(dst, info.Mode().Perm()))
+		check(os.Chmod(dst, info.Mode()))
 		return
 	}
 	mkdir(filepath.Dir(dst))
@@ -285,4 +285,5 @@ func copyEntry(src, dst string) {
 	closeErr := out.Close()
 	check(err)
 	check(closeErr)
+	check(os.Chmod(dst, info.Mode()))
 }
