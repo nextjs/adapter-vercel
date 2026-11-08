@@ -73,6 +73,28 @@ export function encodeOutputMaps(outputs: Outputs) {
     }
   >();
   const mapByIdentity = new WeakMap<Record<string, string>, number>();
+  // Content deduplication and JavaScript object identity are different: only
+  // aliases of the same hashes object observe the adapter's hash additions.
+  const hashIdentities = new WeakMap<Record<string, string>, number>();
+  let nextHashIdentity = 0;
+  for (const output of [
+    ...outputs.appPages,
+    ...outputs.appRoutes,
+    ...outputs.pages,
+    ...outputs.pagesApi,
+    ...(outputs.middleware ? [outputs.middleware] : []),
+  ]) {
+    const hashes = 'assetsHashes' in output ? output.assetsHashes : undefined;
+    if (hashes) {
+      const previous = hashIdentities.get(hashes);
+      if (previous === undefined) hashIdentities.set(hashes, -1);
+      else if (previous === -1) hashIdentities.set(hashes, nextHashIdentity++);
+    }
+  }
+  const hashIdentity = (values: Record<string, string> | undefined) => {
+    const id = values && hashIdentities.get(values);
+    return id !== undefined && id >= 0 ? id : undefined;
+  };
   const mapByHash = new Map<number, number[]>();
   const intern = (values: Record<string, string>) => {
     const previous = mapByIdentity.get(values);
@@ -136,6 +158,9 @@ export function encodeOutputMaps(outputs: Outputs) {
             'assetsHashes' in output && output.assetsHashes
               ? intern(output.assetsHashes)
               : undefined,
+          assetHashIdentity: hashIdentity(
+            'assetsHashes' in output ? output.assetsHashes : undefined
+          ),
         };
   return {
     assetBindings: bindings,

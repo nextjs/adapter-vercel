@@ -183,14 +183,13 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 	if notFound == nil {
 		notFound = pagesError
 	}
-	notFoundHashes := a.hashes(notFound)
 	defaults := nodeFunctionConfig{OperationType: "API", Handler: handlerRel, Runtime: a.NodeRuntime, SupportsMultiPayloads: true, SupportsResponseStreaming: true, ExperimentalAllowBundling: true, DisableFetchInstrumentation: os.Getenv("VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION") == "1", LauncherType: "Nodejs", UseWebAPI: middleware}
 	defaults.Framework.Slug, defaults.Framework.Version = "nextjs", a.NextVersion
 	apiPrefix := jsonText(defaults)
 	defaults.OperationType = "PAGE"
 	pagePrefix := jsonText(defaults)
 	var configs functionConfigs
-	a.parallel("node", outputs, func(o object) {
+	a.parallelNodes(outputs, func(o object) {
 		functionDir := outputPath(filepath.Join(a.outputDir, "functions"), a.normalized(str(o["pathname"]))+".func")
 		mkdir(functionDir)
 		files := a.metadata(o, true)
@@ -202,30 +201,29 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 			for name, value := range envFiles {
 				files.set(name, str(value))
 			}
-			if hasHashes {
-				for name, value := range envHashes {
-					hashes.set(name, str(value))
-				}
-			}
 		}
 		if o["type"] == "PAGES" {
 			if notFound != nil {
 				a.eachMap(notFound, "assets", "assetMapId", func(name, source string) {
 					files.set(name, a.relative(source))
-					if hasHashes {
-						hashes.setFrom(name, notFoundHashes)
-					}
 				})
 				p := rel(a.RepoRoot, str(notFound["filePath"]))
 				files.set(p, p)
-				if hasHashes {
-					hashes.setFrom(p, notFoundHashes)
-				}
 			}
 		}
 		files.set(manifestRel, rel(a.RepoRoot, manifestPath))
 		if hasHashes {
-			hashes.set(manifestRel, manifestHash)
+			a.updateNodeHashes(o, &hashes, func(hashes *metadataMap) {
+				for name, value := range envHashes {
+					hashes.set(name, str(value))
+				}
+				if o["type"] == "PAGES" && notFound != nil {
+					notFoundHashes := a.hashes(notFound)
+					a.eachMap(notFound, "assets", "assetMapId", func(name, _ string) { hashes.setFrom(name, notFoundHashes) })
+					hashes.setFrom(rel(a.RepoRoot, str(notFound["filePath"])), notFoundHashes)
+				}
+				hashes.set(manifestRel, manifestHash)
+			})
 		}
 		handlerPath := outputPath(functionDir, handlerRel)
 		if parent := filepath.Dir(handlerPath); parent != functionDir {
@@ -233,7 +231,7 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 		}
 		writeOnceInDirectory(handlerPath, handler)
 		if hasHashes {
-			hashes.set(handlerRel, handlerHash)
+			a.updateNodeHashes(o, &hashes, func(hashes *metadataMap) { hashes.set(handlerRel, handlerHash) })
 		}
 		source := a.sourceFile(str(o["sourcePage"]))
 		options := a.functionOptions(source, str(o["pathname"]))
@@ -248,10 +246,10 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 			}
 		}
 		duration := options["maxDuration"]
-		if v, ok := outputConfig["maxDuration"]; ok {
+		if v := outputConfig["maxDuration"]; v != nil {
 			duration = v
 		}
-		if v, ok := generated["maxDuration"]; ok {
+		if v := generated["maxDuration"]; v != nil {
 			duration = v
 		}
 		if duration != nil {
@@ -266,6 +264,7 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 		}
 		prefix = nodeConfigPrefix(prefix, options, middleware, hasHashes)
 		if hasHashes {
+			a.snapshotNodeHashes(o, &hashes)
 			configs.writePrefix(filepath.Join(functionDir, ".vc-config.json"), prefix, &files, &hashes, writeOnceInDirectory)
 		} else {
 			configs.writePrefix(filepath.Join(functionDir, ".vc-config.json"), prefix, &files, nil, writeOnceInDirectory)
@@ -319,7 +318,7 @@ func (a *adapter) functionOptions(source, name string) object {
 		matched := source == rule.Pattern
 		if !matched {
 			var err error
-			matched, err = a.functionMatchers[index].MatchString(source)
+			matched, err = a.functionMatchers[index].match(source)
 			check(err)
 		}
 		if !matched {

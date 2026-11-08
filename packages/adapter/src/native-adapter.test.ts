@@ -279,7 +279,7 @@ describe('native adapter parity with the JavaScript adapter', () => {
             ],
           },
         };
-        const goCtx = JSON.parse(JSON.stringify(ctx));
+        const goCtx = structuredClone(ctx);
         await loadReferenceAdapter().onBuildComplete!(ctx);
         const expected = await tree(path.join(distDir, 'output'));
         await fs.rm(path.join(distDir, 'output'), { recursive: true });

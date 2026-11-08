@@ -93,3 +93,21 @@ it('keeps different ordered maps distinct when their transport hashes collide', 
   expect(encoded.assetMaps[a]).toEqual(left);
   expect(encoded.assetMaps[b]).toEqual(right);
 });
+
+it('transports shared hash identity without aliasing independent equal maps', () => {
+  const hashes = { shared: 'hash' };
+  const encoded = encodeOutputMaps({
+    appPages: [{ assets: {}, assetsHashes: hashes }],
+    appRoutes: [{ assets: {}, assetsHashes: { ...hashes } }],
+    pages: [{ assets: {}, assetsHashes: hashes }],
+    pagesApi: [],
+    middleware: undefined,
+  } as unknown as Outputs);
+  const page = encoded.outputs.appPages[0];
+  const route = encoded.outputs.appRoutes[0];
+  const alias = encoded.outputs.pages[0];
+  expect(page.assetHashMapId).toBe(route.assetHashMapId);
+  expect(page.assetHashIdentity).toBeDefined();
+  expect(page.assetHashIdentity).toBe(alias.assetHashIdentity);
+  expect(route.assetHashIdentity).toBeUndefined();
+});

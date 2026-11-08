@@ -48,6 +48,18 @@ func runContract(operation string) (result any, failure object) {
 		Middleware bool              `json:"middleware"`
 	}
 	check(json.NewDecoder(os.Stdin).Decode(&input))
+	if operation == "matchFunctionPatterns" {
+		result := []bool{}
+		for _, rule := range input.FunctionRules {
+			matcher := compileFunctionMatcher(rule)
+			for _, source := range input.Values {
+				matched, err := matcher.match(str(source))
+				check(err)
+				result = append(result, str(source) == rule.Pattern || matched)
+			}
+		}
+		return result, nil
+	}
 	if operation == "collectGoRouteOutputs" {
 		return collectGoRouteOutputs(input.Outputs), nil
 	}

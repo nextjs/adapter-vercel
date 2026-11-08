@@ -5,6 +5,7 @@ import { getLambdaOptionsFromFunction } from '@vercel/build-utils';
 import minimatch from 'minimatch';
 import type { AdapterOutput } from 'next';
 import { prepareGoFunctions } from '../src/hosted-go';
+import { encodeFunctionPattern } from '../src/native-function-patterns';
 
 export type FuncOutputs = Array<
   | AdapterOutput['APP_PAGE']
@@ -48,6 +49,7 @@ async function context(options: Record<string, any>) {
       async ([pattern, values]) => ({
         pattern,
         regexp: minimatch.makeRe(pattern)!.source,
+        ...encodeFunctionPattern(pattern),
         options: await getLambdaOptionsFromFunction({
           sourceFile: pattern,
           config: { ...builderConfig, functions: { [pattern]: values } },
@@ -85,6 +87,19 @@ async function context(options: Record<string, any>) {
 
 export function collectGoRouteOutputs(outputs: unknown): GoRouteOutput[] {
   return invoke('collectGoRouteOutputs', { outputs });
+}
+
+export function matchFunctionPatterns(
+  patterns: string[],
+  sources: string[]
+): boolean[] {
+  return invoke('matchFunctionPatterns', {
+    functionRules: patterns.map((pattern) => ({
+      pattern,
+      ...encodeFunctionPattern(pattern),
+    })),
+    values: sources,
+  });
 }
 export async function handleGoOutputs(
   values: GoRouteOutput[],

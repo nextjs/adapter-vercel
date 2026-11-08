@@ -122,6 +122,14 @@ func (a *adapter) hashes(o object) object {
 	}
 	result := make(object, size+4)
 	a.eachMap(o, "assetsHashes", "assetHashMapId", func(k, v string) { result[k] = v })
+	if shared := a.sharedHashes(o); shared != nil {
+		for name := range shared.deleted {
+			delete(result, name)
+		}
+		for name, value := range shared.extra {
+			result[name] = value
+		}
+	}
 	return result
 }
 

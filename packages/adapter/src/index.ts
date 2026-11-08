@@ -12,6 +12,7 @@ import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { modifyConfig } from './config';
 import { prepareGoFunctions } from './hosted-go';
+import { encodeFunctionPattern } from './native-function-patterns';
 import { encodeNativeRequest, encodeOutputMaps } from './native-wire';
 import { getImagesConfig } from './utils';
 
@@ -127,7 +128,12 @@ const adapter: NextAdapter = {
             sourceFile: pattern,
             config: { ...vercelConfig, functions: { [pattern]: options } },
           });
-          return { pattern, regexp: expression.source, options: normalized };
+          return {
+            pattern,
+            regexp: expression.source,
+            ...encodeFunctionPattern(pattern),
+            options: normalized,
+          };
         }
       )
     );

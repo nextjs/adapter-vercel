@@ -2,31 +2,31 @@ package main
 
 import (
 	"fmt"
-	"github.com/dlclark/regexp2"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 )
 
 type adapter struct {
 	request
-	outputDir                                                    string
-	vercelConfig                                                 object
-	parents                                                      map[string]object
-	fallbacks                                                    object
-	fallbackOrder                                                []string
-	functionMatchers                                             []*regexp2.Regexp
-	relativePaths                                                map[string]string
-	encodedBindings                                              []encodedBinding
-	encodedMapSizes                                              [][2]int
-	sourceFiles                                                  sync.Map
-	workers                                                      *outputWorkers
-	sourceRoot                                                   string
-	sourceTypes                                                  []string
-	goPathnames, otherPathnames                                  map[string]bool
-	hasApp, hasPages, hasMiddleware, has404, has500, hasNotFound bool
+	outputDir                                                                 string
+	vercelConfig                                                              object
+	parents                                                                   map[string]object
+	fallbacks                                                                 object
+	fallbackOrder                                                             []string
+	functionMatchers                                                          []functionMatcher
+	relativePaths                                                             map[string]string
+	encodedBindings                                                           []encodedBinding
+	encodedMapSizes                                                           [][2]int
+	sharedHashMaps                                                            map[float64]*metadataMap
+	hashMu                                                                    sync.Mutex
+	sourceFiles                                                               sync.Map
+	workers                                                                   *outputWorkers
+	sourceRoot                                                                string
+	sourceTypes                                                               []string
+	goPathnames, otherPathnames                                               map[string]bool
+	hasApp, hasAppPages, hasPages, hasMiddleware, has404, has500, hasNotFound bool
 }
 
 func newAdapter(req request) *adapter {
@@ -40,6 +40,7 @@ func newAdapter(req request) *adapter {
 		}
 	}
 	a.encodeBindings()
+	a.initSharedHashes()
 	a.workers = newOutputWorkers(outputConcurrency())
 	a.sourceRoot = a.ProjectDir
 	if exists(filepath.Join(a.ProjectDir, "src/pages")) || exists(filepath.Join(a.ProjectDir, "src/app")) {
@@ -51,10 +52,7 @@ func newAdapter(req request) *adapter {
 		}
 	}
 	for _, rule := range a.FunctionRules {
-		re, err := regexp2.Compile(rule.Regexp, regexp2.ECMAScript)
-		check(err)
-		re.MatchTimeout = time.Second
-		a.functionMatchers = append(a.functionMatchers, re)
+		a.functionMatchers = append(a.functionMatchers, compileFunctionMatcher(rule))
 	}
 	return a
 }
@@ -82,6 +80,7 @@ func build(req request) {
 		a.vercelConfig["wildcard"] = domains
 	}
 	a.hasApp = len(arr(req.Outputs["appPages"]))+len(arr(req.Outputs["appRoutes"])) > 0
+	a.hasAppPages = len(arr(req.Outputs["appPages"])) > 0
 	a.hasPages = len(arr(req.Outputs["pages"]))+len(arr(req.Outputs["pagesApi"])) > 0
 	a.hasMiddleware = req.Outputs["middleware"] != nil
 	nodes, edges := []any{}, []any{}
@@ -208,7 +207,7 @@ func (a *adapter) routes(middleware []any) []any {
 	root := join("/", base)
 	prefix := join("/", base, "/")
 	defaultLocale := str(i18n["defaultLocale"])
-	before, after, fallback := rewriteRoutes(routing, "beforeFiles", a.hasApp), rewriteRoutes(routing, "afterFiles", a.hasApp), rewriteRoutes(routing, "fallback", a.hasApp)
+	before, after, fallback := rewriteRoutes(routing, "beforeFiles", a.hasAppPages), rewriteRoutes(routing, "afterFiles", a.hasAppPages), rewriteRoutes(routing, "fallback", a.hasAppPages)
 	priority, redirects, headers, onMatch := userRoutes(routing)
 	out := []any{}
 	add := func(rs ...object) {
@@ -308,7 +307,7 @@ func (a *adapter) routes(middleware []any) []any {
 		}
 		add(object{"src": join("/", base, escapeRegexp(defaultLocale)), "dest": "/", "check": true}, object{"src": "^" + root + "/?(?:" + localePattern + ")/(.*)", "dest": prefix + "$1", "check": true})
 	}
-	if a.hasApp {
+	if a.hasAppPages {
 		add(object{"src": `^/(?<path>.+)(?<rscSuffix>\.segments/.+\.segment\.rsc)(?:/)?$`, "dest": "/$path.rsc", "check": true})
 	}
 	add(object{"handle": "rewrite"})

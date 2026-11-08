@@ -41,9 +41,16 @@ type request struct {
 }
 
 type functionRule struct {
-	Pattern string `json:"pattern"`
-	Regexp  string `json:"regexp"`
-	Options object `json:"options"`
+	Pattern  string               `json:"pattern"`
+	Regexp   string               `json:"regexp"`
+	Options  object               `json:"options"`
+	Segments [][]*functionSegment `json:"segments,omitempty"`
+	Negate   bool                 `json:"negate,omitempty"`
+}
+
+type functionSegment struct {
+	Literal *string `json:"literal,omitempty"`
+	Regexp  string  `json:"regexp,omitempty"`
 }
 
 func main() {
