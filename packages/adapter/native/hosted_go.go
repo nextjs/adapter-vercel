@@ -206,6 +206,8 @@ func goRegions(value any) any {
 		if region == "global" {
 			panic("Go preferredRegion=\"global\" is unsupported")
 		}
+	}
+	for _, region := range regions {
 		if region == "auto" {
 			return nil
 		}

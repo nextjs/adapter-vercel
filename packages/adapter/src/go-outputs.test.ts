@@ -342,14 +342,21 @@ describe('hosted Go route outputs', () => {
     await expect(handle([output()])).rejects.toThrow('architecture conflicts');
   });
 
-  it('rejects unsupported global regions without leaving a partial function', async () => {
-    await expect(
-      handle([output({ config: { preferredRegion: 'global' } })])
-    ).rejects.toThrow('preferredRegion="global"');
-    await expect(
-      fs.stat(path.join(vercelOutputDir, 'functions/api/hello.func'))
-    ).rejects.toMatchObject({ code: 'ENOENT' });
-  });
+  it.each([
+    { preferredRegion: 'global' },
+    { preferredRegion: ['auto', 'global'] },
+    { preferredRegion: ['global', 'auto'] },
+  ])(
+    'rejects unsupported global regions without leaving a partial function: %j',
+    async ({ preferredRegion }) => {
+      await expect(
+        handle([output({ config: { preferredRegion } })])
+      ).rejects.toThrow('preferredRegion="global"');
+      await expect(
+        fs.stat(path.join(vercelOutputDir, 'functions/api/hello.func'))
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+  );
 
   it('normalizes a basePath root into its index function', async () => {
     await handle([output({ pathname: '/base' })], { basePath: '/base' });
