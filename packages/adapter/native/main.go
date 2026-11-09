@@ -258,7 +258,7 @@ func copyFile(src, dst string) {
 func copyEntry(src, dst string) {
 	info, err := os.Lstat(src)
 	check(err)
-	if info.Mode()&os.ModeSymlink != 0 {
+	if isSymlink(src, info.Mode()) {
 		target, err := os.Readlink(src)
 		check(err)
 		mkdir(filepath.Dir(dst))

@@ -7,7 +7,7 @@ import { expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const { defaultConfig } = require('next/dist/server/config-shared');
 
-it('uses the standard adapter entrypoint to package Node functions and assets natively', async () => {
+it('uses the standard adapter entrypoint to package Node functions and junction-backed public assets natively', async () => {
   const projectDir = await fs.mkdtemp(
     path.join(os.tmpdir(), 'adapter-entrypoint-')
   );
@@ -24,6 +24,15 @@ it('uses the standard adapter entrypoint to package Node functions and assets na
       JSON.stringify({ engines: { node: '22.x' } })
     );
     await fs.writeFile(path.join(distDir, 'routes-manifest.json'), '{}');
+    const shared = path.join(projectDir, 'shared-public');
+    await fs.mkdir(shared);
+    await fs.writeFile(path.join(shared, 'asset.txt'), 'shared asset');
+    await fs.mkdir(path.join(projectDir, 'public'));
+    await fs.symlink(
+      shared,
+      path.join(projectDir, 'public/shared'),
+      'junction'
+    );
     const filePath = path.join(distDir, 'server/health.js');
     await fs.writeFile(filePath, 'exports.GET = () => new Response("healthy")');
     const adapter = require('../dist/index.js');
@@ -78,6 +87,12 @@ it('uses the standard adapter entrypoint to package Node functions and assets na
     );
     expect(output.version).toBe(3);
     expect(output.routes.length).toBeGreaterThan(0);
+    const copiedLink = path.join(distDir, 'output/static/shared');
+    expect((await fs.lstat(copiedLink)).isSymbolicLink()).toBe(true);
+    expect(await fs.realpath(copiedLink)).toBe(await fs.realpath(shared));
+    expect(await fs.readFile(path.join(copiedLink, 'asset.txt'), 'utf8')).toBe(
+      'shared asset'
+    );
     const fn = JSON.parse(
       await fs.readFile(
         path.join(distDir, 'output/functions/health.func/.vc-config.json'),
