@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import adapter from './index';
 import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
 
-const INJECT_ENTRY = './.vercel/otel/node_modules/instrumentation.mjs';
+const INJECT_ENTRY =
+  './.vercel/otel/node_modules/@vercel/default-tracing/instrumentation.mjs';
 
 type TracingConfig = {
   pageExtensions: string[];
@@ -67,8 +68,11 @@ describe('injectDefaultTracing', () => {
       '@opentelemetry/api',
       '1.9.0'
     );
+    await fs.mkdir(path.dirname(path.join(projectDir, INJECT_ENTRY)), {
+      recursive: true,
+    });
     await fs.writeFile(
-      path.join(modules, 'instrumentation.mjs'),
+      path.join(projectDir, INJECT_ENTRY),
       'export async function register() {}\n'
     );
   }
@@ -126,7 +130,7 @@ describe('injectDefaultTracing', () => {
   it('does not change the prepared tree', async () => {
     const projectDir = await readyProject();
     const modules = path.join(otelRoot(projectDir), 'node_modules');
-    const wrapper = path.join(modules, 'instrumentation.mjs');
+    const wrapper = path.join(projectDir, INJECT_ENTRY);
     const before = await fs.readFile(wrapper, 'utf8');
 
     await inject(projectDir);
@@ -136,7 +140,10 @@ describe('injectDefaultTracing', () => {
     expect((await fs.readdir(modules)).sort()).toEqual([
       '@opentelemetry',
       '@vercel',
-      'instrumentation.mjs',
+    ]);
+    expect((await fs.readdir(path.join(modules, '@vercel'))).sort()).toEqual([
+      'default-tracing',
+      'otel',
     ]);
   });
 

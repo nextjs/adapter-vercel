@@ -8,9 +8,12 @@ import { debug } from '@vercel/build-utils';
 // @vercel/otel. It names the entry in VERCEL_DEFAULT_TRACING_ENTRY only when
 // it prepared the wrapper in this build, so a file the build command writes
 // or restores later isn't injected. It sits in node_modules so ESLint and
-// Prettier skip it by default. .mjs, so webpack parses it as ESM even when the
-// app's package.json sets "type": "commonjs".
-const INJECT_ENTRY = './.vercel/otel/node_modules/instrumentation.mjs';
+// Prettier skip it by default, inside a package folder because Node 20.20 and
+// 22 run out of memory formatting an error whose stack has a frame directly in
+// node_modules/. .mjs, so webpack parses it as ESM even when the app's
+// package.json sets "type": "commonjs".
+const INJECT_ENTRY =
+  './.vercel/otel/node_modules/@vercel/default-tracing/instrumentation.mjs';
 
 type TracingConfig = {
   pageExtensions: readonly string[];
