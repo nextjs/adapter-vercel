@@ -171,6 +171,27 @@ it('keeps route-handler-only rewrites unchanged without segment fallback', async
   });
 });
 
+it('keeps root pages function settings when src/pages is an ordinary file', async () => {
+  await fixture(async ({ ctx, write, compare }) => {
+    await fs.rm(path.join(ctx.projectDir, 'app'), { recursive: true });
+    await write('src/pages', 'Not a directory');
+    await write('pages/api/test.ts');
+    const route = ctx.outputs.appRoutes[0];
+    ctx.outputs.appRoutes = [];
+    ctx.outputs.pagesApi = [
+      { ...route, type: 'PAGES_API', sourcePage: '/api/test' },
+    ] as Context['outputs']['pagesApi'];
+    process.env.NEXT_ADAPTER_VERCEL_CONFIG = JSON.stringify({
+      functions: { 'pages/api/test.ts': { maxDuration: 23, memory: 2048 } },
+    });
+    const files = await compare();
+    expect(files['functions/api/test.func/.vc-config.json']).toMatchObject({
+      maxDuration: 23,
+      memory: 2048,
+    });
+  });
+});
+
 it.each([
   [undefined, undefined],
   [null, undefined],

@@ -43,11 +43,11 @@ func newAdapter(req request) *adapter {
 	a.initSharedHashes()
 	a.workers = newOutputWorkers(outputConcurrency())
 	a.sourceRoot = a.ProjectDir
-	if exists(filepath.Join(a.ProjectDir, "src/pages")) || exists(filepath.Join(a.ProjectDir, "src/app")) {
+	if usesSrcDirectory(a.ProjectDir) {
 		a.sourceRoot = filepath.Join(a.ProjectDir, "src")
 	}
 	for _, typ := range []string{"pages", "app"} {
-		if exists(filepath.Join(a.sourceRoot, typ)) {
+		if directory(filepath.Join(a.sourceRoot, typ)) {
 			a.sourceTypes = append(a.sourceTypes, typ)
 		}
 	}

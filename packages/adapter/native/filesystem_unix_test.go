@@ -3,11 +3,39 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
+
+func TestPublicCopyRejectsFIFOWithoutBlocking(t *testing.T) {
+	if root := os.Getenv("NEXT_ADAPTER_FIFO_TEST_ROOT"); root != "" {
+		a := newAdapter(request{ProjectDir: root, RepoRoot: root, DistDir: filepath.Join(root, ".next")})
+		defer a.workers.close()
+		a.publicFiles()
+		return
+	}
+	root := t.TempDir()
+	check(os.Mkdir(filepath.Join(root, "public"), 0700))
+	pipe := filepath.Join(root, "public", "pipe")
+	check(syscall.Mkfifo(pipe, 0600))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestPublicCopyRejectsFIFOWithoutBlocking$")
+	cmd.Env = append(os.Environ(), "NEXT_ADAPTER_FIFO_TEST_ROOT="+root)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatal("copying a public FIFO blocked instead of rejecting it")
+	}
+	if err == nil || !strings.Contains(string(output), "Cannot copy a FIFO pipe: "+pipe) {
+		t.Fatalf("expected the fs-extra FIFO error, got %v: %s", err, output)
+	}
+}
 
 func TestCopyPreservesSourcePermissionsDespiteUmask(t *testing.T) {
 	previous := syscall.Umask(0077)

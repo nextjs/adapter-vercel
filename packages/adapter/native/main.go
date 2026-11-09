@@ -275,6 +275,12 @@ func copyEntry(src, dst string) {
 		check(os.Chmod(dst, info.Mode()))
 		return
 	}
+	if info.Mode()&os.ModeNamedPipe != 0 {
+		panic(fmt.Errorf("Cannot copy a FIFO pipe: %s", src))
+	}
+	if info.Mode()&os.ModeSocket != 0 {
+		panic(fmt.Errorf("Cannot copy a socket file: %s", src))
+	}
 	mkdir(filepath.Dir(dst))
 	in, err := os.Open(src)
 	check(err)
