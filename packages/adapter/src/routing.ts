@@ -276,7 +276,6 @@ export function normalizeNextDataRoutes(
 
   const path = require('node:path');
   const basePath = config.basePath || '';
-  const trailingSlash = config.trailingSlash || false;
 
   return [
     // remove x-nextjs-data header for non _next/data requests
@@ -320,6 +319,23 @@ export function normalizeNextDataRoutes(
       ],
       continue: true,
     },
+    ...stripNextDataRoutes(config, buildId, isOverride),
+  ];
+}
+
+/**
+ * Rewrite a `_next/data` URL to the page path it fetches data for.
+ */
+function stripNextDataRoutes(
+  config: NextConfig,
+  buildId: string,
+  isOverride: boolean
+): RouteWithSrc[] {
+  const path = require('node:path');
+  const basePath = config.basePath || '';
+  const trailingSlash = config.trailingSlash || false;
+
+  return [
     // strip _next/data prefix for resolving
     {
       src: `^${path.posix.join(
@@ -357,6 +373,37 @@ export function normalizeNextDataRoutes(
       ...(isOverride ? { override: true } : {}),
       continue: true,
     },
+  ];
+}
+
+/**
+ * By default Proxy sees a `_next/data` URL as the page path it fetches data
+ * for. With `skipProxyUrlNormalize` (or its deprecated alias
+ * `skipMiddlewareUrlNormalize`) it sees the URL as sent. The URL is normalized
+ * before redirects, so restore it around the middleware routes and normalize
+ * it again after them, like the old builder does.
+ */
+export function wrapMiddlewareRoutes(
+  middlewareRoutes: readonly RouteWithSrc[],
+  config: NextConfig,
+  buildId: string,
+  shouldHandleMiddlewareDataResolving: boolean
+): RouteWithSrc[] {
+  const skipProxyUrlNormalize =
+    config.skipProxyUrlNormalize || config.skipMiddlewareUrlNormalize;
+
+  if (
+    !skipProxyUrlNormalize ||
+    !shouldHandleMiddlewareDataResolving ||
+    middlewareRoutes.length === 0
+  ) {
+    return [...middlewareRoutes];
+  }
+
+  return [
+    ...denormalizeNextDataRoutes(config, buildId, true, true),
+    ...middlewareRoutes,
+    ...stripNextDataRoutes(config, buildId, true),
   ];
 }
 
