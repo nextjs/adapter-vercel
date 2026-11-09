@@ -9,6 +9,11 @@ export type GoRouteOutput = AdapterOutput['APP_ROUTE'] & {
   runtime: 'go';
 };
 
+export type GoMiddlewareOutput = AdapterOutput['MIDDLEWARE'] & {
+  runtime: 'go';
+};
+export type GoOutput = GoRouteOutput | GoMiddlewareOutput;
+
 type BuildOutputs = Parameters<
   NonNullable<NextAdapter['onBuildComplete']>
 >[0]['outputs'];
@@ -76,14 +81,15 @@ function assertPathname(
   }
 }
 
-function assertGoRouteOutput(value: unknown): asserts value is GoRouteOutput {
+function assertGoRouteOutput(value: unknown): asserts value is GoOutput {
   if (
     !isRecord(value) ||
-    value.type !== AdapterOutputType.APP_ROUTE ||
+    (value.type !== AdapterOutputType.APP_ROUTE &&
+      value.type !== AdapterOutputType.MIDDLEWARE) ||
     value.runtime !== 'go'
   ) {
     throw new Error(
-      'Go is supported only for App Router route.go handler outputs'
+      'Go is supported only for App Router route.go handlers and proxy.go middleware outputs'
     );
   }
   if (
@@ -95,7 +101,18 @@ function assertGoRouteOutput(value: unknown): asserts value is GoRouteOutput {
   }
   assertPathname(value.pathname);
   assertPathname(value.sourcePage, 'sourcePage');
-  if (!value.sourcePage.endsWith('/route')) {
+  if (value.type === AdapterOutputType.MIDDLEWARE) {
+    if (
+      !['/proxy', '/src/proxy'].includes(value.sourcePage) ||
+      value.pathname !== '/_middleware' ||
+      !isRecord(value.config) ||
+      !Array.isArray(value.config.matchers)
+    ) {
+      throw new Error(
+        'Go middleware requires a root or src proxy.go source, /_middleware pathname, and matchers'
+      );
+    }
+  } else if (!value.sourcePage.endsWith('/route')) {
     throw new Error('Go sourcePage must identify an App Router route handler');
   }
   if (typeof value.filePath !== 'string' || !path.isAbsolute(value.filePath)) {
@@ -153,8 +170,8 @@ function assertGoRouteOutput(value: unknown): asserts value is GoRouteOutput {
 }
 
 /** Validate before any output is materialized; Node/Edge retain their existing paths. */
-export function collectGoRouteOutputs(outputs: BuildOutputs): GoRouteOutput[] {
-  const goOutputs: GoRouteOutput[] = [];
+export function collectGoRouteOutputs(outputs: BuildOutputs): GoOutput[] {
+  const goOutputs: GoOutput[] = [];
   for (const kind of [
     'appRoutes',
     'appPages',
@@ -178,9 +195,22 @@ export function collectGoRouteOutputs(outputs: BuildOutputs): GoRouteOutput[] {
           `Unsupported Next.js adapter output runtime: ${String(output.runtime)}`
         );
       }
-      if (kind !== 'appRoutes') {
+      if (kind !== 'appRoutes' && kind !== 'middleware') {
         throw new Error(
           `Go ${kind} outputs are unsupported; only App Router route.go handlers are supported`
+        );
+      }
+      if (
+        kind === 'middleware' &&
+        output.type !== AdapterOutputType.MIDDLEWARE
+      ) {
+        throw new Error(
+          'Go middleware outputs are unsupported unless they use the MIDDLEWARE output type'
+        );
+      }
+      if (kind === 'appRoutes' && output.type !== AdapterOutputType.APP_ROUTE) {
+        throw new Error(
+          'Go App Router outputs require the APP_ROUTE output type'
         );
       }
       assertGoRouteOutput(output);
@@ -339,7 +369,7 @@ async function usesSrcAppDirectory(workPath: string): Promise<boolean> {
 }
 
 export async function handleGoOutputs(
-  outputs: GoRouteOutput[],
+  outputs: GoOutput[],
   {
     config,
     projectDir,
@@ -362,7 +392,10 @@ export async function handleGoOutputs(
   const functionPaths = new Map<string, string>();
   for (const output of outputs) {
     assertGoRouteOutput(output);
-    const pathname = normalizeIndexPathname(output.pathname, config);
+    const pathname =
+      output.type === AdapterOutputType.MIDDLEWARE
+        ? output.pathname
+        : normalizeIndexPathname(output.pathname, config);
     const functionPath = `${pathname.slice(1)}.func`;
     const caseInsensitivePath = functionPath.toLowerCase();
     const previous = functionPaths.get(caseInsensitivePath);
@@ -372,18 +405,24 @@ export async function handleGoOutputs(
     functionPaths.set(caseInsensitivePath, functionPath);
   }
   for (const output of outputs) {
-    const sourceFile = (
-      await getSourceFilePathFromPage({
-        workPath: projectDir,
-        page: output.sourcePage,
-        pageExtensions: ['go'],
-        usesSrcDir,
-        pageTypes: ['app'],
-        allowExtensionless: false,
-        allowDirectoryIndex: false,
-      })
-    ).replace(/\\/g, '/');
-    if (!/^(src\/)?app\/(?:.*\/)?route\.go$/.test(sourceFile)) {
+    const isMiddleware = output.type === AdapterOutputType.MIDDLEWARE;
+    const sourceFile = isMiddleware
+      ? `${output.sourcePage.slice(1)}.go`
+      : (
+          await getSourceFilePathFromPage({
+            workPath: projectDir,
+            page: output.sourcePage,
+            pageExtensions: ['go'],
+            usesSrcDir,
+            pageTypes: ['app'],
+            allowExtensionless: false,
+            allowDirectoryIndex: false,
+          })
+        ).replace(/\\/g, '/');
+    if (isMiddleware) {
+      if (!(await fs.stat(path.join(projectDir, sourceFile))).isFile())
+        throw new Error(`Could not resolve Go proxy source: ${sourceFile}`);
+    } else if (!/^(src\/)?app\/(?:.*\/)?route\.go$/.test(sourceFile)) {
       throw new Error(
         `Could not resolve Go route.go source for ${output.sourcePage}`
       );
@@ -401,7 +440,10 @@ export async function handleGoOutputs(
         `Go target architecture conflicts with function configuration for ${sourceFile}`
       );
     }
-    const pathname = normalizeIndexPathname(output.pathname, config);
+    const pathname =
+      output.type === AdapterOutputType.MIDDLEWARE
+        ? output.pathname
+        : normalizeIndexPathname(output.pathname, config);
     const functionDir = path.join(functionsDir, `${pathname.slice(1)}.func`);
     await ensureFunctionParent(functionsDir, functionDir);
     await existingGoFunction(functionDir);

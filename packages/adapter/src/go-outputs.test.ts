@@ -5,11 +5,16 @@ import { AdapterOutputType } from 'next/constants';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   collectGoRouteOutputs,
+  type GoMiddlewareOutput,
   type GoRouteOutput,
   handleGoOutputs,
 } from './go-outputs';
 import * as outputUtils from './outputs';
-import { getSourceFilePathFromPage, usesSrcDirectory } from './outputs';
+import {
+  getSourceFilePathFromPage,
+  handleMiddleware,
+  usesSrcDirectory,
+} from './outputs';
 
 describe('hosted Go route outputs', () => {
   let root: string;
@@ -358,6 +363,76 @@ describe('hosted Go route outputs', () => {
       runtimeLanguage: 'go',
     });
   });
+
+  it.each([false, true])(
+    'packages proxy.go middleware and matcher routes with src=%s',
+    async (src) => {
+      const sourcePage = src ? '/src/proxy' : '/proxy';
+      const source = path.join(projectDir, sourcePage.slice(1) + '.go');
+      await fs.mkdir(path.dirname(source), { recursive: true });
+      await fs.writeFile(source, 'package main');
+      const middleware: GoMiddlewareOutput = {
+        ...output(),
+        type: AdapterOutputType.MIDDLEWARE,
+        id: '/_middleware',
+        pathname: '/_middleware',
+        sourcePage,
+        config: {
+          matchers: [
+            {
+              source: '/protected/:path*',
+              sourceRegex: '^/protected/.*$',
+              has: undefined,
+              missing: undefined,
+            },
+          ],
+          maxDuration: 42,
+        },
+      };
+      const all = collections();
+      all.middleware = middleware;
+      expect(collectGoRouteOutputs(all)).toEqual([middleware]);
+      await handleGoOutputs([middleware], {
+        config: { basePath: src ? '/_middleware' : '' } as never,
+        projectDir,
+        nextVersion: '16.5.0',
+        vercelOutputDir,
+      });
+      const functionConfig = JSON.parse(
+        await fs.readFile(
+          path.join(
+            vercelOutputDir,
+            'functions/_middleware.func/.vc-config.json'
+          ),
+          'utf8'
+        )
+      );
+      expect(functionConfig).toMatchObject({
+        runtime: 'executable',
+        runtimeLanguage: 'go',
+        maxDuration: 42,
+      });
+      expect(functionConfig).not.toHaveProperty('useWebApi');
+      expect(functionConfig).not.toHaveProperty('supportsMultiPayloads');
+      const routes = await handleMiddleware(middleware, {
+        config: {} as never,
+        projectDir,
+        repoRoot: projectDir,
+        distDir: path.join(projectDir, '.next'),
+        nextVersion: '16.5.0',
+        vercelOutputDir,
+        prerenderFallbackFalseMap: {},
+      });
+      expect(routes).toEqual([
+        expect.objectContaining({
+          middlewarePath: '/_middleware',
+          src: '^/protected/.*$',
+          continue: true,
+          override: true,
+        }),
+      ]);
+    }
+  );
 
   it('does not load a Go host module for Node-only output', async () => {
     delete process.env.NEXT_ADAPTER_VERCEL_GO_PACKAGER_PATH;
