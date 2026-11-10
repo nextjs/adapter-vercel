@@ -1,35 +1,54 @@
 # Next.js Vercel Deployment Adapter
 
-This repo contains the Vercel deployment adapter for Next.js. It does not need to be used directly as it will be auto configured when deploying on Vercel.
+The Vercel deployment adapter for Next.js is configured automatically when
+deploying on Vercel. Applications normally do not need to install or configure
+this package directly.
 
-The adapter uses a single Go output generator. Next.js loads `dist/index.js` for
-its configuration and build hooks; that small bridge resolves Node-specific
-metadata and launches the packaged native executable. Routing, function and
-asset packaging run in Go. Deployed Node.js and Edge runtime sources remain
-unchanged. Linux, macOS and Windows executables for x64 and arm64 ship with the
-package, so applications do not need a Go compiler.
+The adapter uses Go to generate routes, function metadata, and static outputs.
+Next.js loads a small JavaScript entrypoint for configuration and build hooks,
+which invokes the packaged native executable. Deployed runtime implementations
+are unchanged.
 
-`pnpm test` builds the adapter, runs the behavioral tests against Go, compares
-complete output trees against an immutable test-only JavaScript reference, and
-runs the Go race detector. The reference is a pinned published development
-dependency; its output generator is neither maintained here nor shipped in the
-adapter bundle.
+The package includes Linux, macOS, and Windows executables for x64 and arm64.
+Applications do not need a Go compiler to run the adapter. See the
+[native adapter documentation](./packages/adapter/native/README.md) for
+architecture, diagnostics, and validation details.
 
-For debugging use cases you can install this package locally and configure it in your `next.config`. It is recommended to leave this automatically configured to receive automatic fixes.
+## Manual configuration
+
+For local debugging or use outside automatic Vercel configuration, install the
+adapter in an application using a Next.js release with adapter support:
 
 ```sh
-npm i @next-community/adapter-vercel@latest
+npm install @next-community/adapter-vercel
 ```
 
 ```ts
 // next.config.ts
-import { NextConfig } from 'next' 
+import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  experimental: {
-    adapterPath: require.resolve('@next-community/adapter-vercel')
-  }
+  adapterPath: require.resolve('@next-community/adapter-vercel'),
 }
 
 export default nextConfig
 ```
+
+Leave adapter selection to Vercel for normal deployments so the platform can
+supply compatible adapter updates.
+
+## Development
+
+Use Node.js 24, the repository's configured pnpm version, and a Go toolchain
+compatible with [go.mod](./packages/adapter/native/go.mod).
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm test
+```
+
+The tests exercise the Go implementation, compare complete output trees against
+an immutable JavaScript reference, and run the Go race detector. The reference
+is a pinned development dependency used only by tests; its output generator is
+not shipped in the adapter bundle.
