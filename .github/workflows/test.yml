@@ -38,4 +38,4 @@ jobs:
           cache-dependency-path: packages/adapter/native/go.sum
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm --filter @next-community/adapter-vercel exec vitest run src/entrypoint.test.ts src/native-wire.test.ts src/native-prefetch.test.ts src/node-handler.test.ts
+      - run: pnpm --filter @next-community/adapter-vercel exec vitest run src/entrypoint.test.ts src/go/native-wire.test.ts src/go/native-prefetch.test.ts src/node-handler.test.ts
