@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { loadReferenceAdapter } from '../../test/reference-adapter';
 
 const require = createRequire(import.meta.url);
-const packageDir = path.resolve(__dirname, '..');
+const packageDir = path.resolve(__dirname, '../..');
 const { defaultConfig } = require('next/dist/server/config-shared');
 
 async function tree(root: string) {
