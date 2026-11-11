@@ -1,6 +1,6 @@
 import minimatch from 'minimatch';
 import { expect, it } from 'vitest';
-import { matchFunctionPatterns } from '../test/native-operations';
+import { matchFunctionPatterns } from '../../test/native-operations';
 
 it('matches minimatch across globstars, negation, braces, dot segments and UTF-16 characters', () => {
   const patterns = [

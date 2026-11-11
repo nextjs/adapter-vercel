@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
-import { generateToolbarScript } from './toolbar';
+import { generateToolbarScript } from '../toolbar';
 
 export async function modifyConfig(
   config: Parameters<NonNullable<NextAdapter['modifyConfig']>>[0],

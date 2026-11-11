@@ -1,10 +1,11 @@
 const { readFileSync } = require('node:fs');
 const { createRequire } = require('node:module');
-const { dirname } = require('node:path');
+const { dirname, join } = require('node:path');
 const { compileFunction } = require('node:vm');
 
-// Frozen test oracle, resolved separately from the shipped adapter entrypoint.
-const filename = require.resolve('@next-community/adapter-vercel-reference');
+// Load the maintained TypeScript implementation directly, bypassing the opt-in
+// selector. Evaluate it afresh so module-level state cannot leak between cases.
+const filename = join(__dirname, '../dist/typescript.js');
 const relativeRequire = createRequire(filename);
 const load = compileFunction(readFileSync(filename, 'utf8'), [
   'require',

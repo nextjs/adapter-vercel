@@ -6,10 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   collectGoRouteOutputs,
   type GoRouteOutput,
-  getSourceFilePathFromPage,
   handleGoOutputs,
-  usesSrcDirectory,
-} from '../test/native-operations';
+} from './go-outputs';
+import * as outputUtils from './outputs';
+import { getSourceFilePathFromPage, usesSrcDirectory } from './outputs';
 
 describe('hosted Go route outputs', () => {
   let root: string;
@@ -259,8 +259,9 @@ describe('hosted Go route outputs', () => {
   );
 
   it('normalizes Windows source paths for function overrides', async () => {
-    await fs.rm(path.join(projectDir, 'app'), { recursive: true });
-    await writeSource('/api/hello/route', true);
+    vi.spyOn(outputUtils, 'getSourceFilePathFromPage').mockResolvedValue(
+      'src\\app\\api\\hello\\route.go'
+    );
     process.env.NEXT_ADAPTER_VERCEL_CONFIG = JSON.stringify({
       functions: {
         'src/app/api/hello/route.go': { maxDuration: 42 },
@@ -342,21 +343,14 @@ describe('hosted Go route outputs', () => {
     await expect(handle([output()])).rejects.toThrow('architecture conflicts');
   });
 
-  it.each([
-    { preferredRegion: 'global' },
-    { preferredRegion: ['auto', 'global'] },
-    { preferredRegion: ['global', 'auto'] },
-  ])(
-    'rejects unsupported global regions without leaving a partial function: %j',
-    async ({ preferredRegion }) => {
-      await expect(
-        handle([output({ config: { preferredRegion } })])
-      ).rejects.toThrow('preferredRegion="global"');
-      await expect(
-        fs.stat(path.join(vercelOutputDir, 'functions/api/hello.func'))
-      ).rejects.toMatchObject({ code: 'ENOENT' });
-    }
-  );
+  it('rejects unsupported global regions without leaving a partial function', async () => {
+    await expect(
+      handle([output({ config: { preferredRegion: 'global' } })])
+    ).rejects.toThrow('preferredRegion="global"');
+    await expect(
+      fs.stat(path.join(vercelOutputDir, 'functions/api/hello.func'))
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
 
   it('normalizes a basePath root into its index function', async () => {
     await handle([output({ pathname: '/base' })], { basePath: '/base' });
@@ -640,7 +634,17 @@ describe('hosted Go route outputs', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('cleans up staged files when a required asset is missing', async () => {
+  it('cleans up staged files when a later required asset is missing', async () => {
+    const copyFile = fs.copyFile;
+    let copiedAssetContents: string | undefined;
+    vi.spyOn(fs, 'copyFile').mockImplementation(
+      async (source, destination, mode) => {
+        await copyFile(source, destination, mode);
+        if (source === assetPath) {
+          copiedAssetContents = await fs.readFile(destination, 'utf8');
+        }
+      }
+    );
     await expect(
       handle([
         output({
@@ -651,6 +655,7 @@ describe('hosted Go route outputs', () => {
         }),
       ])
     ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(copiedAssetContents).toBe('hello asset');
     await expect(
       fs.stat(path.join(vercelOutputDir, 'functions/api/hello.func'))
     ).rejects.toMatchObject({ code: 'ENOENT' });

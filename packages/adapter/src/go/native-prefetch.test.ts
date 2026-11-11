@@ -21,7 +21,7 @@ it.each(['config', 'complete'])(
     const read = vi
       .spyOn(fs, 'readFile')
       .mockResolvedValue(Buffer.from('binary'));
-    const entry = require.resolve('../dist/index.js');
+    const entry = require.resolve('../../dist/go/index.js');
     delete require.cache[entry];
     const adapter = require(entry);
     const config = () => ({

@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { getLambdaOptionsFromFunction } from '@vercel/build-utils';
 import minimatch from 'minimatch';
 import type { AdapterOutput } from 'next';
-import { prepareGoFunctions } from '../src/hosted-go';
-import { encodeFunctionPattern } from '../src/native-function-patterns';
+import { prepareGoFunctions } from '../src/go/hosted-go';
+import { encodeFunctionPattern } from '../src/go/native-function-patterns';
 
 export type FuncOutputs = Array<
   | AdapterOutput['APP_PAGE']
@@ -67,7 +67,7 @@ async function context(options: Record<string, any>) {
     nextVersion: options.nextVersion || '16.4.5',
     nodeRuntime: 'nodejs22.x',
     templatesDir: fileURLToPath(
-      new URL('../dist/native-templates/', import.meta.url)
+      new URL('../dist/go/native-templates/', import.meta.url)
     ),
     nextEnvLoaderPath: require.resolve('@next/env'),
     outputDir: options.vercelOutputDir,

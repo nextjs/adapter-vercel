@@ -8,7 +8,7 @@ import {
   type FuncOutputs,
   handleNodeOutputs,
   handlePrerenderOutputs,
-} from '../test/native-operations';
+} from './outputs';
 
 describe('handleNodeOutputs automatic fetch instrumentation', () => {
   let projectDir: string;
@@ -86,7 +86,7 @@ describe('handleNodeOutputs automatic fetch instrumentation', () => {
         `flag: ${value}`
       ).toBe(expected);
       expect(config.launcherType).toBe('Nodejs');
-      expect(Boolean(config.useWebApi)).toBe(isMiddleware);
+      expect(config.useWebApi).toBe(isMiddleware);
     }
   });
 });

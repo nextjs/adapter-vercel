@@ -4,10 +4,13 @@ The Vercel deployment adapter for Next.js is configured automatically when
 deploying on Vercel. Applications normally do not need to install or configure
 this package directly.
 
-The adapter uses Go to generate routes, function metadata, and static outputs.
-Next.js loads a small JavaScript entrypoint for configuration and build hooks,
-which invokes the packaged native executable. Deployed runtime implementations
-are unchanged.
+The existing TypeScript adapter is used by default. Set
+`NEXT_USE_GO_BUILDER=1` to opt into the separate Go output generator. Next.js
+loads a small selector that delegates configuration and build hooks to the
+selected implementation. Deployed runtime implementations are unchanged.
+
+On Vercel, the same variable opts into the Go builder as well when
+`NEXT_ENABLE_ADAPTER=1` is enabled. Unset it or set it to `0` to use TypeScript.
 
 The package includes Linux, macOS, and Windows executables for x64 and arm64.
 Applications do not need a Go compiler to run the adapter. See the
@@ -48,7 +51,8 @@ pnpm build
 pnpm test
 ```
 
-The tests exercise the Go implementation, compare complete output trees against
-an immutable JavaScript reference, and run the Go race detector. The reference
-is a pinned development dependency used only by tests; its output generator is
-not shipped in the adapter bundle.
+The tests exercise the default TypeScript path and the opt-in Go path, compare
+complete output trees against the maintained TypeScript implementation, and
+run the Go race detector. Tests load TypeScript directly so opt-in cannot
+accidentally make both sides of a comparison use Go. Both output generators
+are shipped separately.

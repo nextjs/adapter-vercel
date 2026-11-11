@@ -1,7 +1,17 @@
 # Native adapter
 
-Next.js loads `dist/index.js` for the adapter's configuration and build hooks.
-The JavaScript entrypoint handles module resolution, configuration mutation,
+The package uses the existing TypeScript adapter by default. Its public
+`dist/index.js` entrypoint loads Go only when `NEXT_USE_GO_BUILDER=1` is set.
+It checks selection for each hook so a cached entrypoint cannot retain an
+opt-in from an earlier build. The TypeScript generator remains unchanged in
+`src/index.ts` and is bundled as `dist/typescript.js`.
+
+The Go bridge is separate in `src/go/index.ts`, with its native helpers in the
+same source directory. It is bundled as `dist/go/index.js`; native binaries,
+templates, and licenses live under `dist/go/`. Native compilation and template
+generation are isolated in `native/build.mts`.
+
+When opted in, the Go bridge handles module resolution, configuration mutation,
 and shared platform policy. Its `onBuildComplete` hook invokes the packaged
 `adapter-vercel-<platform>-<arch>` executable and waits for completion while
 Next.js's temporary traced assets still exist.
@@ -34,12 +44,15 @@ readable for diagnostics.
 A bounded worker pool handles static copying and function generation. Public
 assets precede static assets, and prerenders follow their parent functions.
 Routing and configuration merge order are preserved. Unsupported protocol or
-runtime values fail the build. The shipped adapter has no JavaScript output
-generator fallback.
+runtime values fail the build. Opted-in Go failures are reported directly; they do not silently retry the
+TypeScript generator. Unsetting the opt-in restores the existing TypeScript
+path for subsequent builds.
 
 ## Diagnostics
 
-`NEXT_NATIVE_BUILD_TIMINGS=1` emits adapter timings to build logs.
+`NEXT_USE_GO_BUILDER=1` enables the Go path. The diagnostics below apply only
+to that opted-in implementation. `NEXT_NATIVE_BUILD_TIMINGS=1` emits adapter
+timings to build logs.
 `NEXT_ADAPTER_GO_PROFILE=1` adds phase timings, allocation counts, CPU settings,
 and a labeled Go CPU profile. Profiles are emitted as indexed
 `[adapter-cpu-profile]` base64 chunks. Profiling adds sampling and flush overhead
@@ -66,7 +79,9 @@ pnpm --filter @next-community/adapter-vercel build
 pnpm --filter @next-community/adapter-vercel test
 ```
 
-The former JavaScript output generator is an immutable, test-only dependency.
+The TypeScript implementation and its existing tests remain the default path.
+Parity tests use the maintained TypeScript implementation directly as the
+reference for Go, bypassing the public selection entrypoint.
 Behavioral tests invoke Go helpers through a test executable built with
 `go test -c`; those operations are absent from the production binary.
 Full-output comparisons load the reference afresh for each configuration.

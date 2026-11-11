@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { NextAdapter } from 'next';
 import { expect, it } from 'vitest';
-import { loadReferenceAdapter } from '../test/reference-adapter';
+import { loadReferenceAdapter } from '../../test/reference-adapter';
 
 const require = createRequire(import.meta.url);
 const { defaultConfig } = require('next/dist/server/config-shared');
@@ -30,7 +30,7 @@ async function fixture(
       return file;
     };
     await fs.symlink(
-      path.resolve(__dirname, '../node_modules'),
+      path.resolve(__dirname, '../../node_modules'),
       path.join(root, 'node_modules')
     );
     await write('package.json', JSON.stringify({ engines: { node: '22.x' } }));
@@ -128,7 +128,7 @@ async function fixture(
         await reference.onBuildComplete(ctx);
         const expected = await snapshot();
         await fs.rm(path.join(ctx.distDir, 'output'), { recursive: true });
-        await require('../dist/index.js').onBuildComplete(goCtx);
+        await require('../../dist/go/index.js').onBuildComplete(goCtx);
         const actual = await snapshot();
         expect(actual).toEqual(expected);
         return actual.files;

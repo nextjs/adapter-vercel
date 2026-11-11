@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 import type { NextConfig } from 'next';
 import { makeRe } from 'picomatch';
 
@@ -29,4 +31,14 @@ export function getImagesConfig(config: NextConfig) {
     contentSecurityPolicy: images.contentSecurityPolicy,
     contentDispositionType: images.contentDispositionType,
   };
+}
+
+const matchOperatorsRegex = /[|\\{}()[\]^$+*?.-]/g;
+
+export function escapeStringRegexp(str: string): string {
+  return str.replace(matchOperatorsRegex, '\\$&');
+}
+
+export function sha256(input: string | Buffer): string {
+  return crypto.createHash('sha256').update(input).digest('hex');
 }

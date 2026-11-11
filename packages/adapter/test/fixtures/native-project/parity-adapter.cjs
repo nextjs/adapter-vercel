@@ -7,7 +7,7 @@ const packageDir =
 const { loadReferenceAdapter } = require(
   path.join(packageDir, 'test/reference-adapter.cjs')
 );
-const go = require(path.join(packageDir, 'dist/index.js'));
+const go = require(path.join(packageDir, 'dist/go/index.js'));
 
 async function tree(root) {
   const result = {};
