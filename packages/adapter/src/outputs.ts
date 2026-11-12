@@ -1045,6 +1045,8 @@ export async function handleMiddleware(
     });
   } else if (output.runtime === 'edge') {
     await handleEdgeOutputs([output], ctx);
+  } else if (output.runtime === 'go') {
+    // Executable packaging is shared with Go route outputs in handleGoOutputs.
   } else {
     throw new Error(`Invalid middleware output ${JSON.stringify(output)}`);
   }
