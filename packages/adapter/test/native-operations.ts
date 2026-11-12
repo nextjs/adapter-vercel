@@ -66,6 +66,8 @@ async function context(options: Record<string, any>) {
     repoRoot: options.repoRoot || options.projectDir || options.vercelOutputDir,
     nextVersion: options.nextVersion || '16.4.5',
     nodeRuntime: 'nodejs22.x',
+    disableAutomaticFetchInstrumentation:
+      options.disableAutomaticFetchInstrumentation,
     templatesDir: fileURLToPath(
       new URL('../dist/go/native-templates/', import.meta.url)
     ),

@@ -89,6 +89,44 @@ describe('handleNodeOutputs automatic fetch instrumentation', () => {
       expect(config.useWebApi).toBe(isMiddleware);
     }
   });
+
+  it('disables automatic fetch instrumentation when default tracing was injected', async () => {
+    vi.stubEnv('VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION', '');
+    const output = {
+      id: 'node-output',
+      type: AdapterOutputType.APP_ROUTE,
+      pathname: '/example',
+      sourcePage: '/example',
+      filePath: path.join(distDir, 'example.js'),
+      runtime: 'nodejs',
+      assets: {},
+      assetsHashes: {},
+      config: {},
+    } satisfies FuncOutputs[number];
+
+    for (const injected of [true, false]) {
+      const vercelOutputDir = await fs.mkdtemp(
+        path.join(projectDir, 'output-')
+      );
+      await handleNodeOutputs([output], {
+        config: {},
+        distDir,
+        repoRoot: projectDir,
+        projectDir,
+        nextVersion: '16.5.0',
+        prerenderFallbackFalseMap: {},
+        vercelOutputDir,
+        disableAutomaticFetchInstrumentation: injected,
+      });
+      const config = JSON.parse(
+        await fs.readFile(
+          path.join(vercelOutputDir, 'functions/example.func/.vc-config.json'),
+          'utf8'
+        )
+      );
+      expect(config.shouldDisableAutomaticFetchInstrumentation).toBe(injected);
+    }
+  });
 });
 
 const RSC_CONTENT_TYPE = 'text/x-component';

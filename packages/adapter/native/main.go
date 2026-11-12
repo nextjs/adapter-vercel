@@ -27,17 +27,18 @@ type request struct {
 	ProjectDir  string `json:"projectDir"`
 	NextVersion string `json:"nextVersion"`
 	// Templates are compiled from the unchanged runtime sources when the package is built.
-	TemplatesDir      string              `json:"templatesDir"`
-	NextEnvLoaderPath string              `json:"nextEnvLoaderPath,omitempty"`
-	NodeRuntime       string              `json:"nodeRuntime"`
-	Images            object              `json:"images"`
-	FunctionRules     []functionRule      `json:"functionRules"`
-	AssetOrder        map[string][]string `json:"assetOrder"`
-	WasmOrder         map[string][]string `json:"wasmOrder"`
-	EdgeConfigJSON    string              `json:"edgeConfigJSON"`
-	AssetBindings     [][2]string         `json:"assetBindings"`
-	AssetMaps         [][]uint32          `json:"assetMaps"`
-	GoFunctions       map[string]any      `json:"goFunctions,omitempty"`
+	TemplatesDir                         string              `json:"templatesDir"`
+	NextEnvLoaderPath                    string              `json:"nextEnvLoaderPath,omitempty"`
+	NodeRuntime                          string              `json:"nodeRuntime"`
+	Images                               object              `json:"images"`
+	FunctionRules                        []functionRule      `json:"functionRules"`
+	AssetOrder                           map[string][]string `json:"assetOrder"`
+	WasmOrder                            map[string][]string `json:"wasmOrder"`
+	EdgeConfigJSON                       string              `json:"edgeConfigJSON"`
+	AssetBindings                        [][2]string         `json:"assetBindings"`
+	AssetMaps                            [][]uint32          `json:"assetMaps"`
+	GoFunctions                          map[string]any      `json:"goFunctions,omitempty"`
+	DisableAutomaticFetchInstrumentation bool                `json:"disableAutomaticFetchInstrumentation"`
 }
 
 type functionRule struct {

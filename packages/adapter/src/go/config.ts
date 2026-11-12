@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { generateToolbarScript } from '../toolbar';
+import { injectDefaultTracing } from '../tracing';
 
 export async function modifyConfig(
   config: Parameters<NonNullable<NextAdapter['modifyConfig']>>[0],
@@ -66,6 +67,13 @@ export async function modifyConfig(
     config.instrumentationClientInject.push(
       `./.vercel/adapter-toolbar-script.js`
     );
+  }
+
+  if (
+    ctx.phase === PHASE_PRODUCTION_BUILD &&
+    typeof ctx.projectDir !== 'undefined'
+  ) {
+    await injectDefaultTracing(config, ctx.projectDir);
   }
 
   return config;

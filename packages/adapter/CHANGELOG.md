@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.0.1-beta.37
+
+### Patch Changes
+
+- [#148](https://github.com/nextjs/adapter-vercel/pull/148) [`29732f3`](https://github.com/nextjs/adapter-vercel/commit/29732f309167be1e6b4aeae85a982cd858cc1269) Thanks [@kakadiadarpan](https://github.com/kakadiadarpan)! - Inject default Vercel tracing into Next.js builds that have no instrumentation file. When the build enables it, the adapter points `instrumentationInject` at the wrapper the Vercel builder prepares in `.vercel/otel/` before `next build`. Any failed check skips the inject without failing the build.
+
 ## 0.0.1-beta.36
 
 ### Patch Changes

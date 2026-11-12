@@ -183,7 +183,7 @@ func (a *adapter) nodeOutputs(outputs []any, middleware bool) {
 	if notFound == nil {
 		notFound = pagesError
 	}
-	defaults := nodeFunctionConfig{OperationType: "API", Handler: handlerRel, Runtime: a.NodeRuntime, SupportsMultiPayloads: true, SupportsResponseStreaming: true, ExperimentalAllowBundling: true, DisableFetchInstrumentation: os.Getenv("VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION") == "1", LauncherType: "Nodejs", UseWebAPI: middleware}
+	defaults := nodeFunctionConfig{OperationType: "API", Handler: handlerRel, Runtime: a.NodeRuntime, SupportsMultiPayloads: true, SupportsResponseStreaming: true, ExperimentalAllowBundling: true, DisableFetchInstrumentation: a.DisableAutomaticFetchInstrumentation || os.Getenv("VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION") == "1", LauncherType: "Nodejs", UseWebAPI: middleware}
 	defaults.Framework.Slug, defaults.Framework.Version = "nextjs", a.NextVersion
 	apiPrefix := jsonText(defaults)
 	defaults.OperationType = "PAGE"

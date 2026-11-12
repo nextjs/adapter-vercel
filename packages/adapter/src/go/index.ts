@@ -10,6 +10,7 @@ import {
 import minimatch from 'minimatch';
 import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
+import { defaultTracingWasInjected } from '../tracing';
 import { getImagesConfig } from '../utils';
 import { modifyConfig } from './config';
 import { prepareGoFunctions } from './hosted-go';
@@ -163,6 +164,9 @@ const adapter: NextAdapter = {
       }),
       images: getImagesConfig(ctx.config),
       nodeRuntime: nodeVersion.runtime,
+      disableAutomaticFetchInstrumentation: defaultTracingWasInjected(
+        ctx.config
+      ),
       nextEnvLoaderPath: nextRequire.resolve('@next/env'),
       templatesDir: path.join(__dirname, 'native-templates'),
       assetOrder: Object.fromEntries(

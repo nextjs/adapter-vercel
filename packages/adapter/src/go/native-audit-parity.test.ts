@@ -142,6 +142,69 @@ async function fixture(
   }
 }
 
+it.each([
+  { prepared: true, own: false, production: true, injected: true },
+  { prepared: true, own: true, production: true, injected: false },
+  { prepared: false, own: false, production: true, injected: false },
+  { prepared: true, own: false, production: false, injected: false },
+])(
+  'matches default tracing injection and fetch configuration: %j',
+  async (scenario) => {
+    const previous = process.env.VERCEL_DEFAULT_NEXT_TRACING_ENTRY;
+    try {
+      await fixture(async ({ ctx, write, compare }) => {
+        const entry =
+          './.vercel/otel/node_modules/@vercel/default-tracing/instrumentation.mjs';
+        process.env.VERCEL_DEFAULT_NEXT_TRACING_ENTRY = scenario.prepared
+          ? entry
+          : '';
+        await write(entry, 'export async function register() {}');
+        if (scenario.own)
+          await write('instrumentation.ts', 'export function register() {}');
+        ctx.config.outputFileTracingRoot = ctx.projectDir;
+        ctx.config.instrumentationInject = [];
+        const goConfig = structuredClone(ctx.config);
+        const phase = scenario.production
+          ? 'phase-production-build'
+          : 'phase-development-server';
+        const hookContext = {
+          projectDir: ctx.projectDir,
+          phase,
+          nextVersion: ctx.nextVersion,
+        };
+        const reference = loadReferenceAdapter();
+        if (!reference.modifyConfig) throw new Error('Missing config hook');
+        await reference.modifyConfig(ctx.config, hookContext);
+        await require('../../dist/go/index.js').modifyConfig(
+          goConfig,
+          hookContext
+        );
+        expect(goConfig).toEqual(ctx.config);
+        ctx.outputs.middleware = {
+          ...ctx.outputs.appRoutes[0],
+          type: 'MIDDLEWARE',
+          id: 'middleware',
+          pathname: '/middleware',
+          sourcePage: 'middleware',
+          config: { matchers: [] },
+        } as Context['outputs']['middleware'];
+        const files = await compare();
+        for (const name of ['api/test', 'middleware']) {
+          expect(files[`functions/${name}.func/.vc-config.json`]).toMatchObject(
+            {
+              shouldDisableAutomaticFetchInstrumentation: scenario.injected,
+            }
+          );
+        }
+      });
+    } finally {
+      if (previous === undefined)
+        delete process.env.VERCEL_DEFAULT_NEXT_TRACING_ENTRY;
+      else process.env.VERCEL_DEFAULT_NEXT_TRACING_ENTRY = previous;
+    }
+  }
+);
+
 it('matches JavaScript sourcemap stripping and preserves template-literal data', async () => {
   await fixture(async ({ ctx, write, compare }) => {
     const whitespace = [
