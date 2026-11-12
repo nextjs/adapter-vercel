@@ -332,6 +332,30 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
         await fs.readFile(path.join(distDir, 'output/config.json'), 'utf8')
       ) as { routes: RouteWithSrc[] };
       expect(normalizeRoutes(generated.routes).error).toBeNull();
+      const rscAliases = generated.routes.filter((route) =>
+        route.src?.endsWith('/\\.rsc$')
+      );
+      expect(rscAliases).toEqual([
+        {
+          src: '/base/\\.rsc$',
+          dest: '/base/index.rsc',
+          caseSensitive: true,
+          check: true,
+        },
+        {
+          src: '/base/(.+)/\\.rsc$',
+          dest: '/base/$1.rsc',
+          caseSensitive: true,
+          check: true,
+        },
+      ]);
+      // This adapter emits no legacy prefetch aliases (or prefetch outputs).
+      expect(
+        generated.routes.some((route) =>
+          route.src?.includes('/\\.prefetch\\.rsc$')
+        )
+      ).toBe(false);
+
       const rewriteIndex = generated.routes.findIndex(
         (route) => 'handle' in route && route.handle === 'rewrite'
       );

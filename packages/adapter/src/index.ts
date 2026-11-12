@@ -753,17 +753,20 @@ const myAdapter: NextAdapter = {
 
       ...convertedRewrites.afterFiles,
 
-      // ensure bad rewrites with /.rsc are fixed for App Router
+      // Normalize lowercase internal RSC rewrite destinations only. The proxy
+      // must not disagree with these aliases about transport suffix casing.
       ...(hasAppDir
         ? [
             {
               src: path.posix.join('/', config.basePath, '/\\.rsc$'),
               dest: path.posix.join('/', config.basePath, `/index.rsc`),
+              caseSensitive: true,
               check: true,
             },
             {
               src: path.posix.join('/', config.basePath, '(.+)/\\.rsc$'),
               dest: path.posix.join('/', config.basePath, '$1.rsc'),
+              caseSensitive: true,
               check: true,
             },
           ]
