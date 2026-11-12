@@ -579,3 +579,279 @@ describe('node handler basePath without x-matched-path', () => {
     expect(invocation.entry).toBe(`${basePath}-archive/route`);
   });
 });
+
+describe('node handler page lookup', () => {
+  const originalCwd = process.cwd();
+  const originalNodeEnv = process.env.NODE_ENV;
+  const OriginalRegExp = globalThis.RegExp;
+  const projectDirs: string[] = [];
+
+  afterEach(async () => {
+    globalThis.RegExp = OriginalRegExp;
+    process.chdir(originalCwd);
+
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+
+    await Promise.all(
+      projectDirs
+        .splice(0)
+        .map((projectDir) =>
+          fs.rm(projectDir, { recursive: true, force: true })
+        )
+    );
+  });
+
+  type DynamicRoute = {
+    page: string;
+    regex: string;
+    namedRegex: string;
+    routeKeys: Record<string, string>;
+  };
+  const BLOG: DynamicRoute = {
+    page: '/blog/[slug]',
+    regex: '^/blog/([^/]+?)(?:/)?$',
+    namedRegex: '^/blog/(?<nxtPslug>[^/]+?)(?:/)?$',
+    routeKeys: { nxtPslug: 'nxtPslug' },
+  };
+  const CATCH_ALL: DynamicRoute = {
+    page: '/[...all]',
+    regex: '^/(.+?)(?:/)?$',
+    namedRegex: '^/(?<nxtPall>.+?)(?:/)?$',
+    routeKeys: { nxtPall: 'nxtPall' },
+  };
+
+  // `entries` maps a page to its entry file under `.next/server`, e.g.
+  // `/blog/[slug]` -> `app/blog/[slug]/page`.
+  async function setupApp({
+    entries,
+    dynamicRoutes = [],
+    i18n,
+    prerenderFallbackFalseMap = {},
+  }: {
+    entries: Record<string, string>;
+    dynamicRoutes?: DynamicRoute[];
+    i18n?: { locales: string[]; defaultLocale: string };
+    prerenderFallbackFalseMap?: Record<string, string[]>;
+  }) {
+    const projectDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'adapter-node-handler-lookup-')
+    );
+    projectDirs.push(projectDir);
+
+    const distDir = path.join(projectDir, '.next');
+    await fs.mkdir(path.join(projectDir, 'node_modules', 'next'), {
+      recursive: true,
+    });
+
+    const appPathRoutes: Record<string, string> = {};
+    for (const [page, entry] of Object.entries(entries)) {
+      if (entry.startsWith('app/')) {
+        appPathRoutes[entry.slice('app'.length)] = page;
+      }
+      const entryFile = path.join(distDir, 'server', `${entry}.js`);
+      await fs.mkdir(path.dirname(entryFile), { recursive: true });
+      await fs.writeFile(
+        entryFile,
+        `module.exports.handler = async (req, res, ctx) => {
+          res.statusCode = 200;
+          res.end(JSON.stringify({ entry: ${JSON.stringify(entry)}, url: req.url, locale: ctx.requestMeta.locale }));
+        };`
+      );
+    }
+
+    const dynamicPages = new Set(dynamicRoutes.map((route) => route.page));
+    await fs.writeFile(
+      path.join(distDir, 'routes-manifest.json'),
+      JSON.stringify({
+        staticRoutes: Object.keys(entries)
+          .filter((page) => !dynamicPages.has(page))
+          .map((page) => ({
+            page,
+            regex: `^${page}(?:/)?$`,
+            namedRegex: `^${page}(?:/)?$`,
+            routeKeys: {},
+          })),
+        dynamicRoutes,
+        i18n,
+      })
+    );
+    await fs.writeFile(
+      path.join(distDir, 'app-path-routes-manifest.json'),
+      JSON.stringify(appPathRoutes)
+    );
+    await fs.writeFile(
+      path.join(projectDir, 'node_modules', 'next', 'package.json'),
+      JSON.stringify({ name: 'next', main: 'setup-node-env.js' })
+    );
+    await fs.writeFile(
+      path.join(projectDir, 'node_modules', 'next', 'setup-node-env.js'),
+      ''
+    );
+
+    const launcherPath = path.join(projectDir, 'launcher.cjs');
+    await fs.writeFile(
+      launcherPath,
+      getHandlerSource({
+        projectRelativeDistDir: '.next',
+        prerenderFallbackFalseMap,
+        nextConfig: {},
+      })
+    );
+
+    const launcher = require(launcherPath) as LauncherModule;
+
+    return async function invoke(
+      matchedPath: string
+    ): Promise<{ entry: string; url: string; locale?: string }> {
+      const response = {
+        statusCode: 0,
+        body: undefined as string | undefined,
+        setHeader() {},
+        end(body?: string) {
+          this.body = body;
+        },
+      };
+
+      await launcher(
+        {
+          url: '/requested',
+          method: 'GET',
+          headers: { host: 'example.test', 'x-matched-path': matchedPath },
+        },
+        response,
+        {}
+      );
+
+      expect(response.statusCode).toBe(200);
+      if (response.body === undefined) {
+        throw new Error('The entry stub did not write a response body.');
+      }
+      return JSON.parse(response.body);
+    };
+  }
+
+  it('requires the page that the matched path names', async () => {
+    const invoke = await setupApp({
+      entries: {
+        '/about': 'app/about/page',
+        '/api/hello': 'pages/api/hello',
+        '/blog/[slug]': 'app/blog/[slug]/page',
+      },
+      dynamicRoutes: [BLOG],
+    });
+
+    expect((await invoke('/about')).entry).toBe('app/about/page');
+    expect((await invoke('/about.rsc')).entry).toBe('app/about/page');
+    expect((await invoke('/api/hello')).entry).toBe('pages/api/hello');
+    // The route itself is not a path of the route: no captures are added.
+    expect(await invoke('/blog/[slug]')).toMatchObject({
+      entry: 'app/blog/[slug]/page',
+      url: '/requested',
+    });
+  });
+
+  it('matches a path against the dynamic routes in order', async () => {
+    const invoke = await setupApp({
+      entries: {
+        '/blog/[slug]': 'app/blog/[slug]/page',
+        '/[...all]': 'app/[...all]/page',
+      },
+      dynamicRoutes: [BLOG, CATCH_ALL],
+    });
+
+    expect(await invoke('/blog/hello')).toMatchObject({
+      entry: 'app/blog/[slug]/page',
+      url: '/requested?nxtPslug=hello',
+    });
+    expect(await invoke('/blog/hello/world')).toMatchObject({
+      entry: 'app/[...all]/page',
+      url: '/requested?nxtPall=blog%2Fhello%2Fworld',
+    });
+  });
+
+  it('resolves /index to the page /', async () => {
+    const invoke = await setupApp({
+      entries: { '/': 'app/page', '/[...all]': 'app/[...all]/page' },
+      dynamicRoutes: [CATCH_ALL],
+    });
+
+    expect(await invoke('/index')).toMatchObject({
+      entry: 'app/page',
+      url: '/requested',
+    });
+    expect((await invoke('/index.rsc')).entry).toBe('app/page');
+    expect((await invoke('/')).entry).toBe('app/page');
+  });
+
+  it('matches a static route only by its exact page', async () => {
+    const invoke = await setupApp({
+      entries: { '/a.b': 'app/a.b/page', '/[...all]': 'app/[...all]/page' },
+      dynamicRoutes: [CATCH_ALL],
+    });
+
+    expect((await invoke('/a.b')).entry).toBe('app/a.b/page');
+    expect((await invoke('/aXb')).entry).toBe('app/[...all]/page');
+    expect((await invoke('/a.b/c')).entry).toBe('app/[...all]/page');
+  });
+
+  it('skips a fallback: false route for a path that was not prerendered', async () => {
+    const invoke = await setupApp({
+      entries: {
+        '/blog/[slug]': 'pages/blog/[slug]',
+        '/[...all]': 'pages/[...all]',
+      },
+      dynamicRoutes: [BLOG, CATCH_ALL],
+      i18n: { locales: ['en', 'fr'], defaultLocale: 'en' },
+      prerenderFallbackFalseMap: {
+        '/blog/[slug]': ['/blog/a', '/fr/blog/b'],
+      },
+    });
+
+    expect((await invoke('/blog/a')).entry).toBe('pages/blog/[slug]');
+    expect(await invoke('/fr/blog/b')).toMatchObject({
+      entry: 'pages/blog/[slug]',
+      locale: 'fr',
+    });
+    expect((await invoke('/blog/b')).entry).toBe('pages/[...all]');
+    expect(await invoke('/fr/blog/zzz')).toMatchObject({
+      entry: 'pages/[...all]',
+      locale: 'fr',
+    });
+  });
+
+  it('builds a RegExp only for a dynamic route that a request tests', async () => {
+    let constructed = 0;
+    globalThis.RegExp = new Proxy(OriginalRegExp, {
+      construct(target, args: ConstructorParameters<RegExpConstructor>) {
+        constructed++;
+        return new target(...args);
+      },
+    });
+
+    const invoke = await setupApp({
+      entries: {
+        '/': 'app/page',
+        '/about': 'app/about/page',
+        '/blog/[slug]': 'app/blog/[slug]/page',
+        '/[...all]': 'app/[...all]/page',
+      },
+      dynamicRoutes: [BLOG, CATCH_ALL],
+    });
+    expect(constructed).toBe(0);
+
+    await invoke('/about');
+    await invoke('/blog/[slug]');
+    expect(constructed).toBe(0);
+
+    await invoke('/blog/hello');
+    expect(constructed).toBe(1);
+
+    await invoke('/blog/hello');
+    await invoke('/other');
+    expect(constructed).toBe(2);
+  });
+});
