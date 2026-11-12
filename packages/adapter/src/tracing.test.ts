@@ -51,7 +51,7 @@ describe('injectDefaultTracing', () => {
   // Lays out .vercel/otel/ and names the entry the way the Vercel builder
   // prepares them before `next build`.
   async function prepareTree(projectDir: string): Promise<void> {
-    vi.stubEnv('NEXT_ADAPTER_VERCEL_TRACING_ENTRY', INJECT_ENTRY);
+    vi.stubEnv('VERCEL_DEFAULT_NEXT_TRACING_ENTRY', INJECT_ENTRY);
     const modules = path.join(otelRoot(projectDir), 'node_modules');
     await writePackage(
       path.join(modules, '@vercel', 'otel'),
@@ -178,7 +178,7 @@ describe('injectDefaultTracing', () => {
           'export async function register() {}\n'
         );
       }
-      vi.stubEnv('NEXT_ADAPTER_VERCEL_TRACING_ENTRY', entry);
+      vi.stubEnv('VERCEL_DEFAULT_NEXT_TRACING_ENTRY', entry);
 
       const tracingConfig = await inject(projectDir);
       const viaModifyConfig = await modifyConfig(projectDir);
@@ -198,7 +198,7 @@ describe('injectDefaultTracing', () => {
       path.join(projectDir, entry),
       'export async function register() {}\n'
     );
-    vi.stubEnv('NEXT_ADAPTER_VERCEL_TRACING_ENTRY', entry);
+    vi.stubEnv('VERCEL_DEFAULT_NEXT_TRACING_ENTRY', entry);
 
     const tracingConfig = await inject(projectDir);
 
@@ -344,7 +344,7 @@ describe('injectDefaultTracing', () => {
 
 describe('defaultTracingWasInjected', () => {
   beforeEach(() => {
-    vi.stubEnv('NEXT_ADAPTER_VERCEL_TRACING_ENTRY', INJECT_ENTRY);
+    vi.stubEnv('VERCEL_DEFAULT_NEXT_TRACING_ENTRY', INJECT_ENTRY);
   });
 
   afterEach(() => {
@@ -396,7 +396,7 @@ describe('defaultTracingWasInjected', () => {
 
   it('is false when the builder named no entry', async () => {
     const distDir = await distDirWith(true);
-    vi.stubEnv('NEXT_ADAPTER_VERCEL_TRACING_ENTRY', '');
+    vi.stubEnv('VERCEL_DEFAULT_NEXT_TRACING_ENTRY', '');
     await expect(
       defaultTracingWasInjected(
         { instrumentationInject: [INJECT_ENTRY] },

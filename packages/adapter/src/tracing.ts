@@ -6,14 +6,14 @@ import { debug } from '@vercel/build-utils';
 // default tracing, checks the build image and the project's
 // @opentelemetry/api, and only then writes a wrapper next to a copy of
 // @vercel/otel under .vercel/otel/. It names the wrapper's entry in
-// NEXT_ADAPTER_VERCEL_TRACING_ENTRY only when it prepared it in this build, so a
+// VERCEL_DEFAULT_NEXT_TRACING_ENTRY only when it prepared it in this build, so a
 // file the build command writes or restores later isn't injected.
 const ENTRY_DIR = './.vercel/otel/';
 
 // Entries outside .vercel/otel/ are ignored, so a stray env var can't inject
 // an arbitrary module.
 function preparedEntry(): string | undefined {
-  const entry = process.env.NEXT_ADAPTER_VERCEL_TRACING_ENTRY;
+  const entry = process.env.VERCEL_DEFAULT_NEXT_TRACING_ENTRY;
   if (!entry?.startsWith(ENTRY_DIR) || entry.split('/').includes('..')) {
     return undefined;
   }
