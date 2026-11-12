@@ -3,6 +3,14 @@
   "version": "0.0.1-beta.37",
   "type": "commonjs",
   "main": "dist/index.js",
+  "bin": {
+    "adapter-vercel-linux-x64": "dist/go/bin/adapter-vercel-linux-x64",
+    "adapter-vercel-linux-arm64": "dist/go/bin/adapter-vercel-linux-arm64",
+    "adapter-vercel-darwin-x64": "dist/go/bin/adapter-vercel-darwin-x64",
+    "adapter-vercel-darwin-arm64": "dist/go/bin/adapter-vercel-darwin-arm64",
+    "adapter-vercel-win32-x64": "dist/go/bin/adapter-vercel-win32-x64.exe",
+    "adapter-vercel-win32-arm64": "dist/go/bin/adapter-vercel-win32-arm64.exe"
+  },
   "files": [
     "dist"
   ],
@@ -10,13 +18,14 @@
     "url": "https://github.com/nextjs/adapter-vercel"
   },
   "scripts": {
-    "build": "rm -rf dist; tsc --noEmit && node --experimental-transform-types build.mts",
-    "test": "vitest run"
+    "build": "tsc --noEmit && node --experimental-transform-types build.mts",
+    "test": "pnpm run build && node test/build-native-tests.mjs && vitest run && cd native && go test -race ./..."
   },
   "devDependencies": {
     "@types/bytes": "3.1.1",
     "@types/convert-source-map": "1.5.2",
     "@types/fs-extra": "8.0.0",
+    "@types/minimatch": "3.0.3",
     "@types/node": "20.6.5",
     "@types/picomatch": "2.3.3",
     "@types/webpack-sources": "3.2.0",
@@ -27,8 +36,11 @@
     "convert-source-map": "1.8.0",
     "esbuild": "0.25.10",
     "fs-extra": "11.2.0",
+    "minimatch": "3.1.2",
     "next": "16.5.0-canary.40",
     "picomatch": "4.0.1",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
     "source-map": "0.7.4",
     "vitest": "3.2.7",
     "webpack-sources": "3.2.3"
