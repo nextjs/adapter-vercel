@@ -117,7 +117,7 @@ const myAdapter: NextAdapter = {
     // The injected @vercel/otel instruments fetch, so turn off the runtime's
     // own fetch spans for this build's Node.js functions to avoid duplicates.
     const disableAutomaticFetchInstrumentation =
-      await defaultTracingWasInjected(config, distDir);
+      defaultTracingWasInjected(config);
 
     const escapedBuildId = escapeStringRegexp(buildId);
 

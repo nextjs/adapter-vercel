@@ -69,26 +69,22 @@ export async function injectDefaultTracing(
 }
 
 /**
- * Whether the build actually compiled the default tracing inject. Next.js
- * versions without `instrumentationInject` ignore the entry, so the config
- * alone isn't enough: the compiled server instrumentation entry must exist.
- * When it does, @vercel/otel instruments fetch, so the runtime's own fetch
- * spans would duplicate them.
+ * Whether `modifyConfig` added the builder's wrapper to `instrumentationInject`.
+ * The builder names an entry only for Next.js versions that compile it, but
+ * the adapter can still skip it, for example for a project with its own
+ * instrumentation file. When it was added, @vercel/otel instruments fetch, so
+ * the runtime's own fetch spans would duplicate them.
  */
-export async function defaultTracingWasInjected(
-  config: object,
-  distDir: string
-): Promise<boolean> {
+export function defaultTracingWasInjected(config: object): boolean {
   // Next.js types before the field existed don't declare it.
   const entries =
     'instrumentationInject' in config
       ? config.instrumentationInject
       : undefined;
   const entry = preparedEntry();
-  if (!entry || !Array.isArray(entries) || !entries.includes(entry)) {
-    return false;
-  }
-  return isFile(path.join(distDir, 'server', 'instrumentation.js'));
+  return (
+    entry !== undefined && Array.isArray(entries) && entries.includes(entry)
+  );
 }
 
 // Only printed with VERCEL_BUILDER_DEBUG=1, so customer build logs stay quiet.

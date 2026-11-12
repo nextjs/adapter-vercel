@@ -351,58 +351,25 @@ describe('defaultTracingWasInjected', () => {
     vi.unstubAllEnvs();
   });
 
-  async function distDirWith(instrumentation: boolean): Promise<string> {
-    const distDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adapter-dist-'));
-    await fs.mkdir(path.join(distDir, 'server'), { recursive: true });
-    if (instrumentation) {
-      await fs.writeFile(
-        path.join(distDir, 'server', 'instrumentation.js'),
-        'module.exports = {}\n'
-      );
-    }
-    return distDir;
-  }
-
-  it('is true when the entry is set and Next.js compiled it', async () => {
-    const distDir = await distDirWith(true);
-    await expect(
-      defaultTracingWasInjected(
-        { instrumentationInject: [INJECT_ENTRY] },
-        distDir
-      )
-    ).resolves.toBe(true);
-    await fs.rm(distDir, { recursive: true, force: true });
+  it('is true when the config has the prepared entry', () => {
+    expect(
+      defaultTracingWasInjected({ instrumentationInject: [INJECT_ENTRY] })
+    ).toBe(true);
   });
 
-  it('is false when Next.js ignored the entry and compiled no instrumentation', async () => {
-    const distDir = await distDirWith(false);
-    await expect(
-      defaultTracingWasInjected(
-        { instrumentationInject: [INJECT_ENTRY] },
-        distDir
-      )
-    ).resolves.toBe(false);
-    await fs.rm(distDir, { recursive: true, force: true });
+  // The builder names the entry before `next build`, so it is set even when
+  // the adapter skips, for example for a project with its own instrumentation.
+  it('is false when the adapter did not add the entry', () => {
+    expect(defaultTracingWasInjected({ instrumentationInject: [] })).toBe(
+      false
+    );
+    expect(defaultTracingWasInjected({})).toBe(false);
   });
 
-  it('is false when the adapter did not inject', async () => {
-    const distDir = await distDirWith(true);
-    await expect(
-      defaultTracingWasInjected({ instrumentationInject: [] }, distDir)
-    ).resolves.toBe(false);
-    await expect(defaultTracingWasInjected({}, distDir)).resolves.toBe(false);
-    await fs.rm(distDir, { recursive: true, force: true });
-  });
-
-  it('is false when the builder named no entry', async () => {
-    const distDir = await distDirWith(true);
+  it('is false when the builder named no entry', () => {
     vi.stubEnv('VERCEL_DEFAULT_NEXT_TRACING_ENTRY', '');
-    await expect(
-      defaultTracingWasInjected(
-        { instrumentationInject: [INJECT_ENTRY] },
-        distDir
-      )
-    ).resolves.toBe(false);
-    await fs.rm(distDir, { recursive: true, force: true });
+    expect(
+      defaultTracingWasInjected({ instrumentationInject: [INJECT_ENTRY] })
+    ).toBe(false);
   });
 });
