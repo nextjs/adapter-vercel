@@ -388,8 +388,23 @@ it.each([true, false])(
       await write('pages/main.ts');
       await write('pages/404.ts');
       await write('pages/api/test.ts');
+      // Shared hashes remain live until each concurrent output serializes.
+      // Admit the API after the first sixteen pages: a completed page has
+      // then added its not-found hashes, independent of filesystem timing.
+      const pages = await Promise.all(
+        Array.from({ length: 16 }, async (_, index) => {
+          await write(`pages/main-${index}.ts`);
+          return {
+            ...page,
+            id: `page-${index}`,
+            pathname: `/main-${index}`,
+            sourcePage: `/main-${index}`,
+            filePath: await write(`.next/server/main-${index}.js`),
+          };
+        })
+      );
       ctx.outputs.pages = [
-        page,
+        ...pages,
         {
           ...page,
           id: '404',
