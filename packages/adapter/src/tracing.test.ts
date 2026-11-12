@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import adapter from './index';
 import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
 
@@ -161,11 +161,23 @@ describe('injectDefaultTracing', () => {
   it.each([
     ['unset', undefined],
     ['empty', ''],
-    ['another entry', './.vercel/otel/instrumentation.mjs'],
+    ['an entry for a missing file', './.vercel/otel/instrumentation.mjs'],
+    ['outside .vercel/otel', './lib/instrumentation.mjs'],
+    ['escaping .vercel/otel', './.vercel/otel/../../lib/instrumentation.mjs'],
   ])(
     'does not inject a wrapper the builder did not name when the entry is %s',
-    async (_label, entry) => {
+    async (label, entry) => {
       const projectDir = await readyProject();
+      // Only the entry's location should stop these, not a missing file.
+      if (entry && label !== 'an entry for a missing file') {
+        await fs.mkdir(path.dirname(path.join(projectDir, entry)), {
+          recursive: true,
+        });
+        await fs.writeFile(
+          path.join(projectDir, entry),
+          'export async function register() {}\n'
+        );
+      }
       vi.stubEnv('VERCEL_DEFAULT_TRACING_ENTRY', entry);
 
       const tracingConfig = await inject(projectDir);
@@ -175,6 +187,23 @@ describe('injectDefaultTracing', () => {
       expect(viaModifyConfig.instrumentationInject).toBeUndefined();
     }
   );
+
+  it('injects whatever entry the builder names under .vercel/otel', async () => {
+    const projectDir = await readyProject();
+    const entry = './.vercel/otel/node_modules/@vercel/other/wrapper.mjs';
+    await fs.mkdir(path.dirname(path.join(projectDir, entry)), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(projectDir, entry),
+      'export async function register() {}\n'
+    );
+    vi.stubEnv('VERCEL_DEFAULT_TRACING_ENTRY', entry);
+
+    const tracingConfig = await inject(projectDir);
+
+    expect(tracingConfig.instrumentationInject).toEqual([entry]);
+  });
 
   it('does not inject when the project has an instrumentation file', async () => {
     const projectDir = await readyProject();
@@ -314,6 +343,14 @@ describe('injectDefaultTracing', () => {
 });
 
 describe('defaultTracingWasInjected', () => {
+  beforeEach(() => {
+    vi.stubEnv('VERCEL_DEFAULT_TRACING_ENTRY', INJECT_ENTRY);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   async function distDirWith(instrumentation: boolean): Promise<string> {
     const distDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adapter-dist-'));
     await fs.mkdir(path.join(distDir, 'server'), { recursive: true });
@@ -354,6 +391,18 @@ describe('defaultTracingWasInjected', () => {
       defaultTracingWasInjected({ instrumentationInject: [] }, distDir)
     ).resolves.toBe(false);
     await expect(defaultTracingWasInjected({}, distDir)).resolves.toBe(false);
+    await fs.rm(distDir, { recursive: true, force: true });
+  });
+
+  it('is false when the builder named no entry', async () => {
+    const distDir = await distDirWith(true);
+    vi.stubEnv('VERCEL_DEFAULT_TRACING_ENTRY', '');
+    await expect(
+      defaultTracingWasInjected(
+        { instrumentationInject: [INJECT_ENTRY] },
+        distDir
+      )
+    ).resolves.toBe(false);
     await fs.rm(distDir, { recursive: true, force: true });
   });
 });

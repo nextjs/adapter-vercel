@@ -4,16 +4,21 @@ import { debug } from '@vercel/build-utils';
 
 // Before `next build`, the Vercel builder decides whether the deployment gets
 // default tracing, checks the build image and the project's
-// @opentelemetry/api, and only then writes this wrapper next to a copy of
-// @vercel/otel. It names the entry in VERCEL_DEFAULT_TRACING_ENTRY only when
-// it prepared the wrapper in this build, so a file the build command writes
-// or restores later isn't injected. It sits in node_modules so ESLint and
-// Prettier skip it by default, inside a package folder because Node 20.20 and
-// 22 run out of memory formatting an error whose stack has a frame directly in
-// node_modules/. .mjs, so webpack parses it as ESM even when the app's
-// package.json sets "type": "commonjs".
-const INJECT_ENTRY =
-  './.vercel/otel/node_modules/@vercel/default-tracing/instrumentation.mjs';
+// @opentelemetry/api, and only then writes a wrapper next to a copy of
+// @vercel/otel under .vercel/otel/. It names the wrapper's entry in
+// VERCEL_DEFAULT_TRACING_ENTRY only when it prepared it in this build, so a
+// file the build command writes or restores later isn't injected.
+const ENTRY_DIR = './.vercel/otel/';
+
+// Entries outside .vercel/otel/ are ignored, so a stray env var can't inject
+// an arbitrary module.
+function preparedEntry(): string | undefined {
+  const entry = process.env.VERCEL_DEFAULT_TRACING_ENTRY;
+  if (!entry?.startsWith(ENTRY_DIR) || entry.split('/').includes('..')) {
+    return undefined;
+  }
+  return entry;
+}
 
 type TracingConfig = {
   pageExtensions: readonly string[];
@@ -33,7 +38,8 @@ export async function injectDefaultTracing(
   projectDir: string
 ): Promise<void> {
   try {
-    if (process.env.VERCEL_DEFAULT_TRACING_ENTRY !== INJECT_ENTRY) {
+    const entry = preparedEntry();
+    if (!entry) {
       skip('the builder did not prepare .vercel/otel');
       return;
     }
@@ -43,18 +49,18 @@ export async function injectDefaultTracing(
     }
     // Another setter, such as a config wrapper, already injected instrumentation.
     // It may register its own provider, so don't add a second one.
-    if (config.instrumentationInject?.some((entry) => entry !== INJECT_ENTRY)) {
+    if (config.instrumentationInject?.some((other) => other !== entry)) {
       skip('instrumentationInject already has other entries');
       return;
     }
-    if (!(await isFile(path.join(projectDir, INJECT_ENTRY)))) {
+    if (!(await isFile(path.join(projectDir, entry)))) {
       skip('the prepared wrapper is missing');
       return;
     }
 
     config.instrumentationInject ??= [];
-    if (!config.instrumentationInject.includes(INJECT_ENTRY)) {
-      config.instrumentationInject.push(INJECT_ENTRY);
+    if (!config.instrumentationInject.includes(entry)) {
+      config.instrumentationInject.push(entry);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -78,7 +84,10 @@ export async function defaultTracingWasInjected(
     'instrumentationInject' in config
       ? config.instrumentationInject
       : undefined;
-  if (!Array.isArray(entries) || !entries.includes(INJECT_ENTRY)) return false;
+  const entry = preparedEntry();
+  if (!entry || !Array.isArray(entries) || !entries.includes(entry)) {
+    return false;
+  }
   return isFile(path.join(distDir, 'server', 'instrumentation.js'));
 }
 
