@@ -463,6 +463,10 @@ export async function handleNodeOutputs(
     path.posix.relative(repoRoot, distDir),
     'routes-manifest.json'
   );
+  const prerenderManifestRelativePath = path.posix.join(
+    path.posix.relative(repoRoot, distDir),
+    'prerender-manifest.json'
+  );
   const envFiles = await getProjectEnvFiles(projectDir);
   const hasProjectEnvFiles = envFiles.length > 0;
   const envFilePathMap: Record<string, string> = {};
@@ -543,6 +547,14 @@ export async function handleNodeOutputs(
       }
       files[path.posix.relative(repoRoot, output.filePath)] =
         path.posix.relative(repoRoot, output.filePath);
+
+      // The proxy does not read the prerender manifest: Next.js gives its
+      // incremental cache an empty one. It is the largest manifest of an app
+      // with many prerendered paths.
+      if (isMiddleware) {
+        delete files[prerenderManifestRelativePath];
+        delete filesHashes?.[prerenderManifestRelativePath];
+      }
       if (hasProjectEnvFiles) {
         Object.assign(files, envFilePathMap);
         if (filesHashes) {
