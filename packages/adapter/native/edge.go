@@ -8,25 +8,44 @@ import (
 )
 
 var jsExtension = regexp.MustCompile(`\.(m|c)?js$`)
-var inlineMapComment = regexp.MustCompile(`(?m)^\s*?/[/*][@#]\s+?sourceMappingURL=data:(?:((?:application|text)/json)(?:;charset=[^;,]*)?)?(?:;(base64))?,([^\n]*)$`)
+
+const jsWhitespaceClass = `[\t\n\v\f\r \x{00a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]`
+
+// JavaScript's multiline anchors and dot recognize four line terminators.
+// Keep the preceding terminator as a capture instead of consuming the next
+// line's prefix, so adjacent comments are handled independently.
+var inlineMapComment = regexp.MustCompile(`(^|[\r\n\x{2028}\x{2029}])` + jsWhitespaceClass + `*?/[/*][@#]` + jsWhitespaceClass + `+?sourceMappingURL=data:(?:((?:application|text)/json)(?:;charset=[^;,]*)?)?(?:;(base64))?,([^\r\n\x{2028}\x{2029}]*)`)
 var base64Data = regexp.MustCompile(`^[a-zA-Z0-9+=/]+$`)
+
+func isJSWhitespace(r rune) bool {
+	switch r {
+	case '\t', '\n', '\v', '\f', '\r', ' ', '\u00a0', '\u1680', '\u2028', '\u2029', '\u202f', '\u205f', '\u3000', '\ufeff':
+		return true
+	default:
+		return r >= '\u2000' && r <= '\u200a'
+	}
+}
 
 func stripInlineMaps(source string) string {
 	if !strings.Contains(source, "sourceMappingURL=data:") {
 		return source
 	}
-	return inlineMapComment.ReplaceAllStringFunc(source, func(comment string) string {
-		m := inlineMapComment.FindStringSubmatch(comment)
-		if len(m) < 4 || m[2] != "base64" {
-			return comment
+	for _, match := range inlineMapComment.FindAllStringSubmatch(source, -1) {
+		if match[3] != "base64" {
+			continue
 		}
-		data := strings.Join(strings.Fields(m[3]), "")
+		// Go's Unicode whitespace includes U+0085, which JavaScript preserves.
+		// Removing it would turn template-literal data into an apparent map.
+		data := strings.Join(strings.FieldsFunc(match[4], isJSWhitespace), "")
 		data = strings.ReplaceAll(data, "*/", "")
 		if !base64Data.MatchString(data) {
-			return comment
+			continue
 		}
-		return ""
-	})
+		// Match the reference's matchAll followed by String.replace for each
+		// original match, including repeated identical comment text.
+		source = strings.Replace(source, match[0][len(match[1]):], "", 1)
+	}
+	return source
 }
 func orderedKeys(m object, keys []string) []string {
 	if keys != nil {

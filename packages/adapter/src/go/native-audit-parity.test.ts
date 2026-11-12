@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import { runInNewContext } from 'node:vm';
 import type { NextAdapter } from 'next';
 import { expect, it } from 'vitest';
 import { loadReferenceAdapter } from '../../test/reference-adapter';
@@ -140,6 +141,59 @@ async function fixture(
     await fs.rm(root, { recursive: true, force: true });
   }
 }
+
+it('matches JavaScript sourcemap stripping and preserves template-literal data', async () => {
+  await fixture(async ({ ctx, write, compare }) => {
+    const whitespace = [
+      '\t',
+      '\v',
+      '\f',
+      ' ',
+      '\u00a0',
+      '\u1680',
+      ...Array.from({ length: 11 }, (_, i) => String.fromCharCode(0x2000 + i)),
+      '\u202f',
+      '\u205f',
+      '\u3000',
+      '\ufeff',
+    ];
+    const nonWhitespace = ['\u0085', '\u180e', '\u200b'];
+    const map = '//# sourceMappingURL=data:application/json;base64,AAAA';
+    const templateMap = map.replace('AAAA', 'BBBB');
+    const comments = whitespace.map((char) => `${char}${map}${char}AAAA`);
+    const templates = nonWhitespace.map(
+      (char, i) => `globalThis.value${i} = \`\n${templateMap}${char}BBBB\n\`;`
+    );
+    const lines = ['\n', '\r\n', '\r', '\u2028', '\u2029'];
+    const source = [
+      ...comments,
+      ...templates,
+      ...lines.map(
+        (separator) =>
+          `globalThis.before = true;${separator}${map}${separator}${map}${separator}globalThis.after = true;`
+      ),
+    ].join('\n');
+    const output = ctx.outputs.appRoutes[0];
+    Object.assign(output, {
+      runtime: 'edge',
+      filePath: await write('.next/server/edge.js', source),
+    });
+    const files = await compare();
+    const handler = (
+      files['functions/api/test.func/index.js'] as Buffer
+    ).toString('utf8');
+    const globals: Record<string, unknown> = {};
+    runInNewContext(
+      handler.slice(0, handler.indexOf('export default')),
+      globals
+    );
+    for (const [i, char] of nonWhitespace.entries()) {
+      expect(globals[`value${i}`]).toBe(`\n${templateMap}${char}BBBB\n`);
+    }
+    expect(globals.before).toBe(true);
+    expect(globals.after).toBe(true);
+  });
+});
 
 it.skipIf(process.platform === 'win32')(
   'preserves copied file and directory permissions',
