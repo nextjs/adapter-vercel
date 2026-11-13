@@ -14,6 +14,7 @@ import {
   handleStaticOutputs,
 } from './outputs';
 import {
+  blockErrorPageRoutes,
   denormalizeNextDataRoutes,
   extractHeaders,
   extractOnMatchRoutes,
@@ -592,6 +593,10 @@ const myAdapter: NextAdapter = {
               continue: true,
             },
           ]),
+
+      // 404 if the reserved /_error page or its locale variants are
+      // requested literally, like `next start` does
+      ...blockErrorPageRoutes(config, notFoundPath),
 
       // denormalize _next/data if middleware + pages
       ...denormalizeNextDataRoutes(
