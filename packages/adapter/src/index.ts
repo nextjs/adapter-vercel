@@ -22,6 +22,7 @@ import {
   normalizeNextDataRoutes,
   normalizeRewrites,
   removeGoRouteParams,
+  wrapMiddlewareRoutes,
 } from './routing';
 import { generateToolbarScript } from './toolbar';
 import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
@@ -531,7 +532,12 @@ const myAdapter: NextAdapter = {
       // server actions name meta routes - placeholder for server actions
 
       // middleware route - placeholder for middleware configuration
-      ...middlewareRoutes,
+      ...wrapMiddlewareRoutes(
+        middlewareRoutes,
+        config,
+        buildId,
+        shouldHandleMiddlewareDataResolving
+      ),
 
       ...convertedRewrites.beforeFiles,
 
