@@ -524,14 +524,64 @@ export async function handleNodeOutputs(
     return relPath;
   };
 
+  const getFunctionName = (output: FuncOutputs[0]) =>
+    normalizeIndexPathname(output.pathname, config);
+
+  // Next.js emits an `X.rsc` output for every app page and route handler as a
+  // shallow copy of the `X` output (sharing its `assets` and `assetsHashes`),
+  // so both produce the exact same function. Symlink `X.rsc.func` to `X.func`
+  // instead of building and writing an identical function a second time.
+  const outputsByFunctionName = new Map<string, FuncOutputs[0]>();
+  for (const output of nodeOutputs) {
+    outputsByFunctionName.set(getFunctionName(output), output);
+  }
+  const rscSiblings = new Map<FuncOutputs[0], FuncOutputs[0]>();
+  for (const output of nodeOutputs) {
+    const functionName = getFunctionName(output);
+    if (!functionName.endsWith('.rsc')) continue;
+    const siblingName = functionName.slice(0, -'.rsc'.length);
+    const sibling = outputsByFunctionName.get(siblingName);
+    if (
+      sibling &&
+      // the sibling is written as a real directory unless it is a `.rsc`
+      // output itself, so never link to one and create a symlink chain
+      !siblingName.endsWith('.rsc') &&
+      producesSameNodeFunction(output, sibling)
+    ) {
+      rscSiblings.set(output, sibling);
+    }
+  }
+
   await Promise.all(
     nodeOutputs.map(async (output) => {
       await fsSema.acquire();
 
       const functionDir = path.join(
         functionsDir,
-        `${normalizeIndexPathname(output.pathname, config)}.func`
+        `${getFunctionName(output)}.func`
       );
+
+      const rscSibling = rscSiblings.get(output);
+      if (rscSibling) {
+        await fs.mkdir(path.dirname(functionDir), { recursive: true });
+        await fs
+          .symlink(
+            path.relative(
+              path.dirname(functionDir),
+              path.join(functionsDir, `${getFunctionName(rscSibling)}.func`)
+            ),
+            functionDir
+          )
+          .catch((err) => {
+            // we can tolerate it already existing
+            if (!(typeof err === 'object' && err && err.code === 'EEXIST')) {
+              throw err;
+            }
+          });
+        fsSema.release();
+        return;
+      }
+
       await fs.mkdir(functionDir, { recursive: true });
 
       const files: Record<string, string> = {};
@@ -654,6 +704,32 @@ export async function handleNodeOutputs(
   );
 }
 
+/**
+ * Whether two node outputs produce an identical function. Apart from these
+ * fields, the function only depends on build-wide inputs, and the pathname only
+ * matters for generated workflow routes. Keep this in sync with
+ * `handleNodeOutputs` when the function starts depending on more of the output.
+ */
+function producesSameNodeFunction(
+  a: FuncOutputs[0],
+  b: FuncOutputs[0]
+): boolean {
+  return (
+    (a.type === AdapterOutputType.APP_PAGE ||
+      a.type === AdapterOutputType.APP_ROUTE) &&
+    a.type === b.type &&
+    a.runtime === b.runtime &&
+    a.filePath === b.filePath &&
+    a.sourcePage === b.sourcePage &&
+    a.assets === b.assets &&
+    a.assetsHashes === b.assetsHashes &&
+    (a.config === b.config ||
+      JSON.stringify(a.config) === JSON.stringify(b.config)) &&
+    isGeneratedStep(a.pathname) === isGeneratedStep(b.pathname) &&
+    isGeneratedWorkflow(a.pathname) === isGeneratedWorkflow(b.pathname)
+  );
+}
+
 export async function handlePrerenderOutputs(
   prerenderOutputs: Array<AdapterOutput['PRERENDER']>,
   {
@@ -675,6 +751,32 @@ export async function handlePrerenderOutputs(
   const prerenderParentIds = new Set<string>();
   const fsSema = new Sema(16, { capacity: prerenderOutputs.length });
   const functionsDir = path.join(vercelOutputDir, 'functions');
+
+  // A parent function dir can itself be a symlink (an `X.rsc.func` deduped to
+  // `X.func` by `handleNodeOutputs`). Link prerenders to the real directory so
+  // we never create symlink chains.
+  const resolvedFunctionDirs = new Map<string, Promise<string>>();
+  const resolveFunctionDir = (functionDir: string) => {
+    let resolved = resolvedFunctionDirs.get(functionDir);
+    if (!resolved) {
+      resolved = fs.readlink(functionDir).then(
+        (target) => path.resolve(path.dirname(functionDir), target),
+        (err) => {
+          // not a symlink (or missing), use as is
+          if (
+            typeof err === 'object' &&
+            err &&
+            (err.code === 'EINVAL' || err.code === 'ENOENT')
+          ) {
+            return functionDir;
+          }
+          throw err;
+        }
+      );
+      resolvedFunctionDirs.set(functionDir, resolved);
+    }
+    return resolved;
+  };
 
   await Promise.all(
     prerenderOutputs.map(async (output) => {
@@ -725,9 +827,11 @@ export async function handlePrerenderOutputs(
         const clonedNodeOutput = Object.assign({}, parentNodeOutput);
         clonedNodeOutput.pathname = output.pathname;
 
-        const parentFunctionDir = path.join(
-          functionsDir,
-          `${normalizeIndexPathname(parentNodeOutput.pathname, config)}.func`
+        const parentFunctionDir = await resolveFunctionDir(
+          path.join(
+            functionsDir,
+            `${normalizeIndexPathname(parentNodeOutput.pathname, config)}.func`
+          )
         );
         const prerenderFunctionDir = path.join(
           functionsDir,
