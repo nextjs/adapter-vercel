@@ -139,6 +139,8 @@ const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';
 const POSTPONED_STATE =
   '46[["slug",["%%drp%%","d"]]][1,{"nav":"Doppelgänger"}]null';
 
+type PrerenderOutput = Parameters<typeof handlePrerenderOutputs>[0][number];
+
 describe('handlePrerenderOutputs', () => {
   let vercelOutputDir: string;
 
@@ -159,7 +161,7 @@ describe('handlePrerenderOutputs', () => {
 
   function makePrerenderOutput(
     fallback: AdapterOutput['PRERENDER']['fallback']
-  ): AdapterOutput['PRERENDER'] {
+  ): PrerenderOutput {
     return {
       id: 'prerender-1',
       pathname: '/blog',
@@ -191,7 +193,7 @@ describe('handlePrerenderOutputs', () => {
     ['parent-1', parentOutput],
   ]);
 
-  async function handlePrerenderOutput(output: AdapterOutput['PRERENDER']) {
+  async function handlePrerenderOutput(output: PrerenderOutput) {
     await handlePrerenderOutputs([output], {
       config: {},
       vercelOutputDir,
@@ -278,29 +280,42 @@ describe('handlePrerenderOutputs', () => {
     );
   });
 
-  describe('initialMetadata', () => {
-    async function writtenConfig(output: AdapterOutput['PRERENDER']) {
-      await handlePrerenderOutputs([output], {
-        config: {},
-        vercelOutputDir,
-        nodeOutputsParentMap,
-        rscContentType: RSC_CONTENT_TYPE,
-        varyHeader: 'rsc',
-      });
+  async function writtenConfigs(outputs: PrerenderOutput[]) {
+    await handlePrerenderOutputs(outputs, {
+      config: {},
+      vercelOutputDir,
+      nodeOutputsParentMap,
+      rscContentType: RSC_CONTENT_TYPE,
+      varyHeader: 'rsc',
+    });
 
-      return JSON.parse(
-        await fs.readFile(
-          path.join(vercelOutputDir, 'functions', 'blog.prerender-config.json'),
-          'utf8'
+    return Promise.all(
+      outputs.map(async (output) =>
+        JSON.parse(
+          await fs.readFile(
+            path.join(
+              vercelOutputDir,
+              'functions',
+              `${output.pathname.slice(1)}.prerender-config.json`
+            ),
+            'utf8'
+          )
         )
-      );
-    }
+      )
+    );
+  }
 
-    it('carries compute and htmlSize from the primary output verbatim', async () => {
+  async function writtenConfig(output: PrerenderOutput) {
+    const [config] = await writtenConfigs([output]);
+    return config;
+  }
+
+  describe('initialMetadata', () => {
+    it('carries compute and htmlSize verbatim', async () => {
       const config = await writtenConfig({
         ...makePrerenderOutput(undefined),
-        // Next.js emits the taxonomy all-or-nothing on the primary output;
-        // the adapter carries only `compute` and `htmlSize`.
+        // Each classified output supplies its own taxonomy. The adapter carries
+        // only `compute` and `htmlSize`.
         routeType: 'page',
         response: 'initial',
         compute: 'resuming',
@@ -333,11 +348,118 @@ describe('handlePrerenderOutputs', () => {
     });
 
     it('omits initialMetadata when Next.js supplied no compute', async () => {
-      // Sibling RSC/data/segment outputs and builds from older Next.js
-      // versions carry no taxonomy, and must not gain an empty object.
+      // Unclassified outputs and builds from older Next.js versions must not
+      // gain an empty metadata object.
       const config = await writtenConfig(makePrerenderOutput(undefined));
 
       expect(config).not.toHaveProperty('initialMetadata');
+    });
+  });
+
+  describe('onMiss', () => {
+    it.each([
+      {
+        name: 'complete static output',
+        response: 'complete',
+        compute: 'static',
+        onMiss: 'sync',
+      },
+      {
+        name: 'HTML with client-only pending UI',
+        response: 'initial',
+        compute: 'static',
+        onMiss: 'sync',
+      },
+      {
+        name: 'static navigation without a fallback',
+        response: 'empty',
+        compute: 'static',
+        onMiss: 'sync',
+      },
+      {
+        name: 'explicitly blocking parameter matching',
+        response: 'empty',
+        compute: 'blocking',
+        onMiss: 'sync',
+      },
+      {
+        name: 'partial HTML with server continuation',
+        response: 'initial',
+        compute: 'resuming',
+        onMiss: 'dynamic',
+      },
+      {
+        name: 'request-time rendering without initial content',
+        response: 'empty',
+        compute: 'dynamic',
+        onMiss: 'dynamic',
+      },
+    ] as const)(
+      'emits $onMiss for $name',
+      async ({ response, compute, onMiss }) => {
+        const config = await writtenConfig({
+          ...makePrerenderOutput(undefined),
+          routeType: 'page',
+          response,
+          compute,
+        });
+
+        expect(config.onMiss).toBe(onMiss);
+      }
+    );
+
+    it('derives independent HTML and full-route RSC policies within a group', async () => {
+      const [htmlConfig, rscConfig] = await writtenConfigs([
+        {
+          ...makePrerenderOutput(undefined),
+          routeType: 'shell',
+          response: 'complete',
+          compute: 'static',
+          htmlSize: 128,
+        },
+        {
+          ...makePrerenderOutput(undefined),
+          id: 'prerender-2',
+          pathname: '/blog.rsc',
+          routeType: 'shell',
+          response: 'empty',
+          compute: 'dynamic',
+        },
+      ]);
+
+      expect(htmlConfig.onMiss).toBe('sync');
+      expect(htmlConfig.initialMetadata).toEqual({
+        compute: 'static',
+        htmlSize: 128,
+      });
+      expect(rscConfig.onMiss).toBe('dynamic');
+      expect(rscConfig.initialMetadata).toEqual({ compute: 'dynamic' });
+    });
+
+    it.each([
+      '/blog',
+      '/blog.rsc',
+      '/blog.segments/_full.segment.rsc',
+      '/blog.json',
+    ])('omits onMiss for unclassified output %s', async (pathname) => {
+      const config = await writtenConfig({
+        ...makePrerenderOutput(undefined),
+        pathname,
+      });
+
+      expect(config).not.toHaveProperty('onMiss');
+    });
+
+    it('omits onMiss for Route Handler outputs', async () => {
+      const config = await writtenConfig({
+        ...makePrerenderOutput(undefined),
+        routeType: 'route',
+        response: 'complete',
+        compute: 'static',
+      });
+
+      expect(config).not.toHaveProperty('onMiss');
+      expect(config.initialMetadata).toEqual({ compute: 'static' });
     });
   });
 });
