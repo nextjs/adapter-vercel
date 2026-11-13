@@ -129,6 +129,247 @@ describe('handleNodeOutputs automatic fetch instrumentation', () => {
   });
 });
 
+describe('handleNodeOutputs .rsc function dedupe', () => {
+  let projectDir: string;
+  let distDir: string;
+  let vercelOutputDir: string;
+  let functionsDir: string;
+
+  beforeEach(async () => {
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adapter-rsc-'));
+    distDir = path.join(projectDir, '.next');
+    vercelOutputDir = path.join(projectDir, 'output');
+    functionsDir = path.join(vercelOutputDir, 'functions');
+    await fs.mkdir(distDir);
+    await fs.writeFile(
+      path.join(projectDir, 'package.json'),
+      JSON.stringify({ engines: { node: '22.x' } })
+    );
+    await fs.writeFile(path.join(distDir, 'routes-manifest.json'), '{}');
+  });
+
+  afterEach(async () => {
+    await fs.rm(projectDir, { recursive: true, force: true });
+  });
+
+  // Next.js emits the `.rsc` output as a shallow spread of the page output, so
+  // the two share the very same `assets` and `assetsHashes` objects.
+  function makePagePair(
+    pathname: string,
+    rscPathname: string,
+    type:
+      | typeof AdapterOutputType.APP_PAGE
+      | typeof AdapterOutputType.APP_ROUTE = AdapterOutputType.APP_PAGE
+  ) {
+    const page = {
+      id: pathname,
+      type,
+      pathname,
+      sourcePage: `${pathname === '/' ? '' : pathname}/page`,
+      filePath: path.join(distDir, 'server/app', `${pathname}.js`),
+      runtime: 'nodejs',
+      assets: {
+        'node_modules/dep/index.js': path.join(
+          projectDir,
+          'node_modules/dep/index.js'
+        ),
+      },
+      assetsHashes: { 'node_modules/dep/index.js': 'hash-dep' },
+      config: { maxDuration: 30 },
+    } satisfies FuncOutputs[number];
+    const rsc = { ...page, id: rscPathname, pathname: rscPathname };
+    return [page, rsc] as const;
+  }
+
+  async function run(outputs: FuncOutputs, basePath = '') {
+    await handleNodeOutputs(outputs, {
+      config: { basePath },
+      distDir,
+      repoRoot: projectDir,
+      projectDir,
+      nextVersion: '16.4.0',
+      prerenderFallbackFalseMap: {},
+      vercelOutputDir,
+    });
+  }
+
+  async function expectSymlinkedTo(funcPath: string, target: string) {
+    const linkPath = path.join(functionsDir, funcPath);
+    const stat = await fs.lstat(linkPath);
+    expect(stat.isSymbolicLink(), `${funcPath} should be a symlink`).toBe(true);
+    expect(await fs.readlink(linkPath)).toBe(target);
+  }
+
+  it('symlinks X.rsc.func to X.func when the function is identical', async () => {
+    const [page, rsc] = makePagePair('/blog', '/blog.rsc');
+    await run([page, rsc]);
+
+    expect(
+      (await fs.lstat(path.join(functionsDir, 'blog.func'))).isDirectory()
+    ).toBe(true);
+    await expectSymlinkedTo('blog.rsc.func', 'blog.func');
+    // The deployed config is still reachable through the link.
+    expect(
+      await fs.readFile(
+        path.join(functionsDir, 'blog.rsc.func/.vc-config.json'),
+        'utf8'
+      )
+    ).toBe(
+      await fs.readFile(
+        path.join(functionsDir, 'blog.func/.vc-config.json'),
+        'utf8'
+      )
+    );
+  });
+
+  it('dedupes regardless of output order and for route handlers', async () => {
+    const [route, rsc] = makePagePair(
+      '/api/items',
+      '/api/items.rsc',
+      AdapterOutputType.APP_ROUTE
+    );
+    await run([rsc, route]);
+
+    expect(
+      (await fs.lstat(path.join(functionsDir, 'api/items.func'))).isDirectory()
+    ).toBe(true);
+    await expectSymlinkedTo('api/items.rsc.func', 'items.func');
+  });
+
+  it('dedupes the index route', async () => {
+    const [page, rsc] = makePagePair('/', '/index.rsc');
+    await run([page, rsc]);
+
+    expect(
+      (await fs.lstat(path.join(functionsDir, 'index.func'))).isDirectory()
+    ).toBe(true);
+    await expectSymlinkedTo('index.rsc.func', 'index.func');
+  });
+
+  it.each([
+    ['/docs', '/docs/index.rsc', 'docs/index.rsc.func', 'index.func'],
+    ['/docs/blog', '/docs/blog.rsc', 'docs/blog.rsc.func', 'blog.func'],
+  ])(
+    'dedupes %s with a basePath',
+    async (pathname, rscPathname, link, target) => {
+      const [page, rsc] = makePagePair(pathname, rscPathname);
+      await run([page, rsc], '/docs');
+
+      await expectSymlinkedTo(link, target);
+    }
+  );
+
+  it('writes a standalone .rsc output as a real function', async () => {
+    const [, rsc] = makePagePair('/blog', '/blog.rsc');
+    await run([rsc]);
+
+    expect(
+      (await fs.lstat(path.join(functionsDir, 'blog.rsc.func'))).isDirectory()
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      'filePath',
+      (output: FuncOutputs[0]) => ({
+        ...output,
+        filePath: `${output.filePath}.other`,
+      }),
+    ],
+    [
+      'assetsHashes',
+      (output: FuncOutputs[0]) => ({
+        ...output,
+        assetsHashes: { ...output.assetsHashes },
+      }),
+    ],
+    [
+      'sourcePage',
+      (output: FuncOutputs[0]) => ({
+        ...output,
+        sourcePage: `${output.sourcePage}-other`,
+      }),
+    ],
+  ])(
+    'writes a separate function when the .rsc %s differs',
+    async (_, change) => {
+      const [page, rsc] = makePagePair('/blog', '/blog.rsc');
+      await run([page, change(rsc)]);
+
+      expect(
+        (await fs.lstat(path.join(functionsDir, 'blog.rsc.func'))).isDirectory()
+      ).toBe(true);
+    }
+  );
+
+  it('writes a separate function when the .rsc output differs', async () => {
+    const [page, rsc] = makePagePair('/blog', '/blog.rsc');
+    await run([page, { ...rsc, config: { maxDuration: 60 } }]);
+
+    const stat = await fs.lstat(path.join(functionsDir, 'blog.rsc.func'));
+    expect(stat.isDirectory()).toBe(true);
+    const config = JSON.parse(
+      await fs.readFile(
+        path.join(functionsDir, 'blog.rsc.func/.vc-config.json'),
+        'utf8'
+      )
+    );
+    expect(config.maxDuration).toBe(60);
+  });
+
+  it('writes a separate function when the .rsc output has its own assets', async () => {
+    const [page, rsc] = makePagePair('/blog', '/blog.rsc');
+    await run([
+      page,
+      { ...rsc, assets: { ...rsc.assets, 'extra.js': '/tmp/extra.js' } },
+    ]);
+
+    expect(
+      (await fs.lstat(path.join(functionsDir, 'blog.rsc.func'))).isDirectory()
+    ).toBe(true);
+    const config = JSON.parse(
+      await fs.readFile(
+        path.join(functionsDir, 'blog.rsc.func/.vc-config.json'),
+        'utf8'
+      )
+    );
+    expect(config.filePathMap).toHaveProperty('extra.js');
+  });
+
+  it('points prerenders of a deduped .rsc output at the real function', async () => {
+    const [page, rsc] = makePagePair('/[slug]', '/[slug].rsc');
+    await run([page, rsc]);
+
+    await handlePrerenderOutputs(
+      [
+        {
+          id: '/post.rsc',
+          pathname: '/post.rsc',
+          type: AdapterOutputType.PRERENDER,
+          parentOutputId: rsc.id,
+          groupId: 1,
+          route: '/[slug]',
+          fallback: undefined,
+          config: {},
+        },
+      ],
+      {
+        config: {},
+        vercelOutputDir,
+        nodeOutputsParentMap: new Map<string, FuncOutputs[0]>([
+          [page.id, page],
+          [rsc.id, rsc],
+        ]),
+        rscContentType: 'text/x-component',
+        varyHeader: 'rsc',
+      }
+    );
+
+    // No symlink chain: the prerender links straight to the real directory.
+    await expectSymlinkedTo('post.rsc.func', '[slug].func');
+  });
+});
+
 const RSC_CONTENT_TYPE = 'text/x-component';
 const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';
 
