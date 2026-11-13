@@ -470,9 +470,14 @@ export async function handleNodeOutputs(
   let nextEnvLoaderPathRelativeToProjectDir: string | undefined;
 
   for (const envFile of envFiles) {
-    envFilePathMap[path.posix.join(handlerRelativeDir, envFile)] =
-      path.posix.relative(repoRoot, path.join(projectDir, envFile));
-    envFileHashes[envFile] = sha256(
+    // The hash must be keyed like the file map, or the file has no hash
+    // whenever the project is not at the repo root.
+    const envFileKey = path.posix.join(handlerRelativeDir, envFile);
+    envFilePathMap[envFileKey] = path.posix.relative(
+      repoRoot,
+      path.join(projectDir, envFile)
+    );
+    envFileHashes[envFileKey] = sha256(
       await fs.readFile(path.join(projectDir, envFile))
     );
   }
