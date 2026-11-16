@@ -659,14 +659,8 @@ export async function handleNodeOutputs(
   );
 }
 
-// TODO: Use AdapterOutput['PRERENDER'] directly. This requires a Next.js
-// dependency whose compute type includes `dynamic`.
-type PrerenderOutput = Omit<AdapterOutput['PRERENDER'], 'compute'> & {
-  compute?: AdapterOutput['PRERENDER']['compute'] | 'dynamic';
-};
-
 function getPrerenderOnMiss(
-  output: PrerenderOutput
+  output: AdapterOutput['PRERENDER']
 ): 'sync' | 'dynamic' | undefined {
   if (
     output.routeType === undefined ||
@@ -689,7 +683,7 @@ function getPrerenderOnMiss(
 }
 
 export async function handlePrerenderOutputs(
-  prerenderOutputs: Array<PrerenderOutput>,
+  prerenderOutputs: Array<AdapterOutput['PRERENDER']>,
   {
     config,
     hasAppEntries,

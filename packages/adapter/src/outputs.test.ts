@@ -226,8 +226,6 @@ const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';
 const POSTPONED_STATE =
   '46[["slug",["%%drp%%","d"]]][1,{"nav":"Doppelgänger"}]null';
 
-type PrerenderOutput = Parameters<typeof handlePrerenderOutputs>[0][number];
-
 describe('handlePrerenderOutputs', () => {
   let vercelOutputDir: string;
 
@@ -248,7 +246,7 @@ describe('handlePrerenderOutputs', () => {
 
   function makePrerenderOutput(
     fallback: AdapterOutput['PRERENDER']['fallback']
-  ): PrerenderOutput {
+  ): AdapterOutput['PRERENDER'] {
     return {
       id: 'prerender-1',
       pathname: '/blog',
@@ -280,7 +278,7 @@ describe('handlePrerenderOutputs', () => {
     ['parent-1', parentOutput],
   ]);
 
-  async function handlePrerenderOutput(output: PrerenderOutput) {
+  async function handlePrerenderOutput(output: AdapterOutput['PRERENDER']) {
     await handlePrerenderOutputs([output], {
       config: {},
       vercelOutputDir,
@@ -367,7 +365,7 @@ describe('handlePrerenderOutputs', () => {
     );
   });
 
-  async function writtenConfigs(outputs: PrerenderOutput[]) {
+  async function writtenConfigs(outputs: AdapterOutput['PRERENDER'][]) {
     await handlePrerenderOutputs(outputs, {
       config: {},
       vercelOutputDir,
@@ -392,7 +390,7 @@ describe('handlePrerenderOutputs', () => {
     );
   }
 
-  async function writtenConfig(output: PrerenderOutput) {
+  async function writtenConfig(output: AdapterOutput['PRERENDER']) {
     const [config] = await writtenConfigs([output]);
     return config;
   }
