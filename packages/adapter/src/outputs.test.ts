@@ -335,6 +335,41 @@ describe('handlePrerenderOutputs', () => {
     return body.subarray(offset).toString('utf8');
   }
 
+  it('preserves legacy bypass rules and cached metadata markers', async () => {
+    const filePath = path.join(vercelOutputDir, 'source.html');
+    await fs.writeFile(filePath, '<html><body>shell</body></html>');
+    const output = makePrerenderOutput({
+      filePath,
+      postponedState: POSTPONED_STATE,
+      initialHeaders: { 'x-next-prelude-metadata': '0' },
+    });
+    const bypassFor = [
+      { type: 'header' as const, key: 'next-action' },
+      {
+        type: 'header' as const,
+        key: 'content-type',
+        value: 'multipart/form-data;.*',
+      },
+      {
+        type: 'header' as const,
+        key: 'user-agent',
+        value: '.*(?:MyHTMLLimitedBot).*',
+      },
+    ];
+    output.config.bypassFor = bypassFor;
+
+    await handlePrerenderOutput(output);
+
+    const config = JSON.parse(
+      await fs.readFile(
+        path.join(vercelOutputDir, 'functions/blog.prerender-config.json'),
+        'utf8'
+      )
+    );
+    expect(config.experimentalBypassFor).toEqual(bypassFor);
+    expect(config.initialHeaders['x-next-prelude-metadata']).toBe('0');
+  });
+
   it('declares the state length of a document fallback in bytes', async () => {
     const html = '<!DOCTYPE html><html><body>shell</body></html>';
     const filePath = path.join(vercelOutputDir, 'source.html');

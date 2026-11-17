@@ -28,8 +28,15 @@ import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
-const myAdapter: NextAdapter = {
+const myAdapter: NextAdapter & {
+  unstable_capabilities: {
+    handlesHtmlLimitedBotPrerenders: boolean;
+  };
+} = {
   name: 'Vercel',
+  unstable_capabilities: {
+    handlesHtmlLimitedBotPrerenders: true,
+  },
   async modifyConfig(config, ctx) {
     if (ctx.phase === PHASE_PRODUCTION_BUILD && process.env.CI) {
       // A workaround to speedup Turbopack builds (particularly warm builds). Vercel build cache
@@ -129,8 +136,35 @@ const myAdapter: NextAdapter = {
     const shouldHandleMiddlewareDataResolving = routing.shouldNormalizeNextData;
 
     const i18nConfig = config.i18n;
+    const htmlLimitedBotsRegex = config.htmlLimitedBots;
+
+    if (config.cacheComponents && htmlLimitedBotsRegex === undefined) {
+      throw new Error(
+        'Expected the resolved htmlLimitedBots pattern for a Cache Components build.'
+      );
+    }
+
     const vercelConfig: VercelConfig = {
       version: 3,
+      afterCacheBypass: config.cacheComponents
+        ? [
+            {
+              name: 'HTML Limited Bots',
+              hasAll: [
+                {
+                  type: 'request.header',
+                  key: 'user-agent',
+                  value: { re: `.*(?:${htmlLimitedBotsRegex}).*` },
+                },
+                {
+                  type: 'cache.response.header',
+                  key: 'x-next-prelude-metadata',
+                  value: { eq: '0' },
+                },
+              ],
+            },
+          ]
+        : undefined,
       overrides: {},
       wildcard: i18nConfig?.domains
         ? i18nConfig.domains.map((item) => {

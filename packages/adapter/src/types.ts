@@ -1,4 +1,4 @@
-import type { Route } from '@vercel/routing-utils';
+import type { HasField, Route } from '@vercel/routing-utils';
 
 type ImageFormat = 'image/avif' | 'image/webp';
 
@@ -42,6 +42,14 @@ export type OverridesConfig = Record<
 
 export type VercelConfig = {
   version: 3;
+  afterCacheBypass?: Array<{
+    name?: string;
+    hasAll: Array<{
+      type: 'request.header' | 'cache.response.header';
+      key: string;
+      value?: HasField[number]['value'];
+    }>;
+  }>;
   routes?: Route[];
   images?: ImagesConfig;
   wildcard?: WildcardConfig;
