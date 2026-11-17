@@ -406,6 +406,7 @@ export async function handleGoOutputs(
   }
   for (const output of outputs) {
     const isMiddleware = output.type === AdapterOutputType.MIDDLEWARE;
+    // sourcePage is /proxy or /src/proxy; function config needs a relative filename.
     const sourceFile = isMiddleware
       ? `${output.sourcePage.slice(1)}.go`
       : (
