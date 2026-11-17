@@ -536,11 +536,30 @@ export async function handleNodeOutputs(
   // pages router
   const pagesNotFoundOutput = pages404Output || pagesErrorOutput;
 
-  const getFilePathMap = (output: FuncOutputs[0]) => {
+  // The file map is by far the largest part of a function config. Next.js emits
+  // the `X.rsc` output of every app page and route handler as a shallow copy
+  // of `X`, so the map built for `X` can be reused for `X.rsc` when they share
+  // the `assets` object.
+  type FilePathMapCache = Map<
+    FuncOutputs[0]['assets'],
+    Map<string, Record<string, string>>
+  >;
+  const getFilePathMap = (output: FuncOutputs[0], cache: FilePathMapCache) => {
     const notFoundOutput =
       output.type === AdapterOutputType.PAGES ? pagesNotFoundOutput : undefined;
+    // everything else the map is built from is the same for every output
+    const cacheKey = `${notFoundOutput ? 'pages' : ''}:${output.filePath}`;
+    let byKey = cache.get(output.assets);
+    if (!byKey) {
+      byKey = new Map();
+      cache.set(output.assets, byKey);
+    }
+    let files = byKey.get(cacheKey);
+    if (files) {
+      return files;
+    }
 
-    const files: Record<string, string> = {};
+    files = {};
     for (const [relPath, fsPath] of Object.entries(output.assets)) {
       files[relPath] = relativeToRepoRoot(fsPath);
     }
@@ -563,11 +582,13 @@ export async function handleNodeOutputs(
       routesManifestPath
     );
 
+    byKey.set(cacheKey, files);
     return files;
   };
 
   const getNodeConfig = async (
-    output: FuncOutputs[0]
+    output: FuncOutputs[0],
+    filePathMapCache: FilePathMapCache
   ): Promise<NodeFunctionConfig> => {
     const filesHashes: Record<string, string> | undefined = output.assetsHashes;
 
@@ -621,7 +642,7 @@ export async function handleNodeOutputs(
     });
     const nodeConfig: NodeFunctionConfig = {
       ...vercelConfigOpts,
-      filePathMap: getFilePathMap(output),
+      filePathMap: getFilePathMap(output, filePathMapCache),
       operationType,
       framework: {
         slug: 'nextjs',
@@ -658,21 +679,98 @@ export async function handleNodeOutputs(
     );
   };
 
-  await Promise.all(
-    nodeOutputs.map(async (output) => {
-      await fsSema.acquire();
+  // Pair every `X.rsc` output with its `X` sibling. If the `.rsc` function
+  // turns out to be identical, `X.rsc.func` is symlinked to `X.func` instead
+  // of writing it a second time.
+  const outputsByFunctionName = new Map<string, FuncOutputs[0]>();
+  for (const output of nodeOutputs) {
+    outputsByFunctionName.set(getFunctionName(output), output);
+  }
+  const rscOutputsBySibling = new Map<FuncOutputs[0], FuncOutputs[0][]>();
+  const pairedRscOutputs = new Set<FuncOutputs[0]>();
+  for (const output of nodeOutputs) {
+    const functionName = getFunctionName(output);
+    if (!functionName.endsWith('.rsc')) continue;
+    const siblingName = functionName.slice(0, -'.rsc'.length);
+    const sibling = outputsByFunctionName.get(siblingName);
+    // only link to a real directory, so that a prerender linking to
+    // `X.rsc.func` resolves in at most two hops
+    if (sibling && !siblingName.endsWith('.rsc')) {
+      const rscOutputs = rscOutputsBySibling.get(sibling) || [];
+      rscOutputs.push(output);
+      rscOutputsBySibling.set(sibling, rscOutputs);
+      pairedRscOutputs.add(output);
+    }
+  }
 
-      try {
-        const functionDir = path.join(
-          functionsDir,
-          `${getFunctionName(output)}.func`
-        );
-        const nodeConfig = await getNodeConfig(output);
-        await writeNodeFunction(functionDir, nodeConfig);
-      } finally {
-        fsSema.release();
-      }
-    })
+  await Promise.all(
+    nodeOutputs
+      .filter((output) => !pairedRscOutputs.has(output))
+      .map(async (output) => {
+        await fsSema.acquire();
+
+        try {
+          // shared with the `.rsc` siblings handled below
+          const filePathMapCache: FilePathMapCache = new Map();
+          const functionDir = path.join(
+            functionsDir,
+            `${getFunctionName(output)}.func`
+          );
+          const nodeConfig = await getNodeConfig(output, filePathMapCache);
+          await writeNodeFunction(functionDir, nodeConfig);
+
+          for (const rscOutput of rscOutputsBySibling.get(output) || []) {
+            const rscFunctionDir = path.join(
+              functionsDir,
+              `${getFunctionName(rscOutput)}.func`
+            );
+            const rscNodeConfig = await getNodeConfig(
+              rscOutput,
+              filePathMapCache
+            );
+
+            if (!isSameNodeFunctionConfig(rscNodeConfig, nodeConfig)) {
+              await writeNodeFunction(rscFunctionDir, rscNodeConfig);
+              continue;
+            }
+            await fs.mkdir(path.dirname(rscFunctionDir), { recursive: true });
+            await fs
+              .symlink(
+                path.relative(path.dirname(rscFunctionDir), functionDir),
+                rscFunctionDir
+              )
+              .catch((err) => {
+                // we can tolerate it already existing
+                if (
+                  !(typeof err === 'object' && err && err.code === 'EEXIST')
+                ) {
+                  throw err;
+                }
+              });
+          }
+        } finally {
+          fsSema.release();
+        }
+      })
+  );
+}
+
+/**
+ * Whether two node function configs are identical. Outputs sharing an
+ * `assets` object share the same file map, and Next.js shares the
+ * `assetsHashes` object, so the two large maps are compared by identity and
+ * only the remaining small fields are serialized.
+ */
+function isSameNodeFunctionConfig(
+  a: NodeFunctionConfig,
+  b: NodeFunctionConfig
+): boolean {
+  const { filePathMap: aFiles, fileHashes: aHashes, ...aRest } = a;
+  const { filePathMap: bFiles, fileHashes: bHashes, ...bRest } = b;
+  return (
+    aFiles === bFiles &&
+    aHashes === bHashes &&
+    JSON.stringify(aRest) === JSON.stringify(bRest)
   );
 }
 
