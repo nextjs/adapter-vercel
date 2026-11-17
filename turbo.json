@@ -1,5 +1,18 @@
 {
   "$schema": "https://turborepo.com/schema.json",
+  "globalPassThroughEnv": [
+    "GOPATH",
+    "GOMODCACHE",
+    "GOCACHE",
+    "USERPROFILE",
+    "LOCALAPPDATA",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "SystemRoot",
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

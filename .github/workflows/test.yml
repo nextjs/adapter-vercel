@@ -15,5 +15,27 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: packages/adapter/native/go.mod
+          cache-dependency-path: packages/adapter/native/go.sum
       - run: pnpm install
       - run: pnpm run test
+
+  windows:
+    name: Windows adapter entrypoint
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: packages/adapter/native/go.mod
+          cache-dependency-path: packages/adapter/native/go.sum
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm --filter @next-community/adapter-vercel exec vitest run src/entrypoint.test.ts src/go/native-wire.test.ts src/go/native-prefetch.test.ts src/node-handler.test.ts

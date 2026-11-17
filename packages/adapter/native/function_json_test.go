@@ -1,0 +1,136 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+)
+
+func TestFunctionMetadataOverridesAndMissingHashes(t *testing.T) {
+	a := &adapter{request: request{RepoRoot: "/repo", AssetBindings: [][2]string{{"shared", "/repo/shared.js"}, {"special\"\\\u2028", "/repo/line\u2029.js"}, {"shared", "hash-shared"}, {"deleted", "hash-deleted"}}, AssetMaps: [][]uint32{{0, 1}, {2, 3}}}}
+	a.encodeBindings()
+	o := object{"assetMapId": float64(0), "assetHashMapId": float64(1)}
+	files, hashes := a.metadata(o, true), a.metadata(o, false)
+	files.set("shared", "replacement.js")
+	hashes.setFrom("shared", object{"shared": "replacement-hash"})
+	hashes.setFrom("deleted", object{})
+	files.set("new", "new.js")
+	file := filepath.Join(t.TempDir(), "config.json")
+	writeFunctionConfig(file, object{"runtime": "nodejs", "filePathMap": "overridden", "fileHashes": "overridden"}, &files, &hashes)
+	actual := readJSON(file)
+	want := object{"runtime": "nodejs", "filePathMap": object{"shared": "replacement.js", "special\"\\\u2028": "line\u2029.js", "new": "new.js"}, "fileHashes": object{"shared": "replacement-hash"}}
+	x, _ := json.Marshal(actual)
+	y, _ := json.Marshal(want)
+	if string(x) != string(y) {
+		t.Fatalf("got %s, want %s", x, y)
+	}
+	// Rendering an override must leave the shared dictionaries intact.
+	original := a.metadata(o, false)
+	var value object
+	check(json.Unmarshal(original.appendJSON(nil), &value))
+	if value["deleted"] != "hash-deleted" || value["shared"] != "hash-shared" {
+		t.Fatal(value)
+	}
+}
+
+func TestConcurrentFunctionConfigsReuseContentWithIndependentFiles(t *testing.T) {
+	a := &adapter{request: request{RepoRoot: "/repo", AssetBindings: [][2]string{{"shared", "/repo/shared.js"}, {"shared", "hash"}}, AssetMaps: [][]uint32{{0}, {1}}}}
+	a.encodeBindings()
+	o := object{"assetMapId": float64(0), "assetHashMapId": float64(1)}
+	var cache functionConfigs
+	root := t.TempDir()
+	paths := make([]string, 16)
+	var wg sync.WaitGroup
+	for i := range paths {
+		paths[i] = filepath.Join(root, string(rune('a'+i)), "config.json")
+		wg.Add(1)
+		go func(file string) {
+			defer wg.Done()
+			files, hashes := a.metadata(o, true), a.metadata(o, false)
+			cache.write(file, object{"runtime": "nodejs"}, &files, &hashes)
+		}(paths[i])
+	}
+	wg.Wait()
+	first, err := os.Stat(paths[0])
+	check(err)
+	for _, file := range paths {
+		info, err := os.Stat(file)
+		check(err)
+		if file != paths[0] && os.SameFile(first, info) {
+			t.Fatal("separate outputs must have independent files")
+		}
+		if obj(readJSON(file)["fileHashes"])["shared"] != "hash" {
+			t.Fatal("incomplete shared config")
+		}
+	}
+	write(paths[0], []byte("postbuild edit"))
+	for _, file := range paths[1:] {
+		if obj(readJSON(file)["fileHashes"])["shared"] != "hash" {
+			t.Fatal("editing one output changed another")
+		}
+	}
+}
+
+func TestConfigSharingPreservesExistingFilesAndDifferentOptions(t *testing.T) {
+	a := &adapter{request: request{RepoRoot: "/repo"}}
+	files := a.metadata(object{}, true)
+	var cache functionConfigs
+	root := t.TempDir()
+	existing := filepath.Join(root, "existing.json")
+	write(existing, []byte("existing content"))
+	cache.write(existing, object{"memory": float64(1024)}, &files, nil)
+	created := filepath.Join(root, "created.json")
+	cache.write(created, object{"memory": float64(1024)}, &files, nil)
+	different := filepath.Join(root, "different.json")
+	cache.write(different, object{"memory": float64(2048)}, &files, nil)
+	if string(read(existing)) != "existing content" {
+		t.Fatal("overwrote an existing file")
+	}
+	if readJSON(created)["memory"] != float64(1024) || readJSON(different)["memory"] != float64(2048) {
+		t.Fatal("shared files with different options")
+	}
+}
+
+func TestFunctionMetadataAbsentAndEmptyHashes(t *testing.T) {
+	a := &adapter{request: request{RepoRoot: "/repo"}}
+	files := a.metadata(object{}, true)
+	hashes := a.metadata(object{}, false)
+	for _, present := range []bool{false, true} {
+		file := filepath.Join(t.TempDir(), "config.json")
+		var h *metadataMap
+		if present {
+			h = &hashes
+		}
+		writeFunctionConfig(file, object{}, &files, h)
+		cfg := readJSON(file)
+		if _, exists := cfg["fileHashes"]; exists != present {
+			t.Fatal(cfg)
+		}
+		if len(obj(cfg["filePathMap"])) != 0 {
+			t.Fatal(cfg)
+		}
+	}
+}
+
+func TestFunctionConfigCacheReservesCloseToEncodedSize(t *testing.T) {
+	// A config just above 64KiB used to retain a 128KiB buffer. Enough of
+	// those buffers exhaust the cache before repeated outputs can reuse it.
+	large := "/repo/" + strings.Repeat("x", 70*1024)
+	a := &adapter{request: request{RepoRoot: "/repo", AssetBindings: [][2]string{{"large", large}}, AssetMaps: [][]uint32{{0}}}}
+	a.encodeBindings()
+	files := a.metadata(object{"assetMapId": float64(0)}, true)
+	files.set("overlay", "line\u2028.js")
+	var cache functionConfigs
+	file := filepath.Join(t.TempDir(), "config.json")
+	cache.write(file, object{"runtime": "nodejs"}, &files, nil)
+	encoded := read(file)
+	if retained := cache.bytes.Load(); retained < int64(len(encoded)) || retained > int64(len(encoded)+256) {
+		t.Fatalf("retained %d bytes for %d bytes of JSON", retained, len(encoded))
+	}
+	if obj(readJSON(file)["filePathMap"])["overlay"] != "line\u2028.js" {
+		t.Fatal("lost metadata overlay")
+	}
+}

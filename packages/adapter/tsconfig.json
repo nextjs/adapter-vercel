@@ -19,7 +19,8 @@
     "target": "es2022",
     "module": "es2022",
     "moduleResolution": "node",
-    "types": ["node"]
+    "types": ["node"],
+    "allowImportingTsExtensions": true
   },
   "include": ["src", "build.mts"],
   "exclude": ["node_modules", "**/*.test.ts"]
