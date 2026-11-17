@@ -365,24 +365,159 @@ describe('handlePrerenderOutputs', () => {
     );
   });
 
+  async function writtenConfig(
+    output: AdapterOutput['PRERENDER'],
+    parentType: FuncOutputs[number]['type'] = parentOutput.type
+  ) {
+    await handlePrerenderOutputs([output], {
+      config: {},
+      vercelOutputDir,
+      nodeOutputsParentMap: new Map([
+        ['parent-1', { ...parentOutput, type: parentType }],
+      ]),
+      rscContentType: RSC_CONTENT_TYPE,
+      varyHeader: 'rsc',
+    });
+
+    return JSON.parse(
+      await fs.readFile(
+        path.join(
+          vercelOutputDir,
+          'functions',
+          `${output.pathname.slice(1)}.prerender-config.json`
+        ),
+        'utf8'
+      )
+    );
+  }
+
+  describe('Server Action bypass rules', () => {
+    type BypassRules = NonNullable<
+      AdapterOutput['PRERENDER']['config']['bypassFor']
+    >;
+
+    const actionRules: BypassRules = [
+      { type: 'header', key: 'next-action' },
+      {
+        type: 'header',
+        key: 'content-type',
+        value: 'multipart/form-data;.*',
+      },
+    ];
+
+    it.each([
+      { name: 'a complete page', pathname: '/blog', fallback: undefined },
+      {
+        name: 'a partial page',
+        pathname: '/blog',
+        fallback: { postponedState: POSTPONED_STATE },
+      },
+      {
+        name: 'an RSC sibling',
+        pathname: '/blog.rsc',
+        fallback: { postponedState: POSTPONED_STATE },
+      },
+    ])('uses one POST condition for $name', async ({ pathname, fallback }) => {
+      const output = { ...makePrerenderOutput(fallback), pathname };
+      const bypassFor = structuredClone(actionRules);
+      output.config.bypassFor = bypassFor;
+
+      const config = await writtenConfig(output, AdapterOutputType.APP_PAGE);
+
+      expect(config.experimentalBypassFor).toEqual([
+        { type: 'method', value: 'POST' },
+      ]);
+      expect(output.config.bypassFor).toBe(bypassFor);
+      expect(bypassFor).toEqual(actionRules);
+    });
+
+    it('preserves bot and custom conditions around the generated pair', async () => {
+      const unrelated: BypassRules = [
+        { type: 'header', key: 'user-agent', value: '.*Discordbot.*' },
+        { type: 'cookie', key: 'preview', value: 'enabled' },
+        { type: 'query', key: 'refresh' },
+        { type: 'header', key: 'next-action', value: 'custom-action' },
+        { type: 'header', key: 'content-type', value: 'application/json' },
+      ];
+      const output = makePrerenderOutput(undefined);
+      output.config.bypassFor = [
+        unrelated[0],
+        actionRules[1],
+        ...unrelated.slice(1),
+        actionRules[0],
+      ];
+
+      const config = await writtenConfig(output, AdapterOutputType.APP_PAGE);
+
+      expect(config.experimentalBypassFor).toEqual([
+        { type: 'method', value: 'POST' },
+        ...unrelated,
+      ]);
+    });
+
+    it('matches generated header names without regard to case', async () => {
+      const output = makePrerenderOutput(undefined);
+      output.config.bypassFor = [
+        { type: 'header', key: 'Next-Action' },
+        {
+          type: 'header',
+          key: 'Content-Type',
+          value: 'multipart/form-data;.*',
+        },
+      ];
+
+      const config = await writtenConfig(output, AdapterOutputType.APP_PAGE);
+
+      expect(config.experimentalBypassFor).toEqual([
+        { type: 'method', value: 'POST' },
+      ]);
+    });
+
+    it.each([
+      { name: 'no conditions', bypassFor: undefined },
+      { name: 'an empty list', bypassFor: [] },
+      { name: 'only the action header', bypassFor: [actionRules[0]] },
+      { name: 'only the multipart header', bypassFor: [actionRules[1]] },
+      {
+        name: 'an action header with a custom value',
+        bypassFor: [
+          { type: 'header', key: 'next-action', value: 'custom-action' },
+          actionRules[1],
+        ],
+      },
+      {
+        name: 'a different multipart pattern',
+        bypassFor: [
+          actionRules[0],
+          { type: 'header', key: 'content-type', value: 'multipart/.*' },
+        ],
+      },
+    ] satisfies Array<{ name: string; bypassFor: BypassRules | undefined }>)(
+      'leaves $name unchanged',
+      async ({ bypassFor }) => {
+        const output = makePrerenderOutput(undefined);
+        output.config.bypassFor = bypassFor;
+
+        const config = await writtenConfig(output, AdapterOutputType.APP_PAGE);
+
+        expect(config.experimentalBypassFor).toEqual(bypassFor);
+      }
+    );
+
+    it.each([AdapterOutputType.PAGES, AdapterOutputType.APP_ROUTE] as const)(
+      'leaves %s parent conditions unchanged',
+      async (type) => {
+        const output = makePrerenderOutput(undefined);
+        output.config.bypassFor = structuredClone(actionRules);
+
+        const config = await writtenConfig(output, type);
+
+        expect(config.experimentalBypassFor).toEqual(actionRules);
+      }
+    );
+  });
+
   describe('initialMetadata', () => {
-    async function writtenConfig(output: AdapterOutput['PRERENDER']) {
-      await handlePrerenderOutputs([output], {
-        config: {},
-        vercelOutputDir,
-        nodeOutputsParentMap,
-        rscContentType: RSC_CONTENT_TYPE,
-        varyHeader: 'rsc',
-      });
-
-      return JSON.parse(
-        await fs.readFile(
-          path.join(vercelOutputDir, 'functions', 'blog.prerender-config.json'),
-          'utf8'
-        )
-      );
-    }
-
     it('carries compute and htmlSize from the primary output verbatim', async () => {
       const config = await writtenConfig({
         ...makePrerenderOutput(undefined),

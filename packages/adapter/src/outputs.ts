@@ -659,6 +659,51 @@ export async function handleNodeOutputs(
   );
 }
 
+type PrerenderBypassRule = NonNullable<
+  AdapterOutput['PRERENDER']['config']['bypassFor']
+>[number];
+
+function isActionHeaderBypass(rule: PrerenderBypassRule) {
+  return (
+    rule.type === 'header' &&
+    rule.key.toLowerCase() === 'next-action' &&
+    rule.value === undefined
+  );
+}
+
+function isMultipartBypass(rule: PrerenderBypassRule) {
+  return (
+    rule.type === 'header' &&
+    rule.key.toLowerCase() === 'content-type' &&
+    rule.value === 'multipart/form-data;.*'
+  );
+}
+
+function getPrerenderBypassFor(
+  output: AdapterOutput['PRERENDER'],
+  parentOutput: FuncOutputs[number]
+) {
+  const { bypassFor } = output.config;
+
+  if (
+    parentOutput.type !== AdapterOutputType.APP_PAGE ||
+    !bypassFor?.some(isActionHeaderBypass) ||
+    !bypassFor.some(isMultipartBypass)
+  ) {
+    return bypassFor;
+  }
+
+  // Server Actions use POST for both fetch calls and form submissions. The
+  // generated header selectors also match read requests, so replace the pair
+  // with a method selector and preserve unrelated bypass conditions.
+  return [
+    { type: 'method' as const, value: 'POST' },
+    ...bypassFor.filter(
+      (rule) => !isActionHeaderBypass(rule) && !isMultipartBypass(rule)
+    ),
+  ];
+}
+
 export async function handlePrerenderOutputs(
   prerenderOutputs: Array<AdapterOutput['PRERENDER']>,
   {
@@ -829,7 +874,10 @@ export async function handlePrerenderOutputs(
               partialFallback: output.config.partialFallback || undefined,
 
               bypassToken: output.config.bypassToken,
-              experimentalBypassFor: output.config.bypassFor,
+              experimentalBypassFor: getPrerenderBypassFor(
+                output,
+                parentNodeOutput
+              ),
 
               // Build-time serving metadata, carried verbatim from Next.js.
               // Next.js sets the taxonomy only on a prerender group's primary
