@@ -1,5 +1,15 @@
 # @next-community/adapter-vercel
 
+## 0.1.0-beta.38
+
+### Minor Changes
+
+- [#156](https://github.com/nextjs/adapter-vercel/pull/156) [`f3e2954`](https://github.com/nextjs/adapter-vercel/commit/f3e295418d5539613655addb58231e4524465c4d) Thanks [@timneutkens](https://github.com/timneutkens)! - Package native Go proxy middleware using the hosted executable runtime and existing middleware matcher routes.
+
+### Patch Changes
+
+- [#158](https://github.com/nextjs/adapter-vercel/pull/158) [`ae7eda9`](https://github.com/nextjs/adapter-vercel/commit/ae7eda9e8f104ba7e867fda53c1f2ba95dcd1edd) Thanks [@jamiboym](https://github.com/jamiboym)! - Key the hashes of project `.env` files by their `filePathMap` path, so every env file in a function's `.vc-config.json` has a matching `fileHashes` entry when the Next.js app is not at the repository root.
+
 ## 0.0.1-beta.37
 
 ### Patch Changes
