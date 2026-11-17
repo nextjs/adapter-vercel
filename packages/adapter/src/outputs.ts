@@ -529,132 +529,149 @@ export async function handleNodeOutputs(
     return relPath;
   };
 
+  const getFunctionName = (output: FuncOutputs[0]) =>
+    normalizeIndexPathname(output.pathname, config);
+
+  // ensure 404 handler is included in function for rendering not-found in
+  // pages router
+  const pagesNotFoundOutput = pages404Output || pagesErrorOutput;
+
+  const getFilePathMap = (output: FuncOutputs[0]) => {
+    const notFoundOutput =
+      output.type === AdapterOutputType.PAGES ? pagesNotFoundOutput : undefined;
+
+    const files: Record<string, string> = {};
+    for (const [relPath, fsPath] of Object.entries(output.assets)) {
+      files[relPath] = relativeToRepoRoot(fsPath);
+    }
+    files[path.posix.relative(repoRoot, output.filePath)] = path.posix.relative(
+      repoRoot,
+      output.filePath
+    );
+    if (hasProjectEnvFiles) {
+      Object.assign(files, envFilePathMap);
+    }
+    if (notFoundOutput) {
+      for (const [relPath, fsPath] of Object.entries(notFoundOutput.assets)) {
+        files[relPath] = relativeToRepoRoot(fsPath);
+      }
+      const relPath = path.posix.relative(repoRoot, notFoundOutput.filePath);
+      files[relPath] = relPath;
+    }
+    files[routesManifestRelativePath] = path.posix.relative(
+      repoRoot,
+      routesManifestPath
+    );
+
+    return files;
+  };
+
+  const getNodeConfig = async (
+    output: FuncOutputs[0]
+  ): Promise<NodeFunctionConfig> => {
+    const filesHashes: Record<string, string> | undefined = output.assetsHashes;
+
+    if (filesHashes) {
+      if (hasProjectEnvFiles) {
+        Object.assign(filesHashes, envFileHashes);
+      }
+      if (output.type === AdapterOutputType.PAGES && pagesNotFoundOutput) {
+        for (const relPath of Object.keys(pagesNotFoundOutput.assets)) {
+          filesHashes[relPath] = pagesNotFoundOutput.assetsHashes?.[relPath];
+        }
+        const relPath = path.posix.relative(
+          repoRoot,
+          pagesNotFoundOutput.filePath
+        );
+        filesHashes[relPath] = pagesNotFoundOutput.assetsHashes?.[relPath];
+      }
+      filesHashes[routesManifestRelativePath] = routesManifestHash;
+      filesHashes[handlerRelativePath] = handlerSourceHash;
+    }
+
+    const operationType =
+      output.type === AdapterOutputType.APP_PAGE ||
+      output.type === AdapterOutputType.PAGES
+        ? 'PAGE'
+        : 'API';
+
+    const sourceFile = await getSourceFilePathFromPage({
+      workPath: projectDir,
+      page: output.sourcePage,
+      pageExtensions: config.pageExtensions || [],
+      usesSrcDir,
+    });
+    const vercelConfigOpts = await getLambdaOptionsFromFunction({
+      sourceFile,
+      config: vercelConfig,
+    });
+    const generatedConfigOpts = await getGeneratedWorkflowLambdaOptions({
+      projectDir,
+      routeName: output.pathname,
+      sourceFile,
+    });
+
+    if (generatedConfigOpts) {
+      Object.assign(vercelConfigOpts, generatedConfigOpts);
+    }
+    const maxDuration = resolveNodeFunctionMaxDuration({
+      generatedConfigOpts,
+      outputConfigMaxDuration: output.config.maxDuration,
+      vercelConfigMaxDuration: vercelConfigOpts.maxDuration,
+    });
+    const nodeConfig: NodeFunctionConfig = {
+      ...vercelConfigOpts,
+      filePathMap: getFilePathMap(output),
+      operationType,
+      framework: {
+        slug: 'nextjs',
+        version: nextVersion,
+      },
+      handler: handlerRelativePath,
+      runtime: nodeVersion.runtime,
+      maxDuration,
+      supportsMultiPayloads: true,
+      supportsResponseStreaming: true,
+      experimentalAllowBundling: true,
+      shouldDisableAutomaticFetchInstrumentation:
+        disableAutomaticFetchInstrumentation ||
+        process.env.VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION ===
+          '1',
+      // middleware handler always expects Request/Response interface
+      useWebApi: isMiddleware,
+      launcherType: 'Nodejs',
+      fileHashes: filesHashes,
+    };
+    return nodeConfig;
+  };
+
+  const writeNodeFunction = async (
+    functionDir: string,
+    nodeConfig: NodeFunctionConfig
+  ) => {
+    const handlerAbsolutePath = path.join(functionDir, handlerRelativePath);
+    await fs.mkdir(path.dirname(handlerAbsolutePath), { recursive: true });
+    await writeIfNotExists(handlerAbsolutePath, handlerSource);
+    await writeIfNotExists(
+      path.join(functionDir, `.vc-config.json`),
+      JSON.stringify(nodeConfig, null, 2)
+    );
+  };
+
   await Promise.all(
     nodeOutputs.map(async (output) => {
       await fsSema.acquire();
 
-      const functionDir = path.join(
-        functionsDir,
-        `${normalizeIndexPathname(output.pathname, config)}.func`
-      );
-      await fs.mkdir(functionDir, { recursive: true });
-
-      const files: Record<string, string> = {};
-      const filesHashes: Record<string, string> | undefined =
-        output.assetsHashes;
-
-      for (const [relPath, fsPath] of Object.entries(output.assets)) {
-        files[relPath] = relativeToRepoRoot(fsPath);
+      try {
+        const functionDir = path.join(
+          functionsDir,
+          `${getFunctionName(output)}.func`
+        );
+        const nodeConfig = await getNodeConfig(output);
+        await writeNodeFunction(functionDir, nodeConfig);
+      } finally {
+        fsSema.release();
       }
-      files[path.posix.relative(repoRoot, output.filePath)] =
-        path.posix.relative(repoRoot, output.filePath);
-      if (hasProjectEnvFiles) {
-        Object.assign(files, envFilePathMap);
-        if (filesHashes) {
-          Object.assign(filesHashes, envFileHashes);
-        }
-      }
-
-      // ensure 404 handler is included in function for rendering
-      // not-found in pages router
-      if (output.type === AdapterOutputType.PAGES) {
-        const notFoundOutput = pages404Output || pagesErrorOutput;
-
-        if (notFoundOutput) {
-          for (const [relPath, fsPath] of Object.entries(
-            notFoundOutput.assets
-          )) {
-            files[relPath] = relativeToRepoRoot(fsPath);
-            if (filesHashes) {
-              filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
-            }
-          }
-          const relPath = path.posix.relative(
-            repoRoot,
-            notFoundOutput.filePath
-          );
-          files[relPath] = relPath;
-          if (filesHashes) {
-            filesHashes[relPath] = notFoundOutput.assetsHashes?.[relPath];
-          }
-        }
-      }
-
-      files[routesManifestRelativePath] = path.posix.relative(
-        repoRoot,
-        routesManifestPath
-      );
-      if (filesHashes) {
-        filesHashes[routesManifestRelativePath] = routesManifestHash;
-      }
-
-      const handlerAbsolutePath = path.join(functionDir, handlerRelativePath);
-      await fs.mkdir(path.dirname(handlerAbsolutePath), { recursive: true });
-      await writeIfNotExists(handlerAbsolutePath, handlerSource);
-      if (filesHashes) {
-        filesHashes[handlerRelativePath] = handlerSourceHash;
-      }
-
-      const operationType =
-        output.type === AdapterOutputType.APP_PAGE ||
-        output.type === AdapterOutputType.PAGES
-          ? 'PAGE'
-          : 'API';
-
-      const sourceFile = await getSourceFilePathFromPage({
-        workPath: projectDir,
-        page: output.sourcePage,
-        pageExtensions: config.pageExtensions || [],
-        usesSrcDir,
-      });
-      const vercelConfigOpts = await getLambdaOptionsFromFunction({
-        sourceFile,
-        config: vercelConfig,
-      });
-      const generatedConfigOpts = await getGeneratedWorkflowLambdaOptions({
-        projectDir,
-        routeName: output.pathname,
-        sourceFile,
-      });
-
-      if (generatedConfigOpts) {
-        Object.assign(vercelConfigOpts, generatedConfigOpts);
-      }
-      const maxDuration = resolveNodeFunctionMaxDuration({
-        generatedConfigOpts,
-        outputConfigMaxDuration: output.config.maxDuration,
-        vercelConfigMaxDuration: vercelConfigOpts.maxDuration,
-      });
-      const nodeConfig: NodeFunctionConfig = {
-        ...vercelConfigOpts,
-        filePathMap: files,
-        operationType,
-        framework: {
-          slug: 'nextjs',
-          version: nextVersion,
-        },
-        handler: handlerRelativePath,
-        runtime: nodeVersion.runtime,
-        maxDuration,
-        supportsMultiPayloads: true,
-        supportsResponseStreaming: true,
-        experimentalAllowBundling: true,
-        shouldDisableAutomaticFetchInstrumentation:
-          disableAutomaticFetchInstrumentation ||
-          process.env.VERCEL_TRACING_DISABLE_AUTOMATIC_FETCH_INSTRUMENTATION ===
-            '1',
-        // middleware handler always expects Request/Response interface
-        useWebApi: isMiddleware,
-        launcherType: 'Nodejs',
-        fileHashes: filesHashes,
-      };
-
-      await writeIfNotExists(
-        path.join(functionDir, `.vc-config.json`),
-        JSON.stringify(nodeConfig, null, 2)
-      );
-
-      fsSema.release();
     })
   );
 }
