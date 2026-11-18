@@ -1,4 +1,14 @@
 import type { HasField, Route } from '@vercel/routing-utils';
+import type { AdapterOutput } from 'next';
+
+export type PrerenderOutput = Omit<AdapterOutput['PRERENDER'], 'config'> & {
+  config: Omit<AdapterOutput['PRERENDER']['config'], 'bypassFor'> & {
+    bypassFor?: Array<
+      | NonNullable<AdapterOutput['PRERENDER']['config']['bypassFor']>[number]
+      | { type: 'method'; value: string }
+    >;
+  };
+};
 
 type ImageFormat = 'image/avif' | 'image/webp';
 

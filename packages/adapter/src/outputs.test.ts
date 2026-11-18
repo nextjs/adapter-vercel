@@ -9,6 +9,7 @@ import {
   handleNodeOutputs,
   handlePrerenderOutputs,
 } from './outputs';
+import type { PrerenderOutput } from './types';
 
 describe('handleNodeOutputs automatic fetch instrumentation', () => {
   let projectDir: string;
@@ -246,7 +247,7 @@ describe('handlePrerenderOutputs', () => {
 
   function makePrerenderOutput(
     fallback: AdapterOutput['PRERENDER']['fallback']
-  ): AdapterOutput['PRERENDER'] {
+  ): PrerenderOutput {
     return {
       id: 'prerender-1',
       pathname: '/blog',
@@ -278,7 +279,7 @@ describe('handlePrerenderOutputs', () => {
     ['parent-1', parentOutput],
   ]);
 
-  async function handlePrerenderOutput(output: AdapterOutput['PRERENDER']) {
+  async function handlePrerenderOutput(output: PrerenderOutput) {
     await handlePrerenderOutputs([output], {
       config: {},
       vercelOutputDir,
@@ -370,6 +371,36 @@ describe('handlePrerenderOutputs', () => {
     expect(config.initialHeaders['x-next-prelude-metadata']).toBe('0');
   });
 
+  it('serializes method and custom conditions without rewriting the input', async () => {
+    const output = makePrerenderOutput(undefined);
+    const bypassFor: NonNullable<PrerenderOutput['config']['bypassFor']> = [
+      { type: 'method', value: 'POST' },
+      { type: 'header', key: 'user-agent', value: '.*CustomBot.*' },
+      { type: 'cookie', key: 'preview', value: 'enabled' },
+      { type: 'query', key: 'refresh' },
+    ];
+    const original = structuredClone(bypassFor);
+    output.config.bypassFor = bypassFor;
+
+    await handlePrerenderOutputs([output], {
+      config: {},
+      vercelOutputDir,
+      nodeOutputsParentMap,
+      rscContentType: RSC_CONTENT_TYPE,
+      varyHeader: 'rsc',
+    });
+    const config = JSON.parse(
+      await fs.readFile(
+        path.join(vercelOutputDir, 'functions/blog.prerender-config.json'),
+        'utf8'
+      )
+    );
+
+    expect(config.experimentalBypassFor).toEqual(original);
+    expect(output.config.bypassFor).toBe(bypassFor);
+    expect(bypassFor).toEqual(original);
+  });
+
   it('declares the state length of a document fallback in bytes', async () => {
     const html = '<!DOCTYPE html><html><body>shell</body></html>';
     const filePath = path.join(vercelOutputDir, 'source.html');
@@ -401,7 +432,7 @@ describe('handlePrerenderOutputs', () => {
   });
 
   describe('initialMetadata', () => {
-    async function writtenConfig(output: AdapterOutput['PRERENDER']) {
+    async function writtenConfig(output: PrerenderOutput) {
       await handlePrerenderOutputs([output], {
         config: {},
         vercelOutputDir,

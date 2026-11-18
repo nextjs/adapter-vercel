@@ -85,9 +85,10 @@ describe('HTML-limited bot deployment policy', () => {
     );
   }
 
-  it('declares HTML-limited bot handling through getCapabilities', () => {
+  it('declares independent prerender capabilities through getCapabilities', () => {
     expect(adapter.getCapabilities()).toEqual({
       handlesHtmlLimitedBotPrerenders: true,
+      supportsPrerenderMethodBypass: true,
     });
   });
 

@@ -31,12 +31,14 @@ import { escapeStringRegexp, getImagesConfig } from './utils';
 const myAdapter: NextAdapter & {
   getCapabilities: () => {
     handlesHtmlLimitedBotPrerenders: boolean;
+    supportsPrerenderMethodBypass: boolean;
   };
 } = {
   name: 'Vercel',
   getCapabilities() {
     return {
       handlesHtmlLimitedBotPrerenders: true,
+      supportsPrerenderMethodBypass: true,
     };
   },
   async modifyConfig(config, ctx) {
