@@ -29,13 +29,15 @@ import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
 const myAdapter: NextAdapter & {
-  unstable_capabilities: {
+  getCapabilities: () => {
     handlesHtmlLimitedBotPrerenders: boolean;
   };
 } = {
   name: 'Vercel',
-  unstable_capabilities: {
-    handlesHtmlLimitedBotPrerenders: true,
+  getCapabilities() {
+    return {
+      handlesHtmlLimitedBotPrerenders: true,
+    };
   },
   async modifyConfig(config, ctx) {
     if (ctx.phase === PHASE_PRODUCTION_BUILD && process.env.CI) {

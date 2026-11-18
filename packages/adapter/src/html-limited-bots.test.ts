@@ -85,10 +85,10 @@ describe('HTML-limited bot deployment policy', () => {
     );
   }
 
-  it('declares the provisional capability', () => {
-    expect(adapter.unstable_capabilities.handlesHtmlLimitedBotPrerenders).toBe(
-      true
-    );
+  it('declares HTML-limited bot handling through getCapabilities', () => {
+    expect(adapter.getCapabilities()).toEqual({
+      handlesHtmlLimitedBotPrerenders: true,
+    });
   });
 
   describe.each(['16.3.0', '16.5.0-canary.40'])('next@%s', (nextVersion) => {
