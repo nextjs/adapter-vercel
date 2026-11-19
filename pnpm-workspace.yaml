@@ -1,2 +1,5 @@
 packages:
   - "packages/*"
+
+catalog:
+  next: 16.5.0-canary.53

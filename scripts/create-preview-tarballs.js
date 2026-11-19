@@ -13,8 +13,8 @@ const adapterManifestPath = path.join(adapterPackageDir, 'package.json');
  *
  * The manifest version is rewritten to `<base>-preview-<shortSha>-<yyyymmdd>`
  * (changesets owns the real version). The rewrite is a CI-only mutation and
- * must never be committed. Unlike next.js's equivalent script, no dependency
- * rewriting is needed: the published manifest has no internal workspace deps.
+ * must never be committed. pnpm pack resolves catalog and workspace dependency
+ * specifiers in the packed manifest.
  */
 function main() {
   const [commitSha, tarballDirectory] = process.argv.slice(2);
@@ -48,11 +48,10 @@ function main() {
     'adapter-vercel'
   );
   fs.mkdirSync(destination, { recursive: true });
-  execFileSync(
-    'npm',
-    ['pack', adapterPackageDir, '--pack-destination', destination],
-    { stdio: 'inherit' }
-  );
+  execFileSync('pnpm', ['pack', '--pack-destination', destination], {
+    cwd: adapterPackageDir,
+    stdio: 'inherit',
+  });
 }
 
 main();
