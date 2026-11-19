@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
+import type { NextConfigComplete } from 'next/dist/server/config-shared';
 import { collectGoRouteOutputs, handleGoOutputs } from './go-outputs';
 import {
   type FuncOutputs,
@@ -28,8 +29,22 @@ import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
+// The deployment matcher limits regexes to 1024 UTF-8 bytes. Returning
+// undefined keeps the per-route bot bypass and omits the deployment policy.
+function getHtmlLimitedBotsPattern(config: NextConfigComplete) {
+  const pattern = config.htmlLimitedBots;
+  return Buffer.byteLength(pattern, 'utf8') <= 1024 ? pattern : undefined;
+}
+
 const myAdapter: NextAdapter = {
   name: 'Vercel',
+  getCapabilities({ config }) {
+    return {
+      supportsHtmlLimitedBotPrerenders:
+        getHtmlLimitedBotsPattern(config) !== undefined,
+      supportsPrerenderMethodBypass: true,
+    };
+  },
   async modifyConfig(config, ctx) {
     if (ctx.phase === PHASE_PRODUCTION_BUILD && process.env.CI) {
       // A workaround to speedup Turbopack builds (particularly warm builds). Vercel build cache
@@ -129,8 +144,30 @@ const myAdapter: NextAdapter = {
     const shouldHandleMiddlewareDataResolving = routing.shouldNormalizeNextData;
 
     const i18nConfig = config.i18n;
+    const htmlLimitedBotsRegex = getHtmlLimitedBotsPattern(config);
+
     const vercelConfig: VercelConfig = {
       version: 3,
+      afterCacheBypass:
+        config.cacheComponents && htmlLimitedBotsRegex !== undefined
+          ? [
+              {
+                name: 'HTML Limited Bots',
+                hasAll: [
+                  {
+                    type: 'request.header',
+                    key: 'user-agent',
+                    value: { re: htmlLimitedBotsRegex },
+                  },
+                  {
+                    type: 'cache.response.header',
+                    key: 'x-next-prelude-metadata',
+                    value: { eq: '0' },
+                  },
+                ],
+              },
+            ]
+          : undefined,
       overrides: {},
       wildcard: i18nConfig?.domains
         ? i18nConfig.domains.map((item) => {
