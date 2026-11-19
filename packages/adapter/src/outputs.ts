@@ -14,7 +14,7 @@ import type { RoutesManifest } from 'next/dist/build';
 import type { NextjsParams } from './get-edge-function-source';
 import { getNextjsEdgeFunctionSource } from './get-edge-function-source';
 import { getHandlerSource } from './node-handler';
-import type { PrerenderOutput, VercelConfig } from './types';
+import type { VercelConfig } from './types';
 import { sha256 } from './utils';
 
 /**
@@ -660,7 +660,7 @@ export async function handleNodeOutputs(
 }
 
 export async function handlePrerenderOutputs(
-  prerenderOutputs: Array<PrerenderOutput>,
+  prerenderOutputs: Array<AdapterOutput['PRERENDER']>,
   {
     config,
     hasAppEntries,

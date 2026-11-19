@@ -9,7 +9,6 @@ import {
   handleNodeOutputs,
   handlePrerenderOutputs,
 } from './outputs';
-import type { PrerenderOutput } from './types';
 
 describe('handleNodeOutputs automatic fetch instrumentation', () => {
   let projectDir: string;
@@ -247,7 +246,7 @@ describe('handlePrerenderOutputs', () => {
 
   function makePrerenderOutput(
     fallback: AdapterOutput['PRERENDER']['fallback']
-  ): PrerenderOutput {
+  ): AdapterOutput['PRERENDER'] {
     return {
       id: 'prerender-1',
       pathname: '/blog',
@@ -279,7 +278,7 @@ describe('handlePrerenderOutputs', () => {
     ['parent-1', parentOutput],
   ]);
 
-  async function handlePrerenderOutput(output: PrerenderOutput) {
+  async function handlePrerenderOutput(output: AdapterOutput['PRERENDER']) {
     await handlePrerenderOutputs([output], {
       config: {},
       vercelOutputDir,
@@ -367,7 +366,7 @@ describe('handlePrerenderOutputs', () => {
   });
 
   describe('initialMetadata', () => {
-    async function writtenConfig(output: PrerenderOutput) {
+    async function writtenConfig(output: AdapterOutput['PRERENDER']) {
       await handlePrerenderOutputs([output], {
         config: {},
         vercelOutputDir,

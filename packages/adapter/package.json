@@ -28,6 +28,7 @@
     "esbuild": "0.25.10",
     "fs-extra": "11.2.0",
     "next": "catalog:",
+    "next-legacy": "npm:next@16.5.0-canary.40",
     "picomatch": "4.0.1",
     "source-map": "0.7.4",
     "vitest": "3.2.7",

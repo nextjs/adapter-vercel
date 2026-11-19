@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
+import type { NextConfigComplete } from 'next/dist/server/config-shared';
 import { HTML_LIMITED_BOT_UA_RE_STRING } from 'next/dist/shared/lib/router/utils/is-bot';
 import { collectGoRouteOutputs, handleGoOutputs } from './go-outputs';
 import {
@@ -29,19 +30,12 @@ import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
-type BuildContext = Parameters<NonNullable<NextAdapter['onBuildComplete']>>[0];
-
-function getHtmlLimitedBotsPattern(config: BuildContext['config']) {
+function getHtmlLimitedBotsPattern(config: NextConfigComplete) {
   const pattern = config.htmlLimitedBots || HTML_LIMITED_BOT_UA_RE_STRING;
   return Buffer.byteLength(pattern, 'utf8') <= 1024 ? pattern : undefined;
 }
 
-const myAdapter: NextAdapter & {
-  getCapabilities: (ctx: { config: BuildContext['config'] }) => {
-    supportsHtmlLimitedBotPrerenders: boolean;
-    supportsPrerenderMethodBypass: boolean;
-  };
-} = {
+const myAdapter: NextAdapter = {
   name: 'Vercel',
   getCapabilities({ config }) {
     return {
