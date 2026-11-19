@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { normalizeRoutes, type RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
+import { PHASE_PRODUCTION_BUILD } from 'next/constants';
+import loadConfig from 'next/dist/server/config';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GoRouteOutput } from './go-outputs';
 import adapter from './index';
@@ -255,11 +257,12 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
         distDir,
         buildId: 'go-routing',
         nextVersion: '16.4.0-canary.38',
-        config: {
-          basePath: '/base',
-          pageExtensions: ['tsx', 'ts'],
-          experimental: {},
-        },
+        config: await loadConfig(PHASE_PRODUCTION_BUILD, root, {
+          customConfig: {
+            basePath: '/base',
+            pageExtensions: ['tsx', 'ts'],
+          },
+        }),
         outputs: {
           appRoutes: goOutputs,
           appPages: [

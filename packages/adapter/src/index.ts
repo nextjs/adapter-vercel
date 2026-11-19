@@ -4,7 +4,6 @@ import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import type { NextConfigComplete } from 'next/dist/server/config-shared';
-import { HTML_LIMITED_BOT_UA_RE_STRING } from 'next/dist/shared/lib/router/utils/is-bot';
 import { collectGoRouteOutputs, handleGoOutputs } from './go-outputs';
 import {
   type FuncOutputs,
@@ -31,7 +30,7 @@ import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
 function getHtmlLimitedBotsPattern(config: NextConfigComplete) {
-  const pattern = config.htmlLimitedBots || HTML_LIMITED_BOT_UA_RE_STRING;
+  const pattern = config.htmlLimitedBots;
   return Buffer.byteLength(pattern, 'utf8') <= 1024 ? pattern : undefined;
 }
 
