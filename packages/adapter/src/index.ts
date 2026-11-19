@@ -38,14 +38,14 @@ function getHtmlLimitedBotsPattern(config: BuildContext['config']) {
 
 const myAdapter: NextAdapter & {
   getCapabilities: (ctx: { config: BuildContext['config'] }) => {
-    handlesHtmlLimitedBotPrerenders: boolean;
+    supportsHtmlLimitedBotPrerenders: boolean;
     supportsPrerenderMethodBypass: boolean;
   };
 } = {
   name: 'Vercel',
   getCapabilities({ config }) {
     return {
-      handlesHtmlLimitedBotPrerenders:
+      supportsHtmlLimitedBotPrerenders:
         getHtmlLimitedBotsPattern(config) !== undefined,
       supportsPrerenderMethodBypass: true,
     };

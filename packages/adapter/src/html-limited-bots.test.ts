@@ -165,7 +165,7 @@ describe('HTML-limited bot builds', () => {
       expect(context.config.htmlLimitedBots).toBe(resolvedPattern);
       const supported = Buffer.byteLength(resolvedPattern, 'utf8') <= 1024;
       expect(adapter.getCapabilities({ config: context.config })).toEqual({
-        handlesHtmlLimitedBotPrerenders: supported,
+        supportsHtmlLimitedBotPrerenders: supported,
         supportsPrerenderMethodBypass: true,
       });
       const vercelConfig: VercelConfig = JSON.parse(
