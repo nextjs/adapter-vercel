@@ -29,6 +29,8 @@ import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
+// The deployment matcher limits regexes to 1024 UTF-8 bytes. Returning
+// undefined keeps the per-route bot bypass and omits the deployment policy.
 function getHtmlLimitedBotsPattern(config: NextConfigComplete) {
   const pattern = config.htmlLimitedBots;
   return Buffer.byteLength(pattern, 'utf8') <= 1024 ? pattern : undefined;
