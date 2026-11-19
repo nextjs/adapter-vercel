@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.1.0-beta.39
+
+### Patch Changes
+
+- [#168](https://github.com/nextjs/adapter-vercel/pull/168) [`72791e8`](https://github.com/nextjs/adapter-vercel/commit/72791e8d15d8e2082b3e9cf22808c3541781154a) Thanks [@unstubbable](https://github.com/unstubbable)! - Declare support for HTML-limited bot prerenders and method-based prerender bypass rules through getCapabilities. Emit the deployment-level bot policy and preserve the bypass conditions supplied by Next.js.
+
 ## 0.1.0-beta.38
 
 ### Minor Changes
