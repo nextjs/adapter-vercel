@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Route, RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter } from 'next';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
+import { HTML_LIMITED_BOT_UA_RE_STRING } from 'next/dist/shared/lib/router/utils/is-bot';
 import { collectGoRouteOutputs, handleGoOutputs } from './go-outputs';
 import {
   type FuncOutputs,
@@ -28,16 +29,24 @@ import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
+type BuildContext = Parameters<NonNullable<NextAdapter['onBuildComplete']>>[0];
+
+function getHtmlLimitedBotsPattern(config: BuildContext['config']) {
+  const pattern = config.htmlLimitedBots || HTML_LIMITED_BOT_UA_RE_STRING;
+  return Buffer.byteLength(pattern, 'utf8') <= 1024 ? pattern : undefined;
+}
+
 const myAdapter: NextAdapter & {
-  getCapabilities: () => {
+  getCapabilities: (ctx: { config: BuildContext['config'] }) => {
     handlesHtmlLimitedBotPrerenders: boolean;
     supportsPrerenderMethodBypass: boolean;
   };
 } = {
   name: 'Vercel',
-  getCapabilities() {
+  getCapabilities({ config }) {
     return {
-      handlesHtmlLimitedBotPrerenders: true,
+      handlesHtmlLimitedBotPrerenders:
+        getHtmlLimitedBotsPattern(config) !== undefined,
       supportsPrerenderMethodBypass: true,
     };
   },
@@ -140,35 +149,30 @@ const myAdapter: NextAdapter & {
     const shouldHandleMiddlewareDataResolving = routing.shouldNormalizeNextData;
 
     const i18nConfig = config.i18n;
-    const htmlLimitedBotsRegex = config.htmlLimitedBots;
-
-    if (config.cacheComponents && htmlLimitedBotsRegex === undefined) {
-      throw new Error(
-        'Expected the resolved htmlLimitedBots pattern for a Cache Components build.'
-      );
-    }
+    const htmlLimitedBotsRegex = getHtmlLimitedBotsPattern(config);
 
     const vercelConfig: VercelConfig = {
       version: 3,
-      afterCacheBypass: config.cacheComponents
-        ? [
-            {
-              name: 'HTML Limited Bots',
-              hasAll: [
-                {
-                  type: 'request.header',
-                  key: 'user-agent',
-                  value: { re: `.*(?:${htmlLimitedBotsRegex}).*` },
-                },
-                {
-                  type: 'cache.response.header',
-                  key: 'x-next-prelude-metadata',
-                  value: { eq: '0' },
-                },
-              ],
-            },
-          ]
-        : undefined,
+      afterCacheBypass:
+        config.cacheComponents && htmlLimitedBotsRegex !== undefined
+          ? [
+              {
+                name: 'HTML Limited Bots',
+                hasAll: [
+                  {
+                    type: 'request.header',
+                    key: 'user-agent',
+                    value: { re: htmlLimitedBotsRegex },
+                  },
+                  {
+                    type: 'cache.response.header',
+                    key: 'x-next-prelude-metadata',
+                    value: { eq: '0' },
+                  },
+                ],
+              },
+            ]
+          : undefined,
       overrides: {},
       wildcard: i18nConfig?.domains
         ? i18nConfig.domains.map((item) => {
