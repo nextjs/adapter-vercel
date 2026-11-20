@@ -7,41 +7,59 @@ import { promisify } from 'node:util';
 import { build as bundle } from 'esbuild';
 import type { NextAdapter } from 'next';
 import { afterEach, describe, expect, it } from 'vitest';
-import adapter from './index';
 import type { VercelConfig } from './types';
 
 type BuildContext = Parameters<NonNullable<NextAdapter['onBuildComplete']>>[0];
+type Capabilities = ReturnType<NonNullable<NextAdapter['getCapabilities']>>;
 const execFileAsync = promisify(execFile);
 const cases = [
   {
     name: 'the normalized default pattern',
     pattern: undefined,
     cacheComponents: true,
+    bypassPolicies: '1',
   },
   {
     name: 'a custom pattern',
     pattern: 'MyHTMLLimitedBot|Discordbot',
     cacheComponents: true,
+    bypassPolicies: '1',
   },
   {
     name: 'a pattern at the byte limit',
     pattern: 'x'.repeat(1024),
     cacheComponents: true,
+    bypassPolicies: '1',
   },
   {
     name: 'an oversized ASCII pattern',
     pattern: 'x'.repeat(1025),
     cacheComponents: true,
+    bypassPolicies: '1',
   },
   {
     name: 'an oversized UTF-8 pattern',
     pattern: 'é'.repeat(513),
     cacheComponents: true,
+    bypassPolicies: '1',
   },
   {
     name: 'a build without Cache Components',
     pattern: 'MyHTMLLimitedBot',
     cacheComponents: false,
+    bypassPolicies: '1',
+  },
+  {
+    name: 'an unset prerender bypass flag',
+    pattern: undefined,
+    cacheComponents: true,
+    bypassPolicies: undefined,
+  },
+  {
+    name: 'a disabled prerender bypass flag',
+    pattern: undefined,
+    cacheComponents: true,
+    bypassPolicies: '0',
   },
 ];
 
@@ -74,7 +92,7 @@ describe.each([
 
     it.each(cases)(
       'preserves compatible output for $name',
-      async ({ pattern, cacheComponents }) => {
+      async ({ pattern, cacheComponents, bypassPolicies }) => {
         const projectDir = await fs.mkdtemp(
           path.join(os.tmpdir(), 'adapter-html-bots-')
         );
@@ -127,14 +145,16 @@ describe.each([
       const adapterModule = require('./adapter.cjs');
       const adapter = adapterModule.default ?? adapterModule;
       let capabilityCalls = 0;
+      let capabilities;
       module.exports = {
         ...adapter,
         getCapabilities(context) {
           capabilityCalls++;
-          return adapter.getCapabilities(context);
+          capabilities = adapter.getCapabilities(context);
+          return capabilities;
         },
         onBuildComplete(context) {
-          fs.writeFileSync('build-complete.json', JSON.stringify({ ...context, capabilityCalls }));
+          fs.writeFileSync('build-complete.json', JSON.stringify({ ...context, capabilityCalls, capabilities }));
           return adapter.onBuildComplete(context);
         },
       };
@@ -155,6 +175,7 @@ describe.each([
         const buildEnv: NodeJS.ProcessEnv = {
           ...process.env,
           NEXT_TELEMETRY_DISABLED: '1',
+          VERCEL_NEXT_ADAPTER_PRERENDER_BYPASS_POLICIES: bypassPolicies,
         };
         if (packageName === 'next-legacy') {
           // Legacy builds use their installed bindings, independent of local
@@ -174,7 +195,10 @@ describe.each([
           throw new Error(`${error.stdout}\n${error.stderr}`, { cause: error });
         });
 
-        const context: BuildContext & { capabilityCalls: number } = JSON.parse(
+        const context: BuildContext & {
+          capabilityCalls: number;
+          capabilities?: Capabilities;
+        } = JSON.parse(
           await fs.readFile(
             path.join(projectDir, 'build-complete.json'),
             'utf8'
@@ -187,18 +211,25 @@ describe.each([
         ).toBe('APP_PAGE');
         const resolvedPattern = pattern ?? HTML_LIMITED_BOT_UA_RE_STRING;
         expect(context.config.htmlLimitedBots).toBe(resolvedPattern);
-        const supported = Buffer.byteLength(resolvedPattern, 'utf8') <= 1024;
-        expect(adapter.getCapabilities?.({ config: context.config })).toEqual({
-          supportsHtmlLimitedBotPrerenders: supported,
-          supportsPrerenderMethodBypass: true,
-        });
+        const bypassPoliciesEnabled = bypassPolicies === '1';
+        const botPolicySupported =
+          bypassPoliciesEnabled &&
+          Buffer.byteLength(resolvedPattern, 'utf8') <= 1024;
+        expect(context.capabilities).toEqual(
+          supportsCapabilities
+            ? {
+                supportsHtmlLimitedBotPrerenders: botPolicySupported,
+                supportsPrerenderMethodBypass: bypassPoliciesEnabled,
+              }
+            : undefined
+        );
         const vercelConfig: VercelConfig = JSON.parse(
           await fs.readFile(
             path.join(projectDir, '.next/output/config.json'),
             'utf8'
           )
         );
-        if (cacheComponents && supported) {
+        if (cacheComponents && botPolicySupported) {
           expect(vercelConfig.afterCacheBypass).toEqual([
             {
               name: 'HTML Limited Bots',
@@ -240,10 +271,10 @@ describe.each([
           },
         ];
         const rules = [
-          ...(supportsCapabilities
+          ...(supportsCapabilities && bypassPoliciesEnabled
             ? [{ type: 'method', value: 'POST' }]
             : actionRules),
-          ...(cacheComponents && !(supportsCapabilities && supported)
+          ...(cacheComponents && !(supportsCapabilities && botPolicySupported)
             ? [botRule]
             : []),
         ];
