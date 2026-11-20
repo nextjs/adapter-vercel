@@ -659,6 +659,29 @@ export async function handleNodeOutputs(
   );
 }
 
+function getPrerenderOnMiss(
+  output: AdapterOutput['PRERENDER']
+): 'sync' | 'dynamic' | undefined {
+  if (
+    output.routeType === undefined ||
+    output.routeType === 'route' ||
+    output.response === undefined
+  ) {
+    return undefined;
+  }
+
+  switch (output.compute) {
+    case 'static':
+    case 'blocking':
+      return 'sync';
+    case 'dynamic':
+    case 'resuming':
+      return 'dynamic';
+    default:
+      return undefined;
+  }
+}
+
 export async function handlePrerenderOutputs(
   prerenderOutputs: Array<AdapterOutput['PRERENDER']>,
   {
@@ -831,12 +854,11 @@ export async function handlePrerenderOutputs(
               bypassToken: output.config.bypassToken,
               experimentalBypassFor: output.config.bypassFor,
 
-              // Build-time serving metadata, carried verbatim from Next.js.
-              // Next.js sets the taxonomy only on a prerender group's primary
-              // output, so sibling RSC/data/segment configs omit the field,
-              // and older Next.js versions omit it everywhere. The values
-              // describe the deployment as it was built — revalidation can
-              // change a route's behavior over the deployment's lifetime.
+              onMiss: getPrerenderOnMiss(output),
+
+              // Each classified output supplies its own build-time metadata.
+              // Unclassified outputs and older Next.js versions omit it.
+              // Revalidation can change a route's behavior after deployment.
               initialMetadata:
                 output.compute !== undefined
                   ? {
