@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.1.0-beta.40
+
+### Patch Changes
+
+- [#171](https://github.com/nextjs/adapter-vercel/pull/171) [`1765c7b`](https://github.com/nextjs/adapter-vercel/commit/1765c7bbfc99d8286c1f08bd9d916b27ed8cad69) Thanks [@unstubbable](https://github.com/unstubbable)! - Require `VERCEL_NEXT_ADAPTER_PRERENDER_BYPASS_POLICIES=1` to enable the HTML-limited bot policy and method-based prerender bypass rules.
+
 ## 0.1.0-beta.39
 
 ### Patch Changes
