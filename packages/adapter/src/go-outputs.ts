@@ -300,25 +300,36 @@ function loadGoPackager(): GoPackager {
   return packager as GoPackager;
 }
 
+function hasExactKeys(
+  value: unknown,
+  keys: string[]
+): value is Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+function isGoExecutableFile(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.fsPath === 'string' &&
+    path.isAbsolute(value.fsPath) &&
+    value.mode === 0o755 &&
+    Object.keys(value).every((key) => key === 'fsPath' || key === 'mode')
+  );
+}
+
 function assertPreparedGoFunction(
   value: unknown
 ): asserts value is PreparedGoFunction {
   if (isRecord(value) && 'files' in value) {
     if (
-      Object.keys(value).length !== 1 ||
-      !Object.hasOwn(value, 'files') ||
-      !isRecord(value.files) ||
-      Object.keys(value.files).length !== 2 ||
-      !Object.hasOwn(value.files, 'executable') ||
-      !Object.hasOwn(value.files, 'user-server') ||
-      Object.values(value.files).some(
-        (file) =>
-          !isRecord(file) ||
-          typeof file.fsPath !== 'string' ||
-          !path.isAbsolute(file.fsPath) ||
-          file.mode !== 0o755 ||
-          Object.keys(file).some((key) => key !== 'fsPath' && key !== 'mode')
-      )
+      !hasExactKeys(value, ['files']) ||
+      !hasExactKeys(value.files, ['executable', 'user-server']) ||
+      !isGoExecutableFile(value.files.executable) ||
+      !isGoExecutableFile(value.files['user-server'])
     ) {
       throw new Error(
         'Go packager must provide executable and user-server files'
