@@ -18,16 +18,26 @@ type BuildOutputs = Parameters<
   NonNullable<NextAdapter['onBuildComplete']>
 >[0]['outputs'];
 
+/** A container image built by the host, in a registry or a staged OCI layout. */
 type PreparedGoFunction = {
-  files: Record<string, { fsPath: string; mode: number }>;
+  handler: string;
+  image?: { type: 'oci-layout'; directory: string };
 };
 
+/**
+ * Protocol version 2: the host builds images and the adapter writes functions.
+ * close releases build resources, including any staged OCI layouts.
+ */
 type GoPackager = {
-  version: 1;
+  version: 2;
   prepareGoFunction(options: {
     userServerPath: string;
   }): PreparedGoFunction | Promise<PreparedGoFunction>;
+  close?(): void | Promise<void>;
 };
+
+const GO_PACKAGER_VERSION = 2;
+const IMAGE_DIR = 'image';
 
 const RESERVED_NAMES = new Set([
   'executable',
@@ -239,11 +249,12 @@ function loadGoPackager(): GoPackager {
   const packager: unknown = require(modulePath);
   if (
     !isRecord(packager) ||
-    packager.version !== 1 ||
-    typeof packager.prepareGoFunction !== 'function'
+    packager.version !== GO_PACKAGER_VERSION ||
+    typeof packager.prepareGoFunction !== 'function' ||
+    (packager.close !== undefined && typeof packager.close !== 'function')
   ) {
     throw new Error(
-      'Unsupported @vercel/next Go packager: expected protocol version 1'
+      `Unsupported @vercel/next Go packager: expected protocol version ${GO_PACKAGER_VERSION}`
     );
   }
   return packager as GoPackager;
@@ -252,29 +263,29 @@ function loadGoPackager(): GoPackager {
 function assertPreparedGoFunction(
   value: unknown
 ): asserts value is PreparedGoFunction {
-  if (!isRecord(value) || !isRecord(value.files)) {
-    throw new Error('Invalid Go packager response');
-  }
   if (
-    Object.keys(value.files).length !== 2 ||
-    !Object.hasOwn(value.files, 'executable') ||
-    !Object.hasOwn(value.files, 'user-server')
+    !isRecord(value) ||
+    typeof value.handler !== 'string' ||
+    !value.handler ||
+    Object.keys(value).some((key) => key !== 'handler' && key !== 'image')
   ) {
     throw new Error(
-      'Go packager must provide executable and user-server files'
+      'Go packager must return a container image handler and optional image'
     );
   }
-  for (const file of Object.values(value.files)) {
-    if (
-      !isRecord(file) ||
-      typeof file.fsPath !== 'string' ||
-      !path.isAbsolute(file.fsPath) ||
-      file.mode !== 0o755
-    ) {
-      throw new Error(
-        'Go packager files must have absolute paths and mode 0755'
-      );
-    }
+  if (
+    value.image !== undefined &&
+    (!isRecord(value.image) ||
+      value.image.type !== 'oci-layout' ||
+      typeof value.image.directory !== 'string' ||
+      !path.isAbsolute(value.image.directory) ||
+      Object.keys(value.image).some(
+        (key) => key !== 'type' && key !== 'directory'
+      ))
+  ) {
+    throw new Error(
+      'Go packager image must be an OCI layout with an absolute directory'
+    );
   }
 }
 
@@ -324,10 +335,14 @@ async function existingGoFunction(functionDir: string): Promise<boolean> {
       return undefined;
     }
   })();
+  // Recognize containers and executable functions from earlier adapter builds.
   if (
     !isRecord(previousConfig) ||
-    previousConfig.runtime !== 'executable' ||
-    previousConfig.handler !== 'executable' ||
+    (previousConfig.runtime !== 'container' &&
+      !(
+        previousConfig.runtime === 'executable' &&
+        previousConfig.handler === 'executable'
+      )) ||
     previousConfig.runtimeLanguage !== 'go' ||
     !isRecord(previousConfig.framework) ||
     previousConfig.framework.slug !== 'nextjs'
@@ -384,6 +399,33 @@ export async function handleGoOutputs(
 ): Promise<void> {
   if (!outputs.length) return;
   const packager = loadGoPackager();
+  try {
+    await writeGoFunctions(packager, outputs, {
+      config,
+      projectDir,
+      nextVersion,
+      vercelOutputDir,
+    });
+  } finally {
+    await packager.close?.();
+  }
+}
+
+async function writeGoFunctions(
+  packager: GoPackager,
+  outputs: GoOutput[],
+  {
+    config,
+    projectDir,
+    nextVersion,
+    vercelOutputDir,
+  }: {
+    config: NextConfig;
+    projectDir: string;
+    nextVersion: string;
+    vercelOutputDir: string;
+  }
+): Promise<void> {
   const builderConfig = JSON.parse(
     process.env.NEXT_ADAPTER_VERCEL_CONFIG || '{}'
   );
@@ -392,6 +434,11 @@ export async function handleGoOutputs(
   const functionPaths = new Map<string, string>();
   for (const output of outputs) {
     assertGoRouteOutput(output);
+    if (Object.keys(output.assets).length > 0) {
+      throw new Error(
+        `Go function ${output.sourcePage}.go cannot include separate assets because Go functions run as container images. Embed them in the executable, for example with go:embed.`
+      );
+    }
     const pathname =
       output.type === AdapterOutputType.MIDDLEWARE
         ? output.pathname
@@ -404,6 +451,14 @@ export async function handleGoOutputs(
       throw new Error(`Conflicting Go function output: ${pathname}`);
     functionPaths.set(caseInsensitivePath, functionPath);
   }
+
+  // Prepare all images before writing any functions, preserving previous
+  // output if an image build fails.
+  const prepared: {
+    functionDir: string;
+    functionConfig: Record<string, unknown>;
+    image: PreparedGoFunction;
+  }[] = [];
   for (const output of outputs) {
     const isMiddleware = output.type === AdapterOutputType.MIDDLEWARE;
     // sourcePage is /proxy or /src/proxy; function config needs a relative filename.
@@ -432,56 +487,62 @@ export async function handleGoOutputs(
       sourceFile,
       config: builderConfig,
     });
-    const prepared: unknown = await packager.prepareGoFunction({
-      userServerPath: output.filePath,
-    });
-    assertPreparedGoFunction(prepared);
     if (overrides.architecture && overrides.architecture !== 'x86_64') {
       throw new Error(
         `Go target architecture conflicts with function configuration for ${sourceFile}`
       );
     }
+    const regions =
+      overrides.regions ?? preferredRegions(output.config.preferredRegion);
+    const image: unknown = await packager.prepareGoFunction({
+      userServerPath: output.filePath,
+    });
+    assertPreparedGoFunction(image);
     const pathname =
       output.type === AdapterOutputType.MIDDLEWARE
         ? output.pathname
         : normalizeIndexPathname(output.pathname, config);
-    const functionDir = path.join(functionsDir, `${pathname.slice(1)}.func`);
-    await ensureFunctionParent(functionsDir, functionDir);
-    await existingGoFunction(functionDir);
-    // Assemble in a fresh directory so reruns cannot retain stale assets or
-    // follow a symlink left by a previous output. Preserve the prior function
-    // if copying any of the replacement's files fails.
-    const stagingDir = await fs.mkdtemp(
-      path.join(path.dirname(functionDir), '.go-function-')
-    );
-    try {
-      for (const [destination, source] of Object.entries(output.assets)) {
-        const sourceStat = await fs.stat(source);
-        if (!sourceStat.isFile())
-          throw new Error(`Go asset is not a regular file: ${destination}`);
-        const destinationPath = path.join(stagingDir, destination);
-        await fs.mkdir(path.dirname(destinationPath), { recursive: true });
-        await fs.copyFile(source, destinationPath);
-        await fs.chmod(destinationPath, sourceStat.mode & 0o777);
-      }
-      for (const [destination, file] of Object.entries(prepared.files)) {
-        await fs.copyFile(file.fsPath, path.join(stagingDir, destination));
-        await fs.chmod(path.join(stagingDir, destination), file.mode);
-      }
+    prepared.push({
+      functionDir: path.join(functionsDir, `${pathname.slice(1)}.func`),
       // Deliberately omit Node launcher, multipayload and bundling properties.
-      const functionConfig = {
+      functionConfig: {
         ...overrides,
-        runtime: 'executable',
-        handler: 'executable',
+        runtime: 'container',
+        handler: image.handler,
+        ...(image.image && {
+          image: { type: 'oci-layout', path: IMAGE_DIR },
+        }),
         runtimeLanguage: 'go',
         architecture: 'x86_64',
         supportsResponseStreaming: true,
         maxDuration: output.config.maxDuration ?? overrides.maxDuration,
-        regions:
-          overrides.regions ?? preferredRegions(output.config.preferredRegion),
+        regions,
         operationType: 'API',
         framework: { slug: 'nextjs', version: nextVersion },
-      };
+      },
+      image,
+    });
+  }
+
+  for (const { functionDir, functionConfig, image } of prepared) {
+    await ensureFunctionParent(functionsDir, functionDir);
+    await existingGoFunction(functionDir);
+    // Assemble in a fresh directory so reruns cannot retain stale files or
+    // follow a symlink left by a previous output. Preserve the prior function
+    // if assembling the replacement fails.
+    const stagingDir = await fs.mkdtemp(
+      path.join(path.dirname(functionDir), '.go-function-')
+    );
+    try {
+      if (image.image) {
+        // Shared executables can share a staged layout, possibly on another
+        // filesystem, so copy it instead of moving it into a function.
+        await fs.cp(image.image.directory, path.join(stagingDir, IMAGE_DIR), {
+          recursive: true,
+          errorOnExist: true,
+          force: false,
+        });
+      }
       await fs.writeFile(
         path.join(stagingDir, '.vc-config.json'),
         JSON.stringify(functionConfig, null, 2)
