@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -226,13 +227,12 @@ describe('adapter-generated mixed Go and Node routing', () => {
         fs.writeFile(nodeEntrypoint, 'exports.handler = () => {};'),
         fs.writeFile(
           packagerPath,
-          `exports.version = 1;
-exports.prepareGoFunction = ({ userServerPath }) => ({
-  files: {
-    executable: { fsPath: userServerPath, mode: 0o755 },
-    'user-server': { fsPath: userServerPath, mode: 0o755 },
-  },
-});`
+          `exports.version = 2;
+exports.prepareGoFunction = async ({ userServerPath, type }) => {
+  if (type !== 'route') throw new Error('Expected route packaging');
+  return { handler: 'registry.example.com/next-go@sha256:' + require('node:crypto').createHash('sha256')
+    .update(await require('node:fs/promises').readFile(userServerPath)).digest('hex') };
+};`
         ),
       ]);
       const goOutputs = [
@@ -420,21 +420,16 @@ exports.prepareGoFunction = ({ userServerPath }) => ({
           await fs.readFile(path.join(functionDir, '.vc-config.json'), 'utf8')
         );
         expect(functionConfig).toEqual({
-          runtime: 'executable',
-          handler: 'executable',
+          runtime: 'container',
+          handler: `registry.example.com/next-go@sha256:${createHash('sha256').update('precompiled server').digest('hex')}`,
           runtimeLanguage: 'go',
           architecture: 'x86_64',
           supportsResponseStreaming: true,
           operationType: 'API',
           framework: { slug: 'nextjs', version: context.nextVersion },
         });
-        expect(
-          await fs.readFile(path.join(functionDir, 'user-server'), 'utf8')
-        ).toBe('precompiled server');
         expect((await fs.readdir(functionDir)).sort()).toEqual([
           '.vc-config.json',
-          'executable',
-          'user-server',
         ]);
       }
       const nodeConfig = JSON.parse(
