@@ -1,5 +1,11 @@
 # @next-community/adapter-vercel
 
+## 0.1.0-beta.41
+
+### Minor Changes
+
+- [#173](https://github.com/nextjs/adapter-vercel/pull/173) [`e192a3e`](https://github.com/nextjs/adapter-vercel/commit/e192a3eca0cbadf2aa477cc18ffb7012151998cf) Thanks [@timneutkens](https://github.com/timneutkens)! - Use version 2 of the hosted Go packager contract, allowing the packager to choose container or executable packaging for each output. Go route handlers become container functions, while `proxy.go` middleware stays executable according to the packager result. Containers use an image handler and optional staged OCI layout; executables include the launcher, user server, and assets. Separate assets on container outputs must be embedded with `go:embed`. Version 1 packagers are no longer supported, and an optional close hook releases build resources.
+
 ## 0.1.0-beta.40
 
 ### Patch Changes
