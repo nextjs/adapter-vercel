@@ -228,10 +228,11 @@ describe('adapter-generated mixed Go and Node routing', () => {
         fs.writeFile(
           packagerPath,
           `exports.version = 2;
-exports.prepareGoFunction = async ({ userServerPath }) => ({
-  handler: 'registry.example.com/next-go@sha256:' + require('node:crypto').createHash('sha256')
-    .update(await require('node:fs/promises').readFile(userServerPath)).digest('hex'),
-});`
+exports.prepareGoFunction = async ({ userServerPath, type }) => {
+  if (type !== 'route') throw new Error('Expected route packaging');
+  return { handler: 'registry.example.com/next-go@sha256:' + require('node:crypto').createHash('sha256')
+    .update(await require('node:fs/promises').readFile(userServerPath)).digest('hex') };
+};`
         ),
       ]);
       const goOutputs = [

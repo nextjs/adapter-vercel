@@ -19,19 +19,26 @@ type BuildOutputs = Parameters<
 >[0]['outputs'];
 
 /** A container image built by the host, in a registry or a staged OCI layout. */
-type PreparedGoFunction = {
+type PreparedGoContainer = {
   handler: string;
   image?: { type: 'oci-layout'; directory: string };
 };
 
+type PreparedGoExecutable = {
+  files: Record<'executable' | 'user-server', { fsPath: string; mode: number }>;
+};
+
+type PreparedGoFunction = PreparedGoContainer | PreparedGoExecutable;
+
 /**
- * Protocol version 2: the host builds images and the adapter writes functions.
+ * Protocol version 2: the host chooses packaging and the adapter writes functions.
  * close releases build resources, including any staged OCI layouts.
  */
 type GoPackager = {
   version: 2;
   prepareGoFunction(options: {
     userServerPath: string;
+    type: 'route' | 'middleware';
   }): PreparedGoFunction | Promise<PreparedGoFunction>;
   close?(): void | Promise<void>;
 };
@@ -39,8 +46,35 @@ type GoPackager = {
 const GO_PACKAGER_VERSION = 2;
 const IMAGE_DIR = 'image';
 
+const RESERVED_NAMES = new Set([
+  'executable',
+  'user-server',
+  '.vc-config.json',
+]);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function assertRelativeFilePath(
+  value: unknown,
+  description: string
+): asserts value is string {
+  if (
+    typeof value !== 'string' ||
+    !value ||
+    value.includes('\\') ||
+    value.includes('\0') ||
+    path.posix.isAbsolute(value) ||
+    /^[A-Za-z]:/.test(value) ||
+    value
+      .split('/')
+      .some((segment) => !segment || segment === '.' || segment === '..')
+  ) {
+    throw new Error(
+      `Invalid Go ${description}: expected a normalized relative file path`
+    );
+  }
 }
 
 function assertPathname(
@@ -144,33 +178,49 @@ async function resolveGoSourceFile(
   return sourceFile;
 }
 
-async function assertGoRouteAssets(
-  output: GoOutput,
-  projectDir: string,
-  usesSrcDir?: boolean
-): Promise<void> {
-  // Next.js attaches shared Node assets to proxy.go outputs. They are unused
-  // by the Go container, so only route handlers must reject separate assets.
-  if (
-    output.type !== AdapterOutputType.APP_ROUTE ||
-    !Object.keys(output.assets).length
-  )
-    return;
-  const sourceFile = await resolveGoSourceFile(
-    output,
-    projectDir,
-    usesSrcDir ?? (await usesSrcAppDirectory(projectDir))
-  );
-  throw new Error(
-    `Go function ${sourceFile} cannot include separate assets because Go functions run as container images. Embed them in the executable, for example with go:embed.`
-  );
+function assertGoAssets(assets: GoOutput['assets']): void {
+  const destinations = Object.keys(assets);
+  const portableDestinations = new Set<string>();
+  const portablePaths = new Map<string, string>();
+  for (const destination of destinations) {
+    assertRelativeFilePath(destination, 'asset destination');
+    const portableDestination = destination.toLowerCase();
+    if (RESERVED_NAMES.has(portableDestination.split('/')[0])) {
+      throw new Error(`Reserved Go function asset destination: ${destination}`);
+    }
+    if (portableDestinations.has(portableDestination)) {
+      throw new Error(`Conflicting Go asset destinations: ${destination}`);
+    }
+    portableDestinations.add(portableDestination);
+    const parts = destination.split('/');
+    for (let i = 1; i <= parts.length; i++) {
+      const prefix = parts.slice(0, i).join('/');
+      const portablePrefix = prefix.toLowerCase();
+      const previous = portablePaths.get(portablePrefix);
+      if (previous && previous !== prefix) {
+        throw new Error(`Conflicting Go asset destinations: ${destination}`);
+      }
+      portablePaths.set(portablePrefix, prefix);
+    }
+    const source = assets[destination];
+    if (typeof source !== 'string' || !path.isAbsolute(source)) {
+      throw new Error(
+        `Go asset ${destination} requires an absolute source path`
+      );
+    }
+  }
+  for (const destination of portableDestinations) {
+    const parts = destination.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      if (portableDestinations.has(parts.slice(0, i).join('/'))) {
+        throw new Error(`Conflicting Go asset destinations: ${destination}`);
+      }
+    }
+  }
 }
 
 /** Validate before any output is materialized; Node/Edge retain their existing paths. */
-export async function collectGoRouteOutputs(
-  outputs: BuildOutputs,
-  projectDir: string
-): Promise<GoOutput[]> {
+export function collectGoRouteOutputs(outputs: BuildOutputs): GoOutput[] {
   const goOutputs: GoOutput[] = [];
   for (const kind of [
     'appRoutes',
@@ -214,7 +264,6 @@ export async function collectGoRouteOutputs(
         );
       }
       assertGoRouteOutput(output);
-      await assertGoRouteAssets(output, projectDir);
       goOutputs.push(output);
     }
   }
@@ -254,6 +303,29 @@ function loadGoPackager(): GoPackager {
 function assertPreparedGoFunction(
   value: unknown
 ): asserts value is PreparedGoFunction {
+  if (isRecord(value) && 'files' in value) {
+    if (
+      Object.keys(value).length !== 1 ||
+      !Object.hasOwn(value, 'files') ||
+      !isRecord(value.files) ||
+      Object.keys(value.files).length !== 2 ||
+      !Object.hasOwn(value.files, 'executable') ||
+      !Object.hasOwn(value.files, 'user-server') ||
+      Object.values(value.files).some(
+        (file) =>
+          !isRecord(file) ||
+          typeof file.fsPath !== 'string' ||
+          !path.isAbsolute(file.fsPath) ||
+          file.mode !== 0o755 ||
+          Object.keys(file).some((key) => key !== 'fsPath' && key !== 'mode')
+      )
+    ) {
+      throw new Error(
+        'Go packager must provide executable and user-server files'
+      );
+    }
+    return;
+  }
   if (
     !isRecord(value) ||
     typeof value.handler !== 'string' ||
@@ -432,7 +504,6 @@ async function writeGoFunctions(
   const functionPaths = new Map<string, string>();
   for (const output of outputs) {
     assertGoRouteOutput(output);
-    await assertGoRouteAssets(output, projectDir, usesSrcDir);
     const pathname =
       output.type === AdapterOutputType.MIDDLEWARE
         ? output.pathname
@@ -466,10 +537,19 @@ async function writeGoFunctions(
       }
       const regions =
         overrides.regions ?? preferredRegions(output.config.preferredRegion);
-      const image: unknown = await packager.prepareGoFunction({
+      const packaged: unknown = await packager.prepareGoFunction({
         userServerPath: output.filePath,
+        type:
+          output.type === AdapterOutputType.MIDDLEWARE ? 'middleware' : 'route',
       });
-      assertPreparedGoFunction(image);
+      assertPreparedGoFunction(packaged);
+      if ('files' in packaged) {
+        assertGoAssets(output.assets);
+      } else if (Object.keys(output.assets).length > 0) {
+        throw new Error(
+          `Go function ${sourceFile} cannot include separate assets because it runs as a container image. Embed them in the executable, for example with go:embed.`
+        );
+      }
       const pathname =
         output.type === AdapterOutputType.MIDDLEWARE
           ? output.pathname
@@ -479,11 +559,18 @@ async function writeGoFunctions(
         // Deliberately omit Node launcher, multipayload and bundling properties.
         functionConfig: {
           ...overrides,
-          runtime: 'container',
-          handler: image.handler,
-          ...(image.image && {
-            image: { type: 'oci-layout', path: IMAGE_DIR },
-          }),
+          ...('files' in packaged
+            ? {
+                runtime: 'executable',
+                handler: 'executable',
+              }
+            : {
+                runtime: 'container',
+                handler: packaged.handler,
+                ...(packaged.image && {
+                  image: { type: 'oci-layout', path: IMAGE_DIR },
+                }),
+              }),
           runtimeLanguage: 'go',
           architecture: 'x86_64',
           supportsResponseStreaming: true,
@@ -492,7 +579,8 @@ async function writeGoFunctions(
           operationType: 'API',
           framework: { slug: 'nextjs', version: nextVersion },
         },
-        image,
+        packaged,
+        assets: output.assets,
       };
     })
   );
@@ -501,7 +589,7 @@ async function writeGoFunctions(
     return result.value;
   });
 
-  for (const { functionDir, functionConfig, image } of prepared) {
+  for (const { functionDir, functionConfig, packaged, assets } of prepared) {
     await ensureFunctionParent(functionsDir, functionDir);
     await existingGoFunction(functionDir);
     // Assemble in a fresh directory so reruns cannot retain stale files or
@@ -511,14 +599,32 @@ async function writeGoFunctions(
       path.join(path.dirname(functionDir), '.go-function-')
     );
     try {
-      if (image.image) {
+      if ('files' in packaged) {
+        for (const [destination, source] of Object.entries(assets)) {
+          const sourceStat = await fs.stat(source);
+          if (!sourceStat.isFile())
+            throw new Error(`Go asset is not a regular file: ${destination}`);
+          const destinationPath = path.join(stagingDir, destination);
+          await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+          await fs.copyFile(source, destinationPath);
+          await fs.chmod(destinationPath, sourceStat.mode & 0o777);
+        }
+        for (const [destination, file] of Object.entries(packaged.files)) {
+          await fs.copyFile(file.fsPath, path.join(stagingDir, destination));
+          await fs.chmod(path.join(stagingDir, destination), file.mode);
+        }
+      } else if (packaged.image) {
         // Shared executables can share a staged layout, possibly on another
         // filesystem, so copy it instead of moving it into a function.
-        await fs.cp(image.image.directory, path.join(stagingDir, IMAGE_DIR), {
-          recursive: true,
-          errorOnExist: true,
-          force: false,
-        });
+        await fs.cp(
+          packaged.image.directory,
+          path.join(stagingDir, IMAGE_DIR),
+          {
+            recursive: true,
+            errorOnExist: true,
+            force: false,
+          }
+        );
       }
       await fs.writeFile(
         path.join(stagingDir, '.vc-config.json'),

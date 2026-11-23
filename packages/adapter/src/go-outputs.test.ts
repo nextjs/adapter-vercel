@@ -10,7 +10,6 @@ import {
   type GoRouteOutput,
   handleGoOutputs,
 } from './go-outputs';
-import adapter from './index';
 import * as outputUtils from './outputs';
 import {
   getSourceFilePathFromPage,
@@ -23,6 +22,7 @@ describe('hosted Go route outputs', () => {
   let projectDir: string;
   let vercelOutputDir: string;
   let binaryPath: string;
+  let proxyPath: string;
   let assetPath: string;
   let packagerPath: string;
   let packagerCalls: string;
@@ -41,12 +41,14 @@ describe('hosted Go route outputs', () => {
     await fs.mkdir(projectDir, { recursive: true });
     await writeSource('/api/hello/route');
     binaryPath = path.join(root, 'compiled-route');
+    proxyPath = path.join(root, 'proxy');
     assetPath = path.join(root, 'message.txt');
     packagerPath = path.join(root, 'packager.cjs');
     packagerCalls = path.join(root, 'packager-calls.jsonl');
     layoutDir = path.join(root, 'layouts');
     await Promise.all([
       fs.writeFile(binaryPath, 'precompiled application'),
+      fs.writeFile(proxyPath, 'proxy binary'),
       fs.writeFile(assetPath, 'hello asset'),
     ]);
     process.env.NEXT_ADAPTER_VERCEL_GO_PACKAGER_PATH = packagerPath;
@@ -113,8 +115,8 @@ describe('hosted Go route outputs', () => {
     };
   }
 
-  function collect(outputs: ReturnType<typeof collections>) {
-    return collectGoRouteOutputs(outputs, projectDir);
+  async function collect(outputs: ReturnType<typeof collections>) {
+    return collectGoRouteOutputs(outputs);
   }
 
   function handle(outputs: GoRouteOutput[], config = {}) {
@@ -155,8 +157,14 @@ describe('hosted Go route outputs', () => {
       const { createHash } = require('node:crypto');
       const record = (event) => fs.appendFile(${JSON.stringify(packagerCalls)}, JSON.stringify(event) + '\\n');
       exports.version = 2;
-      exports.prepareGoFunction = async ({ userServerPath }) => {
-        await record({ prepare: userServerPath });
+      exports.prepareGoFunction = async ({ userServerPath, type }) => {
+        await record({ prepare: userServerPath, type });
+        if ((type === 'middleware' && !exports.container) || exports.executable) {
+          return { files: {
+            executable: { fsPath: ${JSON.stringify(proxyPath)}, mode: 0o755 },
+            'user-server': { fsPath: userServerPath, mode: 0o755 },
+          } };
+        }
         const binary = await fs.readFile(userServerPath);
         const digest = createHash('sha256').update(binary).digest('hex');
         if (${layout}) {
@@ -234,8 +242,8 @@ describe('hosted Go route outputs', () => {
     const events = await calls();
     expect(events.slice(0, -1)).toEqual(
       expect.arrayContaining([
-        { prepare: binaryPath },
-        { prepare: secondBinaryPath },
+        { prepare: binaryPath, type: 'route' },
+        { prepare: secondBinaryPath, type: 'route' },
       ])
     );
     expect(events).toHaveLength(3);
@@ -403,6 +411,8 @@ describe('hosted Go route outputs', () => {
       await fs.mkdir(path.dirname(packageJsonPath), { recursive: true });
       await fs.writeFile(setupNodePath, '// shared Node environment setup');
       await fs.writeFile(packageJsonPath, JSON.stringify({ type: 'commonjs' }));
+      await fs.chmod(setupNodePath, 0o640);
+      await fs.chmod(packageJsonPath, 0o600);
       const middleware: GoMiddlewareOutput = {
         ...output(),
         type: AdapterOutputType.MIDDLEWARE,
@@ -444,16 +454,54 @@ describe('hosted Go route outputs', () => {
         )
       );
       expect(functionConfig).toMatchObject({
-        runtime: 'container',
-        handler: imageHandler('precompiled application'),
+        runtime: 'executable',
+        handler: 'executable',
         runtimeLanguage: 'go',
         maxDuration: 42,
       });
       expect(
-        await fs.readdir(
-          path.join(vercelOutputDir, 'functions/_middleware.func')
-        )
-      ).toEqual(['.vc-config.json']);
+        (
+          await fs.readdir(
+            path.join(vercelOutputDir, 'functions/_middleware.func')
+          )
+        ).sort()
+      ).toEqual([
+        '.next',
+        '.vc-config.json',
+        'executable',
+        'node_modules',
+        'user-server',
+      ]);
+      const functionDir = path.join(
+        vercelOutputDir,
+        'functions/_middleware.func'
+      );
+      expect(
+        await fs.readFile(path.join(functionDir, 'executable'), 'utf8')
+      ).toBe('proxy binary');
+      expect(
+        await fs.readFile(path.join(functionDir, 'user-server'), 'utf8')
+      ).toBe('precompiled application');
+      for (const file of ['executable', 'user-server']) {
+        expect((await fs.stat(path.join(functionDir, file))).mode & 0o777).toBe(
+          0o755
+        );
+      }
+      for (const [destination, sourcePath] of Object.entries(
+        middleware.assets
+      )) {
+        expect(await fs.readFile(path.join(functionDir, destination))).toEqual(
+          await fs.readFile(sourcePath)
+        );
+        expect(
+          (await fs.stat(path.join(functionDir, destination))).mode & 0o777
+        ).toBe((await fs.stat(sourcePath)).mode & 0o777);
+      }
+      expect(functionConfig).not.toHaveProperty('image');
+      expect(await calls()).toEqual([
+        { prepare: binaryPath, type: 'middleware' },
+        { close: true },
+      ]);
       expect(await fs.readFile(setupNodePath, 'utf8')).toBe(
         '// shared Node environment setup'
       );
@@ -526,18 +574,105 @@ describe('hosted Go route outputs', () => {
     );
   });
 
-  it.each(['data/message.txt', '../escape', '.vc-config.json'])(
-    'rejects route assets during collection regardless of destination: %s',
-    async (destination) => {
+  it('collects Go route assets before the packager selects a runtime', async () => {
+    const route = output({ assets: { 'data/message.txt': assetPath } });
+    expect(await collect(collections([route]))).toEqual([route]);
+    expect(await calls()).toEqual([]);
+  });
+
+  it.each([
+    '../escape',
+    '/absolute',
+    'a/../../escape',
+    'a\\file',
+    'C:/absolute',
+    './alias',
+    'executable',
+    'Executable',
+    'USER-SERVER',
+    'user-server/nested',
+    '.vc-config.json',
+    '.VC-CONFIG.JSON',
+  ])('rejects unsafe executable asset destination %s', async (destination) => {
+    await writePackager('exports.executable = true;');
+    await expect(
+      handle([output({ assets: { [destination]: assetPath } })])
+    ).rejects.toThrow(/Go (asset destination|function asset destination)/);
+    await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it.each([
+    ['data', 'data/file'],
+    ['data/file.txt', 'data/FILE.txt'],
+    ['DATA', 'data/file.txt'],
+    ['Data/first.txt', 'data/second.txt'],
+  ])(
+    'rejects conflicting executable asset destinations %s and %s',
+    async (first, second) => {
+      await writePackager('exports.executable = true;');
       await expect(
-        collect(collections([output({ assets: { [destination]: assetPath } })]))
-      ).rejects.toThrow(
-        /app\/api\/hello\/route\.go cannot include separate assets.*go:embed/
-      );
-      expect(await calls()).toEqual([]);
+        handle([
+          output({ assets: { [first]: assetPath, [second]: assetPath } }),
+        ])
+      ).rejects.toThrow('Conflicting Go asset destinations');
       await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
         code: 'ENOENT',
       });
+    }
+  );
+
+  it('rejects a relative executable asset source', async () => {
+    await writePackager('exports.executable = true;');
+    await expect(
+      handle([output({ assets: { 'data/message.txt': 'relative' } })])
+    ).rejects.toThrow('requires an absolute source path');
+    await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it.each(['missing', 'directory'])(
+    'preserves the prior function and cleans staging when an executable asset is %s',
+    async (kind) => {
+      await handle([output()]);
+      const previousConfig = await readConfig();
+      await writePackager('exports.executable = true;');
+      const replacement = handle([
+        output({
+          assets: {
+            'data/message.txt': assetPath,
+            invalid: kind === 'missing' ? path.join(root, 'missing') : root,
+          },
+        }),
+      ]);
+      if (kind === 'missing') {
+        await expect(replacement).rejects.toMatchObject({ code: 'ENOENT' });
+      } else {
+        await expect(replacement).rejects.toThrow(
+          'Go asset is not a regular file: invalid'
+        );
+      }
+      expect(await readConfig()).toEqual(previousConfig);
+      expect(
+        await fs.readdir(path.join(vercelOutputDir, 'functions/api/hello.func'))
+      ).toEqual(['.vc-config.json']);
+      const entries = await fs.readdir(
+        path.join(vercelOutputDir, 'functions'),
+        { recursive: true }
+      );
+      expect(
+        entries.filter((entry) =>
+          path.basename(entry).startsWith('.go-function-')
+        )
+      ).toEqual([]);
+      expect(await calls()).toEqual([
+        { prepare: binaryPath, type: 'route' },
+        { close: true },
+        { prepare: binaryPath, type: 'route' },
+        { close: true },
+      ]);
     }
   );
 
@@ -549,34 +684,12 @@ describe('hosted Go route outputs', () => {
         await writeSource('/api/hello/route', true);
       }
       await expect(
-        collect(
-          collections([output({ assets: { 'data/message.txt': assetPath } })])
-        )
+        handle([output({ assets: { 'data/message.txt': assetPath } })])
       ).rejects.toThrow(
         `Go function ${src ? 'src/' : ''}app/api/hello/route.go cannot include separate assets`
       );
     }
   );
-
-  it('rejects route assets before the build hook writes Node or static output', async () => {
-    if (!adapter.onBuildComplete) throw new Error('Expected build hook');
-    const outputs = collections([
-      output({ assets: { 'data/message.txt': assetPath } }),
-    ]);
-    outputs.appPages.push({ runtime: 'nodejs' });
-    outputs.staticFiles.push({ type: AdapterOutputType.STATIC_FILE });
-    await expect(
-      adapter.onBuildComplete({
-        projectDir,
-        distDir: path.join(projectDir, '.next'),
-        outputs,
-      } as never)
-    ).rejects.toThrow('app/api/hello/route.go cannot include separate assets');
-    expect(await calls()).toEqual([]);
-    await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-  });
 
   it.each([
     '/../route',
@@ -688,9 +801,9 @@ describe('hosted Go route outputs', () => {
         runtimeLanguage: 'go',
       });
       expect(await calls()).toEqual([
-        { prepare: binaryPath },
+        { prepare: binaryPath, type: 'route' },
         { close: true },
-        { prepare: binaryPath },
+        { prepare: binaryPath, type: 'route' },
         { close: true },
       ]);
     }
@@ -723,9 +836,9 @@ describe('hosted Go route outputs', () => {
       )
     ).toEqual([]);
     expect(await calls()).toEqual([
-      { prepare: binaryPath },
+      { prepare: binaryPath, type: 'route' },
       { close: true },
-      { prepare: binaryPath },
+      { prepare: binaryPath, type: 'route' },
       { close: true },
     ]);
   });
@@ -770,7 +883,6 @@ describe('hosted Go route outputs', () => {
     '{ handler: null }',
     '{ handler: 123 }',
     "{ handler: '' }",
-    "{ handler: 'image', files: {} }",
     "{ handler: 'image', extra: true }",
   ])('rejects an invalid container response: %s', async (response) => {
     await writePackager(`exports.prepareGoFunction = () => (${response});`);
@@ -782,6 +894,170 @@ describe('hosted Go route outputs', () => {
     });
     expect(await calls()).toEqual([{ close: true }]);
   });
+
+  it.each([
+    'null',
+    '{}',
+    '[]',
+    "{ executable: { fsPath: '/proxy', mode: 0o755 } }",
+    "{ executable: { fsPath: '/proxy', mode: 0o755 }, extra: { fsPath: '/server', mode: 0o755 } }",
+    "{ executable: { fsPath: '/proxy', mode: 0o755 }, 'user-server': { fsPath: '/server', mode: 0o755 }, extra: {} }",
+    "{ executable: null, 'user-server': { fsPath: '/server', mode: 0o755 } }",
+    "{ executable: { fsPath: 'relative', mode: 0o755 }, 'user-server': { fsPath: '/server', mode: 0o755 } }",
+    "{ executable: { fsPath: '/proxy', mode: 0o755 }, 'user-server': { fsPath: 'relative', mode: 0o755 } }",
+    "{ executable: { fsPath: '/proxy', mode: 0o644 }, 'user-server': { fsPath: '/server', mode: 0o755 } }",
+    "{ executable: { fsPath: '/proxy', mode: 0o755 }, 'user-server': { fsPath: '/server', mode: 0o644 } }",
+    "{ executable: { fsPath: '/proxy', mode: 0o755, extra: true }, 'user-server': { fsPath: '/server', mode: 0o755 } }",
+  ])('rejects invalid executable files: %s', async (files) => {
+    await writePackager(
+      `exports.prepareGoFunction = () => ({ files: ${files} });`
+    );
+    await expect(handle([output()])).rejects.toThrow(
+      'Go packager must provide executable and user-server files'
+    );
+    expect(await calls()).toEqual([{ close: true }]);
+    await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it.each(['handler', 'image', 'extra'])(
+    'rejects an executable response with an extra %s key',
+    async (key) => {
+      await writePackager(`exports.executable = true;
+        const prepare = exports.prepareGoFunction;
+        exports.prepareGoFunction = async (options) => ({ ...await prepare(options), [${JSON.stringify(key)}]: 'unexpected' });`);
+      await expect(handle([output()])).rejects.toThrow(
+        'Go packager must provide executable and user-server files'
+      );
+      expect(await calls()).toEqual([
+        { prepare: binaryPath, type: 'route' },
+        { close: true },
+      ]);
+      await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    }
+  );
+
+  it('writes an executable route with assets when the packager selects files', async () => {
+    await writePackager('exports.executable = true;');
+    await fs.chmod(assetPath, 0o640);
+    await handle([output({ assets: { 'data/message.txt': assetPath } })]);
+    expect(await readConfig()).toMatchObject({
+      runtime: 'executable',
+      handler: 'executable',
+      runtimeLanguage: 'go',
+    });
+    const functionDir = path.join(vercelOutputDir, 'functions/api/hello.func');
+    expect((await fs.readdir(functionDir)).sort()).toEqual([
+      '.vc-config.json',
+      'data',
+      'executable',
+      'user-server',
+    ]);
+    expect(
+      await fs.readFile(path.join(functionDir, 'data/message.txt'), 'utf8')
+    ).toBe('hello asset');
+    expect(
+      (await fs.stat(path.join(functionDir, 'data/message.txt'))).mode & 0o777
+    ).toBe(0o640);
+    expect(await calls()).toEqual([
+      { prepare: binaryPath, type: 'route' },
+      { close: true },
+    ]);
+  });
+
+  it('rejects middleware assets when the packager selects a container', async () => {
+    await fs.writeFile(path.join(projectDir, 'proxy.go'), 'package main');
+    await writePackager('exports.container = true;');
+    const middleware: GoMiddlewareOutput = {
+      ...output(),
+      type: AdapterOutputType.MIDDLEWARE,
+      id: '/_middleware',
+      pathname: '/_middleware',
+      sourcePage: '/proxy',
+      assets: { 'data/message.txt': assetPath },
+      config: { matchers: [] },
+    };
+    await expect(
+      handleGoOutputs([middleware], {
+        projectDir,
+        vercelOutputDir,
+        nextVersion: '16.5.0',
+        config: {},
+      })
+    ).rejects.toThrow(
+      /proxy.go cannot include separate assets because it runs as a container image.*go:embed/
+    );
+    expect(await calls()).toEqual([
+      { prepare: binaryPath, type: 'middleware' },
+      { close: true },
+    ]);
+    await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it.each([false, true])(
+    'prepares mixed container and executable outputs before writing, with container assets=%s',
+    async (withAssets) => {
+      await fs.writeFile(path.join(projectDir, 'proxy.go'), 'package main');
+      const middleware: GoMiddlewareOutput = {
+        ...output(),
+        type: AdapterOutputType.MIDDLEWARE,
+        id: '/_middleware',
+        pathname: '/_middleware',
+        sourcePage: '/proxy',
+        config: { matchers: [] },
+      };
+      const result = handleGoOutputs(
+        [
+          middleware,
+          output({
+            assets: withAssets ? { 'data/message.txt': assetPath } : {},
+          }),
+        ],
+        {
+          projectDir,
+          vercelOutputDir,
+          nextVersion: '16.5.0',
+          config: {},
+        }
+      );
+      if (withAssets) {
+        await expect(result).rejects.toThrow(
+          /cannot include separate assets.*go:embed/
+        );
+        await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+      } else {
+        await result;
+        expect(await readConfig()).toMatchObject({ runtime: 'container' });
+        expect(await readConfig('_middleware')).toMatchObject({
+          runtime: 'executable',
+          handler: 'executable',
+        });
+        expect(
+          (
+            await fs.readdir(
+              path.join(vercelOutputDir, 'functions/_middleware.func')
+            )
+          ).sort()
+        ).toEqual(['.vc-config.json', 'executable', 'user-server']);
+      }
+      const events = await calls();
+      expect(events.slice(0, -1)).toEqual(
+        expect.arrayContaining([
+          { prepare: binaryPath, type: 'middleware' },
+          { prepare: binaryPath, type: 'route' },
+        ])
+      );
+      expect(events).toHaveLength(3);
+      expect(events.at(-1)).toEqual({ close: true });
+    }
+  );
 
   it.each([
     'null',
@@ -819,7 +1095,7 @@ describe('hosted Go route outputs', () => {
     await writePackager('delete exports.close;');
     await handle([output()]);
     expect(await readConfig()).toMatchObject({ runtime: 'container' });
-    expect(await calls()).toEqual([{ prepare: binaryPath }]);
+    expect(await calls()).toEqual([{ prepare: binaryPath, type: 'route' }]);
   });
 
   it('calls close after writing the function', async () => {
@@ -834,7 +1110,10 @@ describe('hosted Go route outputs', () => {
         await close();
       };`);
     await handle([output()]);
-    expect(await calls()).toEqual([{ prepare: binaryPath }, { close: true }]);
+    expect(await calls()).toEqual([
+      { prepare: binaryPath, type: 'route' },
+      { close: true },
+    ]);
   });
 
   it('calls close when build configuration is invalid', async () => {
@@ -866,7 +1145,10 @@ describe('hosted Go route outputs', () => {
     `);
     const packager = require(packagerPath);
     await expect(handle([output()])).rejects.toBe(packager.closeError);
-    expect(await calls()).toEqual([{ prepare: binaryPath }, { close: true }]);
+    expect(await calls()).toEqual([
+      { prepare: binaryPath, type: 'route' },
+      { close: true },
+    ]);
     expect(await readConfig()).toMatchObject({ runtime: 'container' });
   });
 
@@ -897,8 +1179,8 @@ describe('hosted Go route outputs', () => {
       runtime: 'container',
     });
     expect(await calls()).toEqual([
-      { prepare: binaryPath },
-      { prepare: binaryPath },
+      { prepare: binaryPath, type: 'route' },
+      { prepare: binaryPath, type: 'route' },
       { close: true },
     ]);
   });
@@ -943,7 +1225,7 @@ describe('hosted Go route outputs', () => {
     expect(await result).toMatchObject({ message: 'first image failed' });
     expect(close).toHaveBeenCalledTimes(1);
     expect(await calls()).toEqual([
-      { prepare: secondBinaryPath },
+      { prepare: secondBinaryPath, type: 'route' },
       { close: true },
     ]);
     await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
@@ -951,7 +1233,7 @@ describe('hosted Go route outputs', () => {
     });
   });
 
-  it('rejects separate assets before packaging any functions', async () => {
+  it('rejects container assets after packaging with no functions written', async () => {
     await expect(
       handle([
         output(),
@@ -962,7 +1244,11 @@ describe('hosted Go route outputs', () => {
         }),
       ])
     ).rejects.toThrow(/cannot include separate assets.*go:embed/);
-    expect(await calls()).toEqual([{ close: true }]);
+    expect(await calls()).toEqual([
+      { prepare: binaryPath, type: 'route' },
+      { prepare: binaryPath, type: 'route' },
+      { close: true },
+    ]);
     await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
       code: 'ENOENT',
     });
@@ -1029,7 +1315,10 @@ describe('hosted Go route outputs', () => {
     expect(
       events.slice(0, -1).filter((event) => event.prepare === binaryPath)
     ).toHaveLength(2);
-    expect(events.slice(0, -1)).toContainEqual({ prepare: secondBinaryPath });
+    expect(events.slice(0, -1)).toContainEqual({
+      prepare: secondBinaryPath,
+      type: 'route',
+    });
     expect(events).toHaveLength(4);
     expect(events.at(-1)).toEqual({ close: true });
   });
@@ -1081,8 +1370,8 @@ describe('hosted Go route outputs', () => {
         });
       }
       expect(await calls()).toEqual([
-        { prepare: binaryPath },
-        { prepare: binaryPath },
+        { prepare: binaryPath, type: 'route' },
+        { prepare: binaryPath, type: 'route' },
         { close: true },
       ]);
     }
