@@ -10,6 +10,7 @@ import {
   type GoRouteOutput,
   handleGoOutputs,
 } from './go-outputs';
+import adapter from './index';
 import * as outputUtils from './outputs';
 import {
   getSourceFilePathFromPage,
@@ -110,6 +111,10 @@ describe('hosted Go route outputs', () => {
       prerenders: [] as { parentOutputId: string }[],
       middleware: undefined as unknown,
     };
+  }
+
+  function collect(outputs: ReturnType<typeof collections>) {
+    return collectGoRouteOutputs(outputs, projectDir);
   }
 
   function handle(outputs: GoRouteOutput[], config = {}) {
@@ -226,11 +231,15 @@ describe('hosted Go route outputs', () => {
       });
       expect(await fs.readdir(functionDir)).toEqual(['.vc-config.json']);
     }
-    expect(await calls()).toEqual([
-      { prepare: binaryPath },
-      { prepare: secondBinaryPath },
-      { close: true },
-    ]);
+    const events = await calls();
+    expect(events.slice(0, -1)).toEqual(
+      expect.arrayContaining([
+        { prepare: binaryPath },
+        { prepare: secondBinaryPath },
+      ])
+    );
+    expect(events).toHaveLength(3);
+    expect(events.at(-1)).toEqual({ close: true });
   });
 
   it('resolves sourcePage under src/app for overrides and route duration precedence', async () => {
@@ -382,15 +391,28 @@ describe('hosted Go route outputs', () => {
     'packages proxy.go middleware and matcher routes with src=%s',
     async (src) => {
       const sourcePage = src ? '/src/proxy' : '/proxy';
-      const source = path.join(projectDir, sourcePage.slice(1) + '.go');
+      const source = path.join(projectDir, `${sourcePage.slice(1)}.go`);
       await fs.mkdir(path.dirname(source), { recursive: true });
       await fs.writeFile(source, 'package main');
+      const setupNodePath = path.join(
+        projectDir,
+        'node_modules/next/setup-node-env.js'
+      );
+      const packageJsonPath = path.join(projectDir, '.next/package.json');
+      await fs.mkdir(path.dirname(setupNodePath), { recursive: true });
+      await fs.mkdir(path.dirname(packageJsonPath), { recursive: true });
+      await fs.writeFile(setupNodePath, '// shared Node environment setup');
+      await fs.writeFile(packageJsonPath, JSON.stringify({ type: 'commonjs' }));
       const middleware: GoMiddlewareOutput = {
         ...output(),
         type: AdapterOutputType.MIDDLEWARE,
         id: '/_middleware',
         pathname: '/_middleware',
         sourcePage,
+        assets: {
+          'node_modules/next/setup-node-env.js': setupNodePath,
+          '.next/package.json': packageJsonPath,
+        },
         config: {
           matchers: [
             {
@@ -405,7 +427,7 @@ describe('hosted Go route outputs', () => {
       };
       const all = collections();
       all.middleware = middleware;
-      expect(collectGoRouteOutputs(all)).toEqual([middleware]);
+      expect(await collect(all)).toEqual([middleware]);
       await handleGoOutputs([middleware], {
         config: { basePath: src ? '/_middleware' : '' } as never,
         projectDir,
@@ -427,6 +449,14 @@ describe('hosted Go route outputs', () => {
         runtimeLanguage: 'go',
         maxDuration: 42,
       });
+      expect(
+        await fs.readdir(
+          path.join(vercelOutputDir, 'functions/_middleware.func')
+        )
+      ).toEqual(['.vc-config.json']);
+      expect(await fs.readFile(setupNodePath, 'utf8')).toBe(
+        '// shared Node environment setup'
+      );
       expect(functionConfig).not.toHaveProperty('useWebApi');
       expect(functionConfig).not.toHaveProperty('supportsMultiPayloads');
       const routes = await handleMiddleware(middleware, {
@@ -452,18 +482,18 @@ describe('hosted Go route outputs', () => {
   it('does not load a Go host module for Node-only output', async () => {
     delete process.env.NEXT_ADAPTER_VERCEL_GO_PACKAGER_PATH;
     const nodeOutput = { ...output(), runtime: 'nodejs' };
-    expect(collectGoRouteOutputs(collections([nodeOutput]))).toEqual([]);
+    expect(await collect(collections([nodeOutput]))).toEqual([]);
     await expect(handle([])).resolves.toBeUndefined();
   });
 
-  it('recognizes Go alongside existing Node and Edge outputs', () => {
+  it('recognizes Go alongside existing Node and Edge outputs', async () => {
     const go = output();
     const all = collections([
       { ...go, runtime: 'nodejs' },
       go,
       { ...go, runtime: 'edge' },
     ]);
-    expect(collectGoRouteOutputs(all)).toEqual([go]);
+    expect(await collect(all)).toEqual([go]);
   });
 
   it.each([
@@ -472,77 +502,80 @@ describe('hosted Go route outputs', () => {
     'pagesApi',
     'staticFiles',
     'middleware',
-  ] as const)('rejects Go in %s', (kind) => {
+  ] as const)('rejects Go in %s', async (kind) => {
     const all = collections();
     if (kind === 'middleware') all.middleware = output();
     else all[kind].push(output());
-    expect(() => collectGoRouteOutputs(all)).toThrow(
+    await expect(collect(all)).rejects.toThrow(
       `Go ${kind} outputs are unsupported`
     );
   });
 
-  it('rejects an unknown runtime instead of silently dropping output', () => {
-    expect(() =>
-      collectGoRouteOutputs(collections([{ ...output(), runtime: 'unknown' }]))
-    ).toThrow('Unsupported Next.js adapter output runtime');
+  it('rejects an unknown runtime instead of silently dropping output', async () => {
+    await expect(
+      collect(collections([{ ...output(), runtime: 'unknown' }]))
+    ).rejects.toThrow('Unsupported Next.js adapter output runtime');
   });
 
-  it('rejects Go prerender parents and duplicate output ids', () => {
+  it('rejects Go prerender parents and duplicate output ids', async () => {
     const all = collections([output()]);
     all.prerenders.push({ parentOutputId: output().id });
-    expect(() => collectGoRouteOutputs(all)).toThrow(
-      'cannot be prerender parents'
+    await expect(collect(all)).rejects.toThrow('cannot be prerender parents');
+    await expect(collect(collections([output(), output()]))).rejects.toThrow(
+      'Duplicate Go output id'
     );
-    expect(() =>
-      collectGoRouteOutputs(collections([output(), output()]))
-    ).toThrow('Duplicate Go output id');
   });
 
-  it.each([
-    '../escape',
-    '/absolute',
-    'a/../../escape',
-    'a\\file',
-    'C:/absolute',
-    './alias',
-    'executable',
-    'Executable',
-    'USER-SERVER',
-    'user-server/nested',
-    '.vc-config.json',
-    '.VC-CONFIG.JSON',
-  ])('rejects unsafe or reserved asset destination %s', async (destination) => {
+  it.each(['data/message.txt', '../escape', '.vc-config.json'])(
+    'rejects route assets during collection regardless of destination: %s',
+    async (destination) => {
+      await expect(
+        collect(collections([output({ assets: { [destination]: assetPath } })]))
+      ).rejects.toThrow(
+        /app\/api\/hello\/route\.go cannot include separate assets.*go:embed/
+      );
+      expect(await calls()).toEqual([]);
+      await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    }
+  );
+
+  it.each([false, true])(
+    'reports the actual route source for assets with src=%s',
+    async (src) => {
+      if (src) {
+        await fs.rm(path.join(projectDir, 'app'), { recursive: true });
+        await writeSource('/api/hello/route', true);
+      }
+      await expect(
+        collect(
+          collections([output({ assets: { 'data/message.txt': assetPath } })])
+        )
+      ).rejects.toThrow(
+        `Go function ${src ? 'src/' : ''}app/api/hello/route.go cannot include separate assets`
+      );
+    }
+  );
+
+  it('rejects route assets before the build hook writes Node or static output', async () => {
+    if (!adapter.onBuildComplete) throw new Error('Expected build hook');
+    const outputs = collections([
+      output({ assets: { 'data/message.txt': assetPath } }),
+    ]);
+    outputs.appPages.push({ runtime: 'nodejs' });
+    outputs.staticFiles.push({ type: AdapterOutputType.STATIC_FILE });
     await expect(
-      handle([output({ assets: { [destination]: assetPath } })])
-    ).rejects.toThrow(/Go (asset destination|function asset destination)/);
+      adapter.onBuildComplete({
+        projectDir,
+        distDir: path.join(projectDir, '.next'),
+        outputs,
+      } as never)
+    ).rejects.toThrow('app/api/hello/route.go cannot include separate assets');
+    expect(await calls()).toEqual([]);
     await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
       code: 'ENOENT',
     });
-  });
-
-  it('rejects overlapping asset destinations', async () => {
-    await expect(
-      handle([
-        output({
-          assets: {
-            data: assetPath,
-            'data-file': assetPath,
-            'data/file': assetPath,
-          },
-        }),
-      ])
-    ).rejects.toThrow('Conflicting Go asset destinations');
-  });
-
-  it.each([
-    { 'data/file.txt': 'data/FILE.txt' },
-    { DATA: 'data/file.txt' },
-    { 'Data/first.txt': 'data/second.txt' },
-  ])('rejects case-folded asset collisions', async (destinations) => {
-    const [first, second] = Object.entries(destinations)[0];
-    await expect(
-      handle([output({ assets: { [first]: assetPath, [second]: assetPath } })])
-    ).rejects.toThrow('Conflicting Go asset destinations');
   });
 
   it.each([
@@ -810,6 +843,114 @@ describe('hosted Go route outputs', () => {
     expect(await calls()).toEqual([{ close: true }]);
   });
 
+  it('preserves the original packaging error when close also fails', async () => {
+    await writePackager(`
+      exports.packagingError = new Error('image build failed');
+      exports.prepareGoFunction = () => { throw exports.packagingError; };
+      const close = exports.close;
+      exports.close = async () => { await close(); throw new Error('cleanup failed'); };
+    `);
+    const packager = require(packagerPath);
+    await expect(handle([output()])).rejects.toBe(packager.packagingError);
+    expect(await calls()).toEqual([{ close: true }]);
+    await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('reports a close error when packaging succeeds', async () => {
+    await writePackager(`
+      exports.closeError = new Error('cleanup failed');
+      const close = exports.close;
+      exports.close = async () => { await close(); throw exports.closeError; };
+    `);
+    const packager = require(packagerPath);
+    await expect(handle([output()])).rejects.toBe(packager.closeError);
+    expect(await calls()).toEqual([{ prepare: binaryPath }, { close: true }]);
+    expect(await readConfig()).toMatchObject({ runtime: 'container' });
+  });
+
+  it('prepares images concurrently before writing any functions', async () => {
+    const functionsDir = path.join(vercelOutputDir, 'functions');
+    await writePackager(`
+      const prepare = exports.prepareGoFunction;
+      let count = 0;
+      let release;
+      const bothStarted = new Promise((resolve) => { release = resolve; });
+      exports.prepareGoFunction = async (options) => {
+        if (++count === 2) release();
+        await bothStarted;
+        try {
+          await fs.stat(${JSON.stringify(functionsDir)});
+          throw new Error('Functions were written before all images were prepared');
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+        }
+        return prepare(options);
+      };
+    `);
+    await handle([output(), output({ id: 'other', pathname: '/api/other' })]);
+    expect(await readConfig('api/hello')).toMatchObject({
+      runtime: 'container',
+    });
+    expect(await readConfig('api/other')).toMatchObject({
+      runtime: 'container',
+    });
+    expect(await calls()).toEqual([
+      { prepare: binaryPath },
+      { prepare: binaryPath },
+      { close: true },
+    ]);
+  });
+
+  it('waits for pending image builds before closing after a failure', async () => {
+    const secondBinaryPath = path.join(root, 'other-binary');
+    await fs.writeFile(secondBinaryPath, 'other application');
+    await writePackager(`
+      const prepare = exports.prepareGoFunction;
+      let started;
+      exports.started = new Promise((resolve) => { started = resolve; });
+      const pending = new Promise((resolve) => { exports.finish = resolve; });
+      exports.prepareGoFunction = async (options) => {
+        if (options.userServerPath === ${JSON.stringify(binaryPath)}) {
+          throw new Error('first image failed');
+        }
+        started();
+        await pending;
+        return prepare(options);
+      };
+    `);
+    const packager = require(packagerPath);
+    const close = vi.spyOn(packager, 'close');
+    const result = handle([
+      output(),
+      output({
+        id: 'other',
+        pathname: '/api/other',
+        filePath: secondBinaryPath,
+      }),
+    ]).catch((error: unknown) => error);
+    try {
+      await packager.started;
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(close).not.toHaveBeenCalled();
+      await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      packager.finish();
+    }
+    expect(await result).toMatchObject({ message: 'first image failed' });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(await calls()).toEqual([
+      { prepare: secondBinaryPath },
+      { close: true },
+    ]);
+    await expect(fs.stat(vercelOutputDir)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
   it('rejects separate assets before packaging any functions', async () => {
     await expect(
       handle([
@@ -884,12 +1025,13 @@ describe('hosted Go route outputs', () => {
     expect(await fs.readFile(path.join(layoutDir, digest, blob), 'utf8')).toBe(
       'precompiled application'
     );
-    expect(await calls()).toEqual([
-      { prepare: binaryPath },
-      { prepare: binaryPath },
-      { prepare: secondBinaryPath },
-      { close: true },
-    ]);
+    const events = await calls();
+    expect(
+      events.slice(0, -1).filter((event) => event.prepare === binaryPath)
+    ).toHaveLength(2);
+    expect(events.slice(0, -1)).toContainEqual({ prepare: secondBinaryPath });
+    expect(events).toHaveLength(4);
+    expect(events.at(-1)).toEqual({ close: true });
   });
 
   it.each([false, true])(

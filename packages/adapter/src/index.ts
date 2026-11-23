@@ -132,7 +132,7 @@ const myAdapter: NextAdapter = {
     projectDir,
     nextVersion,
   }) {
-    const goOutputs = collectGoRouteOutputs(outputs);
+    const goOutputs = await collectGoRouteOutputs(outputs, projectDir);
     const vercelOutputDir = path.join(distDir, 'output');
     await fs.mkdir(vercelOutputDir, { recursive: true });
     // The injected @vercel/otel instruments fetch, so turn off the runtime's

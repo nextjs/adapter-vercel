@@ -39,35 +39,8 @@ type GoPackager = {
 const GO_PACKAGER_VERSION = 2;
 const IMAGE_DIR = 'image';
 
-const RESERVED_NAMES = new Set([
-  'executable',
-  'user-server',
-  '.vc-config.json',
-]);
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function assertRelativeFilePath(
-  value: unknown,
-  description: string
-): asserts value is string {
-  if (
-    typeof value !== 'string' ||
-    !value ||
-    value.includes('\\') ||
-    value.includes('\0') ||
-    path.posix.isAbsolute(value) ||
-    /^[A-Za-z]:/.test(value) ||
-    value
-      .split('/')
-      .some((segment) => !segment || segment === '.' || segment === '..')
-  ) {
-    throw new Error(
-      `Invalid Go ${description}: expected a normalized relative file path`
-    );
-  }
 }
 
 function assertPathname(
@@ -139,48 +112,65 @@ function assertGoRouteOutput(value: unknown): asserts value is GoOutput {
       'Go outputs require assets, assetsHashes, and config objects'
     );
   }
-  const destinations = Object.keys(value.assets);
-  const portableDestinations = new Set<string>();
-  const portablePaths = new Map<string, string>();
-  for (const destination of destinations) {
-    assertRelativeFilePath(destination, 'asset destination');
-    const portableDestination = destination.toLowerCase();
-    if (RESERVED_NAMES.has(portableDestination.split('/')[0])) {
-      throw new Error(`Reserved Go function asset destination: ${destination}`);
-    }
-    if (portableDestinations.has(portableDestination)) {
-      throw new Error(`Conflicting Go asset destinations: ${destination}`);
-    }
-    portableDestinations.add(portableDestination);
-    const parts = destination.split('/');
-    for (let i = 1; i <= parts.length; i++) {
-      const prefix = parts.slice(0, i).join('/');
-      const portablePrefix = prefix.toLowerCase();
-      const previous = portablePaths.get(portablePrefix);
-      if (previous && previous !== prefix) {
-        throw new Error(`Conflicting Go asset destinations: ${destination}`);
-      }
-      portablePaths.set(portablePrefix, prefix);
-    }
-    const source = value.assets[destination];
-    if (typeof source !== 'string' || !path.isAbsolute(source)) {
-      throw new Error(
-        `Go asset ${destination} requires an absolute source path`
-      );
-    }
+}
+
+async function resolveGoSourceFile(
+  output: GoOutput,
+  projectDir: string,
+  usesSrcDir: boolean
+): Promise<string> {
+  if (output.type === AdapterOutputType.MIDDLEWARE) {
+    const sourceFile = `${output.sourcePage.slice(1)}.go`;
+    if (!(await fs.stat(path.join(projectDir, sourceFile))).isFile())
+      throw new Error(`Could not resolve Go proxy source: ${sourceFile}`);
+    return sourceFile;
   }
-  for (const destination of portableDestinations) {
-    const parts = destination.split('/');
-    for (let i = 1; i < parts.length; i++) {
-      if (portableDestinations.has(parts.slice(0, i).join('/'))) {
-        throw new Error(`Conflicting Go asset destinations: ${destination}`);
-      }
-    }
+  const sourceFile = (
+    await getSourceFilePathFromPage({
+      workPath: projectDir,
+      page: output.sourcePage,
+      pageExtensions: ['go'],
+      usesSrcDir,
+      pageTypes: ['app'],
+      allowExtensionless: false,
+      allowDirectoryIndex: false,
+    })
+  ).replace(/\\/g, '/');
+  if (!/^(src\/)?app\/(?:.*\/)?route\.go$/.test(sourceFile)) {
+    throw new Error(
+      `Could not resolve Go route.go source for ${output.sourcePage}`
+    );
   }
+  return sourceFile;
+}
+
+async function assertGoRouteAssets(
+  output: GoOutput,
+  projectDir: string,
+  usesSrcDir?: boolean
+): Promise<void> {
+  // Next.js attaches shared Node assets to proxy.go outputs. They are unused
+  // by the Go container, so only route handlers must reject separate assets.
+  if (
+    output.type !== AdapterOutputType.APP_ROUTE ||
+    !Object.keys(output.assets).length
+  )
+    return;
+  const sourceFile = await resolveGoSourceFile(
+    output,
+    projectDir,
+    usesSrcDir ?? (await usesSrcAppDirectory(projectDir))
+  );
+  throw new Error(
+    `Go function ${sourceFile} cannot include separate assets because Go functions run as container images. Embed them in the executable, for example with go:embed.`
+  );
 }
 
 /** Validate before any output is materialized; Node/Edge retain their existing paths. */
-export function collectGoRouteOutputs(outputs: BuildOutputs): GoOutput[] {
+export async function collectGoRouteOutputs(
+  outputs: BuildOutputs,
+  projectDir: string
+): Promise<GoOutput[]> {
   const goOutputs: GoOutput[] = [];
   for (const kind of [
     'appRoutes',
@@ -224,6 +214,7 @@ export function collectGoRouteOutputs(outputs: BuildOutputs): GoOutput[] {
         );
       }
       assertGoRouteOutput(output);
+      await assertGoRouteAssets(output, projectDir);
       goOutputs.push(output);
     }
   }
@@ -399,6 +390,7 @@ export async function handleGoOutputs(
 ): Promise<void> {
   if (!outputs.length) return;
   const packager = loadGoPackager();
+  let closeFailure: { error: unknown } | undefined;
   try {
     await writeGoFunctions(packager, outputs, {
       config,
@@ -407,8 +399,14 @@ export async function handleGoOutputs(
       vercelOutputDir,
     });
   } finally {
-    await packager.close?.();
+    try {
+      await packager.close?.();
+    } catch (error) {
+      // Defer cleanup errors so a build failure keeps its original error.
+      closeFailure = { error };
+    }
   }
+  if (closeFailure) throw closeFailure.error;
 }
 
 async function writeGoFunctions(
@@ -434,11 +432,7 @@ async function writeGoFunctions(
   const functionPaths = new Map<string, string>();
   for (const output of outputs) {
     assertGoRouteOutput(output);
-    if (Object.keys(output.assets).length > 0) {
-      throw new Error(
-        `Go function ${output.sourcePage}.go cannot include separate assets because Go functions run as container images. Embed them in the executable, for example with go:embed.`
-      );
-    }
+    await assertGoRouteAssets(output, projectDir, usesSrcDir);
     const pathname =
       output.type === AdapterOutputType.MIDDLEWARE
         ? output.pathname
@@ -452,77 +446,60 @@ async function writeGoFunctions(
     functionPaths.set(caseInsensitivePath, functionPath);
   }
 
-  // Prepare all images before writing any functions, preserving previous
-  // output if an image build fails.
-  const prepared: {
-    functionDir: string;
-    functionConfig: Record<string, unknown>;
-    image: PreparedGoFunction;
-  }[] = [];
-  for (const output of outputs) {
-    const isMiddleware = output.type === AdapterOutputType.MIDDLEWARE;
-    // sourcePage is /proxy or /src/proxy; function config needs a relative filename.
-    const sourceFile = isMiddleware
-      ? `${output.sourcePage.slice(1)}.go`
-      : (
-          await getSourceFilePathFromPage({
-            workPath: projectDir,
-            page: output.sourcePage,
-            pageExtensions: ['go'],
-            usesSrcDir,
-            pageTypes: ['app'],
-            allowExtensionless: false,
-            allowDirectoryIndex: false,
-          })
-        ).replace(/\\/g, '/');
-    if (isMiddleware) {
-      if (!(await fs.stat(path.join(projectDir, sourceFile))).isFile())
-        throw new Error(`Could not resolve Go proxy source: ${sourceFile}`);
-    } else if (!/^(src\/)?app\/(?:.*\/)?route\.go$/.test(sourceFile)) {
-      throw new Error(
-        `Could not resolve Go route.go source for ${output.sourcePage}`
+  // Prepare concurrently, but wait for every build to settle before writing
+  // functions or closing the packager, including when one image build fails.
+  const results = await Promise.allSettled(
+    outputs.map(async (output) => {
+      const sourceFile = await resolveGoSourceFile(
+        output,
+        projectDir,
+        usesSrcDir
       );
-    }
-    const overrides = await getLambdaOptionsFromFunction({
-      sourceFile,
-      config: builderConfig,
-    });
-    if (overrides.architecture && overrides.architecture !== 'x86_64') {
-      throw new Error(
-        `Go target architecture conflicts with function configuration for ${sourceFile}`
-      );
-    }
-    const regions =
-      overrides.regions ?? preferredRegions(output.config.preferredRegion);
-    const image: unknown = await packager.prepareGoFunction({
-      userServerPath: output.filePath,
-    });
-    assertPreparedGoFunction(image);
-    const pathname =
-      output.type === AdapterOutputType.MIDDLEWARE
-        ? output.pathname
-        : normalizeIndexPathname(output.pathname, config);
-    prepared.push({
-      functionDir: path.join(functionsDir, `${pathname.slice(1)}.func`),
-      // Deliberately omit Node launcher, multipayload and bundling properties.
-      functionConfig: {
-        ...overrides,
-        runtime: 'container',
-        handler: image.handler,
-        ...(image.image && {
-          image: { type: 'oci-layout', path: IMAGE_DIR },
-        }),
-        runtimeLanguage: 'go',
-        architecture: 'x86_64',
-        supportsResponseStreaming: true,
-        maxDuration: output.config.maxDuration ?? overrides.maxDuration,
-        regions,
-        operationType: 'API',
-        framework: { slug: 'nextjs', version: nextVersion },
-      },
-      image,
-    });
-  }
+      const overrides = await getLambdaOptionsFromFunction({
+        sourceFile,
+        config: builderConfig,
+      });
+      if (overrides.architecture && overrides.architecture !== 'x86_64') {
+        throw new Error(
+          `Go target architecture conflicts with function configuration for ${sourceFile}`
+        );
+      }
+      const regions =
+        overrides.regions ?? preferredRegions(output.config.preferredRegion);
+      const image: unknown = await packager.prepareGoFunction({
+        userServerPath: output.filePath,
+      });
+      assertPreparedGoFunction(image);
+      const pathname =
+        output.type === AdapterOutputType.MIDDLEWARE
+          ? output.pathname
+          : normalizeIndexPathname(output.pathname, config);
+      return {
+        functionDir: path.join(functionsDir, `${pathname.slice(1)}.func`),
+        // Deliberately omit Node launcher, multipayload and bundling properties.
+        functionConfig: {
+          ...overrides,
+          runtime: 'container',
+          handler: image.handler,
+          ...(image.image && {
+            image: { type: 'oci-layout', path: IMAGE_DIR },
+          }),
+          runtimeLanguage: 'go',
+          architecture: 'x86_64',
+          supportsResponseStreaming: true,
+          maxDuration: output.config.maxDuration ?? overrides.maxDuration,
+          regions,
+          operationType: 'API',
+          framework: { slug: 'nextjs', version: nextVersion },
+        },
+        image,
+      };
+    })
+  );
+  const prepared = results.map((result) => {
+    if (result.status === 'rejected') throw result.reason;
+    return result.value;
+  });
 
   for (const { functionDir, functionConfig, image } of prepared) {
     await ensureFunctionParent(functionsDir, functionDir);
