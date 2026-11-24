@@ -33,11 +33,11 @@ function prerenderBypassPoliciesEnabled() {
   return process.env.VERCEL_NEXT_ADAPTER_PRERENDER_BYPASS_POLICIES === '1';
 }
 
-// The deployment matcher limits regexes to 1024 UTF-8 bytes. Returning
+// The deployment matcher limits regexes to 4096 UTF-8 bytes. Returning
 // undefined keeps the per-route bot bypass and omits the deployment policy.
 function getHtmlLimitedBotsPattern(config: NextConfigComplete) {
   const pattern = config.htmlLimitedBots;
-  return Buffer.byteLength(pattern, 'utf8') <= 1024 ? pattern : undefined;
+  return Buffer.byteLength(pattern, 'utf8') <= 4096 ? pattern : undefined;
 }
 
 const myAdapter: NextAdapter = {

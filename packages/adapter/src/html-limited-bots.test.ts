@@ -27,19 +27,19 @@ const cases = [
   },
   {
     name: 'a pattern at the byte limit',
-    pattern: 'x'.repeat(1024),
+    pattern: 'x'.repeat(4096),
     cacheComponents: true,
     bypassPolicies: '1',
   },
   {
     name: 'an oversized ASCII pattern',
-    pattern: 'x'.repeat(1025),
+    pattern: 'x'.repeat(4097),
     cacheComponents: true,
     bypassPolicies: '1',
   },
   {
     name: 'an oversized UTF-8 pattern',
-    pattern: 'é'.repeat(513),
+    pattern: `${'é'.repeat(2048)}x`,
     cacheComponents: true,
     bypassPolicies: '1',
   },
@@ -214,7 +214,7 @@ describe.each([
         const bypassPoliciesEnabled = bypassPolicies === '1';
         const botPolicySupported =
           bypassPoliciesEnabled &&
-          Buffer.byteLength(resolvedPattern, 'utf8') <= 1024;
+          Buffer.byteLength(resolvedPattern, 'utf8') <= 4096;
         expect(context.capabilities).toEqual(
           supportsCapabilities
             ? {
