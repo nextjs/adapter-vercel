@@ -17,49 +17,31 @@ const cases = [
     name: 'the normalized default pattern',
     pattern: undefined,
     cacheComponents: true,
-    bypassPolicies: '1',
   },
   {
     name: 'a custom pattern',
     pattern: 'MyHTMLLimitedBot|Discordbot',
     cacheComponents: true,
-    bypassPolicies: '1',
   },
   {
     name: 'a pattern at the byte limit',
     pattern: 'x'.repeat(4096),
     cacheComponents: true,
-    bypassPolicies: '1',
   },
   {
     name: 'an oversized ASCII pattern',
     pattern: 'x'.repeat(4097),
     cacheComponents: true,
-    bypassPolicies: '1',
   },
   {
     name: 'an oversized UTF-8 pattern',
     pattern: `${'é'.repeat(2048)}x`,
     cacheComponents: true,
-    bypassPolicies: '1',
   },
   {
     name: 'a build without Cache Components',
     pattern: 'MyHTMLLimitedBot',
     cacheComponents: false,
-    bypassPolicies: '1',
-  },
-  {
-    name: 'an unset prerender bypass flag',
-    pattern: undefined,
-    cacheComponents: true,
-    bypassPolicies: undefined,
-  },
-  {
-    name: 'a disabled prerender bypass flag',
-    pattern: undefined,
-    cacheComponents: true,
-    bypassPolicies: '0',
   },
 ];
 
@@ -92,7 +74,7 @@ describe.each([
 
     it.each(cases)(
       'preserves compatible output for $name',
-      async ({ pattern, cacheComponents, bypassPolicies }) => {
+      async ({ pattern, cacheComponents }) => {
         const projectDir = await fs.mkdtemp(
           path.join(os.tmpdir(), 'adapter-html-bots-')
         );
@@ -175,7 +157,6 @@ describe.each([
         const buildEnv: NodeJS.ProcessEnv = {
           ...process.env,
           NEXT_TELEMETRY_DISABLED: '1',
-          VERCEL_NEXT_ADAPTER_PRERENDER_BYPASS_POLICIES: bypassPolicies,
         };
         if (packageName === 'next-legacy') {
           // Legacy builds use their installed bindings, independent of local
@@ -211,15 +192,13 @@ describe.each([
         ).toBe('APP_PAGE');
         const resolvedPattern = pattern ?? HTML_LIMITED_BOT_UA_RE_STRING;
         expect(context.config.htmlLimitedBots).toBe(resolvedPattern);
-        const bypassPoliciesEnabled = bypassPolicies === '1';
         const botPolicySupported =
-          bypassPoliciesEnabled &&
           Buffer.byteLength(resolvedPattern, 'utf8') <= 4096;
         expect(context.capabilities).toEqual(
           supportsCapabilities
             ? {
                 supportsHtmlLimitedBotPrerenders: botPolicySupported,
-                supportsPrerenderMethodBypass: bypassPoliciesEnabled,
+                supportsPrerenderMethodBypass: true,
               }
             : undefined
         );
@@ -271,7 +250,7 @@ describe.each([
           },
         ];
         const rules = [
-          ...(supportsCapabilities && bypassPoliciesEnabled
+          ...(supportsCapabilities
             ? [{ type: 'method', value: 'POST' }]
             : actionRules),
           ...(cacheComponents && !(supportsCapabilities && botPolicySupported)

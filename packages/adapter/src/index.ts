@@ -29,10 +29,6 @@ import { defaultTracingWasInjected, injectDefaultTracing } from './tracing';
 import type { VercelConfig } from './types';
 import { escapeStringRegexp, getImagesConfig } from './utils';
 
-function prerenderBypassPoliciesEnabled() {
-  return process.env.VERCEL_NEXT_ADAPTER_PRERENDER_BYPASS_POLICIES === '1';
-}
-
 // The deployment matcher limits regexes to 4096 UTF-8 bytes. Returning
 // undefined keeps the per-route bot bypass and omits the deployment policy.
 function getHtmlLimitedBotsPattern(config: NextConfigComplete) {
@@ -43,12 +39,10 @@ function getHtmlLimitedBotsPattern(config: NextConfigComplete) {
 const myAdapter: NextAdapter = {
   name: 'Vercel',
   getCapabilities({ config }) {
-    const bypassPoliciesEnabled = prerenderBypassPoliciesEnabled();
     return {
       supportsHtmlLimitedBotPrerenders:
-        bypassPoliciesEnabled &&
         getHtmlLimitedBotsPattern(config) !== undefined,
-      supportsPrerenderMethodBypass: bypassPoliciesEnabled,
+      supportsPrerenderMethodBypass: true,
     };
   },
   async modifyConfig(config, ctx) {
@@ -150,9 +144,7 @@ const myAdapter: NextAdapter = {
     const shouldHandleMiddlewareDataResolving = routing.shouldNormalizeNextData;
 
     const i18nConfig = config.i18n;
-    const htmlLimitedBotsRegex = prerenderBypassPoliciesEnabled()
-      ? getHtmlLimitedBotsPattern(config)
-      : undefined;
+    const htmlLimitedBotsRegex = getHtmlLimitedBotsPattern(config);
 
     const vercelConfig: VercelConfig = {
       version: 3,
