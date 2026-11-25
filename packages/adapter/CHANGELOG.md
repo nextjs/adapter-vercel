@@ -1,5 +1,13 @@
 # @next-community/adapter-vercel
 
+## 0.1.0-beta.42
+
+### Patch Changes
+
+- [#177](https://github.com/nextjs/adapter-vercel/pull/177) [`5d2225e`](https://github.com/nextjs/adapter-vercel/commit/5d2225ea10ca7d14a55a1ee0c9b4cd6cf8d40c19) Thanks [@styfle](https://github.com/styfle)! - Remove the build environment opt-in for the HTML-limited bot policy and method-based prerender bypass rules.
+
+- [#175](https://github.com/nextjs/adapter-vercel/pull/175) [`ff6ce82`](https://github.com/nextjs/adapter-vercel/commit/ff6ce8247b6c59937ca1d92977d8fd3b56588ba2) Thanks [@unstubbable](https://github.com/unstubbable)! - Allow `htmlLimitedBots` regexes up to 4,096 UTF-8 bytes in `afterCacheBypass`.
+
 ## 0.1.0-beta.41
 
 ### Minor Changes
