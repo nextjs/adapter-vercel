@@ -1,5 +1,6 @@
 import type { RouteWithSrc } from '@vercel/routing-utils';
 import type { NextAdapter, NextConfig } from 'next';
+import { escapeStringRegexp } from './utils';
 
 type AdapterRouting = Parameters<
   NonNullable<NextAdapter['onBuildComplete']>
@@ -430,6 +431,70 @@ export function denormalizeNextDataRoutes(
       )}`,
       continue: true,
       ...(isOverride ? { override: true } : {}),
+    },
+  ];
+}
+
+/**
+ * Next.js reserves `/_error` for rendering errors and answers a direct request
+ * for it with 404. The adapter still writes `/_error` as a function because the
+ * `error` phase falls back to it, so without this route the `filesystem` phase
+ * would serve it with 200.
+ *
+ * The route sends direct requests to the same destination the `error` phase
+ * uses for a 404. It must come before `handle: 'filesystem'`. The `error`
+ * phase only checks the filesystem, so it still reaches the fallback.
+ *
+ * `vercel build` merges routes with `mergeRoutes` from `@vercel/routing-utils`,
+ * which moves `check` routes ahead of `override` routes in the same phase.
+ * The `_next/data` normalization routes use `override`, so this route does
+ * too, to run after them and also catch `/_next/data/<buildId>/_error.json`.
+ */
+export function blockErrorPageRoutes(
+  config: NextConfig,
+  notFoundPath: string
+): RouteWithSrc[] {
+  const path = require('node:path');
+  const basePath = config.basePath || '';
+  // Next.js requires a basePath to start with `/` and not end with one.
+  const srcPrefix = `^${escapeStringRegexp(basePath)}`;
+  const errorPage = '/_error(?:\\.rsc)?/?$';
+
+  if (!config.i18n) {
+    return [
+      {
+        src: `${srcPrefix}${errorPage}`,
+        dest: path.posix.join('/', basePath, notFoundPath),
+        status: 404,
+        check: true,
+        override: true,
+      },
+    ];
+  }
+
+  const locales = config.i18n.locales
+    .map((locale) => escapeStringRegexp(locale))
+    .join('|');
+
+  return [
+    {
+      src: `${srcPrefix}/(?<nextLocale>${locales})${errorPage}`,
+      dest: path.posix.join('/', basePath, '/$nextLocale', notFoundPath),
+      status: 404,
+      check: true,
+      override: true,
+    },
+    {
+      src: `${srcPrefix}${errorPage}`,
+      dest: path.posix.join(
+        '/',
+        basePath,
+        `/${config.i18n.defaultLocale}`,
+        notFoundPath
+      ),
+      status: 404,
+      check: true,
+      override: true,
     },
   ];
 }
